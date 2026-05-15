@@ -12,7 +12,7 @@ export async function proxy(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet, cacheHeaders) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
@@ -20,6 +20,11 @@ export async function proxy(request: NextRequest) {
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );
+          if (cacheHeaders) {
+            Object.entries(cacheHeaders).forEach(([key, headerValue]) => {
+              supabaseResponse.headers.set(key, headerValue);
+            });
+          }
         },
       },
     }

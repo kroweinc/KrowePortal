@@ -3,15 +3,22 @@ import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { Nav } from "@/components/nav";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { DeleteTaskButton } from "@/components/delete-task-button";
+import { OperatorTaskActions } from "@/app/o/tasks/[id]/operator-task-actions";
 import Link from "next/link";
-import type { Task } from "@/lib/types";
+import type { Task, TaskPriority } from "@/lib/types";
 
 const STATUS_LABELS: Record<string, string> = {
-  inbox: "Inbox",
+  inbox: "In Progress",
   in_progress: "In Progress",
-  blocked: "Blocked",
+  blocked: "Approval",
   done: "Done",
+};
+
+const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
 };
 
 export default async function OperatorTaskDetail({
@@ -49,9 +56,12 @@ export default async function OperatorTaskDetail({
             <h1 className="text-lg font-semibold text-neutral-900 leading-snug">
               {task.title}
             </h1>
-            <Badge variant={task.status as "inbox" | "in_progress" | "blocked" | "done"}>
-              {STATUS_LABELS[task.status]}
-            </Badge>
+            <div className="flex items-center gap-1.5">
+              <Badge variant={task.priority}>{PRIORITY_LABELS[task.priority]}</Badge>
+              <Badge variant={task.status as "inbox" | "in_progress" | "blocked" | "done"}>
+                {STATUS_LABELS[task.status]}
+              </Badge>
+            </div>
           </div>
 
           {task.description && (
@@ -70,6 +80,13 @@ export default async function OperatorTaskDetail({
             )}
             <span>Added: {new Date(task.created_at).toLocaleDateString()}</span>
           </div>
+          <OperatorTaskActions task={task} />
+          <DeleteTaskButton
+            taskId={task.id}
+            taskTitle={task.title}
+            variant="full"
+            redirectTo="/o"
+          />
         </div>
       </main>
     </div>

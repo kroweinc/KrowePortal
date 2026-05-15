@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { DEV_PROFILE_IDS } from "@/lib/auth";
 import { Nav } from "@/components/nav";
 import { OperatorTaskList } from "@/components/operator-task-list";
 import { NewTaskForm } from "@/components/new-task-form";
@@ -11,7 +13,9 @@ export default async function OperatorDashboard() {
   if (!profile) redirect("/login");
   if (profile.role !== "operator") redirect("/b");
 
-  const supabase = await createClient();
+  const supabase = DEV_PROFILE_IDS.has(profile.id)
+    ? createAdminClient()
+    : await createClient();
 
   const { data: engagements } = await supabase
     .from("engagements")
@@ -23,14 +27,15 @@ export default async function OperatorDashboard() {
   const engagementIds = engagementList.map((e) => e.id);
 
   let tasks: Task[] = [];
-  if (engagementIds.length > 0) {
-    const { data } = await supabase
-      .from("tasks")
-      .select("*")
-      .in("engagement_id", engagementIds)
-      .order("created_at", { ascending: false });
-    tasks = (data ?? []) as Task[];
-  }
+  const filter = engagementIds.length > 0
+    ? `engagement_id.in.(${engagementIds.join(",")}),engagement_id.is.null`
+    : "engagement_id.is.null";
+  const { data } = await supabase
+    .from("tasks")
+    .select("*")
+    .or(filter)
+    .order("created_at", { ascending: false });
+  tasks = (data ?? []) as Task[];
 
   const firstEngagement = engagementList[0];
 
@@ -47,21 +52,14 @@ export default async function OperatorDashboard() {
           )}
         </div>
 
-        <OperatorTaskList tasks={tasks} />
-
-        {firstEngagement ? (
-          <NewTaskForm
-            engagementId={firstEngagement.id}
-            placeholder="Describe something that needs to be built or fixed…"
-          />
-        ) : (
-          <div className="rounded-lg border border-dashed border-neutral-200 py-12 text-center">
-            <p className="text-sm text-neutral-400">
-              You don&apos;t have an active engagement yet. A builder will set one up for you.
-            </p>
-          </div>
-        )}
+        <Suspense>
+          <OperatorTaskList tasks={tasks} />
+        </Suspense>
       </main>
+      <NewTaskForm
+        engagementId={firstEngagement?.id}
+        placeholder="Describe something that needs to be built or fixed…"
+      />
     </div>
   );
 }

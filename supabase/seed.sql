@@ -1,18 +1,14 @@
 -- ============================================================
 -- Krowe Portal — Dev Seed
--- Run AFTER creating two users via Supabase Auth (email magic link).
--- Replace the UUIDs below with the actual auth.users IDs.
+-- Local: IDs must match supabase/migrations/0004_dev_profiles.sql and
+--         DEV_PROFILE_IDS in lib/auth.ts (dev auth.users rows).
+-- Hosted: if you do not apply 0004, replace op_id/bl_id with real auth.users IDs.
 -- ============================================================
-
--- Step 1: after signing up operator@example.com and builder@example.com via /login,
---         grab their UUIDs from the Supabase dashboard → Authentication → Users.
--- Step 2: replace OPERATOR_UUID and BUILDER_UUID below.
--- Step 3: run this SQL in the Supabase SQL editor.
 
 do $$
 declare
-  op_id   uuid := 'OPERATOR_UUID';
-  bl_id   uuid := 'BUILDER_UUID';
+  op_id   uuid := '00000000-0000-0000-0000-000000000001';
+  bl_id   uuid := '00000000-0000-0000-0000-000000000002';
   eng_id  uuid;
 begin
   -- profiles (only if not already created via onboarding)

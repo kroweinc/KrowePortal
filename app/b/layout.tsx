@@ -1,0 +1,17 @@
+import { redirect } from "next/navigation"
+import { getCurrentProfile } from "@/lib/auth"
+import { Nav } from "@/components/nav"
+import { BuilderTabs } from "@/components/builder-tabs"
+
+export default async function BuilderLayout({ children }: { children: React.ReactNode }) {
+  const profile = await getCurrentProfile()
+  if (!profile) redirect("/login")
+
+  return (
+    <div className="min-h-screen bg-neutral-50">
+      <Nav profile={profile} />
+      <BuilderTabs />
+      {children}
+    </div>
+  )
+}

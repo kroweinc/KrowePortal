@@ -6,21 +6,29 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { updateTask, updateTaskStatus, toggleVisibility } from "@/lib/actions/tasks";
-import type { Task, TaskStatus } from "@/lib/types";
+import { DeleteTaskButton } from "@/components/delete-task-button";
+import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
 import { useRouter } from "next/navigation";
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: "inbox", label: "Inbox" },
   { value: "in_progress", label: "In Progress" },
-  { value: "blocked", label: "Blocked" },
+  { value: "blocked", label: "Approval" },
   { value: "done", label: "Done" },
+];
+
+const PRIORITIES: { value: TaskPriority; label: string }[] = [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
 ];
 
 interface BuilderTaskActionsProps {
   task: Task;
+  onSuccess?: () => void;
 }
 
-export function BuilderTaskActions({ task }: BuilderTaskActionsProps) {
+export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +104,16 @@ export function BuilderTaskActions({ task }: BuilderTaskActionsProps) {
           <Textarea name="description" defaultValue={task.description ?? ""} rows={4} />
         </div>
         <div>
+          <label className="block text-xs font-medium text-neutral-700 mb-1">Priority</label>
+          <Select name="priority" defaultValue={task.priority}>
+            {PRIORITIES.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div>
           <label className="block text-xs font-medium text-neutral-700 mb-1">
             Estimate (hours)
           </label>
@@ -113,6 +131,7 @@ export function BuilderTaskActions({ task }: BuilderTaskActionsProps) {
           {saved ? "Saved!" : isPending ? "Saving…" : "Save changes"}
         </Button>
       </form>
+      <DeleteTaskButton taskId={task.id} taskTitle={task.title} variant="full" redirectTo={onSuccess ? undefined : "/b"} onSuccess={onSuccess} />
     </div>
   );
 }

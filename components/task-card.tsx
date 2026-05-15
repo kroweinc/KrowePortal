@@ -1,17 +1,31 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Eye, EyeOff, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toggleVisibility, updateTaskStatus } from "@/lib/actions/tasks";
-import type { Task, TaskStatus, Role } from "@/lib/types";
+import { DeleteTaskButton } from "@/components/delete-task-button";
+import type { Task, TaskStatus, Role, TaskPriority } from "@/lib/types";
+
+const PRIORITY_TINT: Record<TaskPriority, string> = {
+  low: "bg-green-50/40",
+  medium: "bg-amber-50/40",
+  high: "bg-red-50/40",
+};
+
+const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+};
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
-  inbox: "Inbox",
+  inbox: "In Progress",
   in_progress: "In Progress",
-  blocked: "Blocked",
+  blocked: "Approval",
   done: "Done",
 };
 
@@ -26,10 +40,12 @@ interface TaskCardProps {
   task: Task;
   role: Role;
   engagementTitle?: string;
+  onSelect?: (task: Task) => void;
 }
 
-export function TaskCard({ task, role, engagementTitle }: TaskCardProps) {
+export function TaskCard({ task, role, engagementTitle, onSelect }: TaskCardProps) {
   const nextStatus = NEXT_STATUS[task.status];
+  const [isDragging, setIsDragging] = useState(false);
 
   async function handleStatusClick() {
     if (!nextStatus) return;
@@ -41,20 +57,35 @@ export function TaskCard({ task, role, engagementTitle }: TaskCardProps) {
   }
 
   return (
-    <Card className="group">
+    <Card
+      className={`group cursor-grab transition-opacity ${PRIORITY_TINT[task.priority]} ${isDragging ? "opacity-40 cursor-grabbing" : ""}`}
+      draggable
+      onDragStart={(e) => {
+        setIsDragging(true);
+        e.dataTransfer.setData("taskId", task.id);
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragEnd={() => setIsDragging(false)}
+    >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <Link
             href={`/${role === "operator" ? "o" : "b"}/tasks/${task.id}`}
             className="flex-1"
+            onClick={(e) => {
+              if (!onSelect) return;
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+              e.preventDefault();
+              onSelect(task);
+            }}
           >
             <CardTitle className="text-sm font-medium leading-snug hover:underline">
               {task.title}
             </CardTitle>
           </Link>
-          <Badge variant={task.status as "inbox" | "in_progress" | "blocked" | "done"}>
-            {STATUS_LABELS[task.status]}
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            <Badge variant={task.priority}>{PRIORITY_LABELS[task.priority]}</Badge>
+          </div>
         </div>
         {engagementTitle && (
           <p className="text-xs text-neutral-400">{engagementTitle}</p>
@@ -93,10 +124,11 @@ export function TaskCard({ task, role, engagementTitle }: TaskCardProps) {
               </button>
             )}
             {role === "builder" && nextStatus && (
-              <Button size="sm" variant="outline" onClick={handleStatusClick}>
+              <Button size="sm" variant="outline" onClick={handleStatusClick} className="whitespace-nowrap">
                 → {STATUS_LABELS[nextStatus]}
               </Button>
             )}
+            <DeleteTaskButton taskId={task.id} taskTitle={task.title} variant="icon" />
           </div>
         </div>
       </CardContent>
