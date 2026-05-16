@@ -15,7 +15,9 @@ import {
   InlineToggle,
 } from "@/components/inline-edit";
 import { updateTask, updateTaskStatus, toggleVisibility } from "@/lib/actions/tasks";
+import { useRequestDone } from "@/components/done-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
+import { TaskSubtasks } from "@/components/task-subtasks";
 import { STATUS_LABELS } from "@/lib/utils";
 import type { Task, Role, TaskStatus, TaskPriority } from "@/lib/types";
 
@@ -48,6 +50,8 @@ export function TaskDetailSheet({
   engagementTitle,
   onOpenChange,
 }: TaskDetailSheetProps) {
+  const requestDone = useRequestDone();
+
   async function saveField(field: string, value: string) {
     if (!task) return;
     const fd = new FormData();
@@ -58,6 +62,15 @@ export function TaskDetailSheet({
 
   async function saveStatus(value: string) {
     if (!task) return;
+    if (value === "done" && task.status !== "done") {
+      return new Promise<void>((resolve) => {
+        requestDone({
+          task,
+          onCommit: resolve,
+          onCancel: resolve,
+        });
+      });
+    }
     await updateTaskStatus(task.id, value as TaskStatus);
   }
 
@@ -100,6 +113,44 @@ export function TaskDetailSheet({
                   placeholder="No description"
                 />
               </div>
+
+              {task.status === "done" && (() => {
+                const deliverableAttachments = (task.task_attachments ?? []).filter(a => a.is_deliverable);
+                const hasContent = task.pushed_to_main || task.completion_note || deliverableAttachments.length > 0;
+                if (!hasContent) return null;
+                return (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">
+                      Deliverable
+                    </p>
+                    {(task.pushed_to_main || task.completion_note) && (
+                      <div className="rounded-md border border-green-100 bg-green-50 px-3 py-2.5 space-y-1">
+                        {task.pushed_to_main && (
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-green-700">
+                            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+                              <path d="M9 18c-4.51 2-5-2-7-2" />
+                            </svg>
+                            Pushed to main
+                          </div>
+                        )}
+                        {task.completion_note && (
+                          <p className="text-xs text-green-700">{task.completion_note}</p>
+                        )}
+                      </div>
+                    )}
+                    <TaskAttachments
+                      key={`deliverable-attachments-${task.id}`}
+                      taskId={task.id}
+                      role={role}
+                      currentUserId={currentUserId}
+                      initial={deliverableAttachments}
+                      isDeliverable={true}
+                      readOnly={true}
+                    />
+                  </div>
+                );
+              })()}
 
               <div className="flex flex-wrap gap-3 text-xs text-neutral-400">
                 <span>
@@ -149,11 +200,15 @@ export function TaskDetailSheet({
               </div>
 
               <TaskAttachments
+                key={`attachments-${task.id}`}
                 taskId={task.id}
                 role={role}
                 currentUserId={currentUserId}
-                initial={[]}
+                initial={(task.task_attachments ?? []).filter(a => !a.is_deliverable)}
+                isDeliverable={false}
               />
+
+              <TaskSubtasks key={`subtasks-${task.id}`} taskId={task.id} />
 
               <DeleteTaskButton
                 taskId={task.id}

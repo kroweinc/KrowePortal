@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { updateTask, updateTaskStatus, toggleVisibility } from "@/lib/actions/tasks";
+import { useRequestDone } from "@/components/done-deliverable-provider";
 import { DeleteTaskButton } from "@/components/delete-task-button";
 import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
 import { useRouter } from "next/navigation";
@@ -31,6 +32,7 @@ interface BuilderTaskActionsProps {
 
 export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps) {
   const router = useRouter();
+  const requestDone = useRequestDone();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -50,6 +52,14 @@ export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps)
 
   function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const status = e.target.value as TaskStatus;
+    if (status === "done" && task.status !== "done") {
+      requestDone({
+        task,
+        onCommit: () => router.refresh(),
+        onCancel: () => router.refresh(),
+      });
+      return;
+    }
     startTransition(async () => {
       await updateTaskStatus(task.id, status);
       router.refresh();

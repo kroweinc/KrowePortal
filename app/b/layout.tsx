@@ -2,6 +2,7 @@ import { redirect } from "next/navigation"
 import { getCurrentProfile } from "@/lib/auth"
 import { Nav } from "@/components/nav"
 import { BuilderTabs } from "@/components/builder-tabs"
+import { DoneDeliverableProvider } from "@/components/done-deliverable-provider"
 
 export default async function BuilderLayout({ children }: { children: React.ReactNode }) {
   const profile = await getCurrentProfile()
@@ -11,7 +12,9 @@ export default async function BuilderLayout({ children }: { children: React.Reac
     <div className="min-h-screen bg-neutral-50">
       <Nav profile={profile} />
       <BuilderTabs />
-      {children}
+      <DoneDeliverableProvider>
+        {children}
+      </DoneDeliverableProvider>
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toggleVisibility, updateTaskStatus } from "@/lib/actions/tasks";
+import { useRequestDone } from "@/components/done-deliverable-provider";
 import { DeleteTaskButton } from "@/components/delete-task-button";
 import type { Task, TaskStatus, Role, TaskPriority } from "@/lib/types";
 
@@ -43,15 +44,22 @@ interface TaskCardProps {
   role: Role;
   engagementTitle?: string;
   onSelect?: (task: Task) => void;
+  onDragStart?: (task: Task) => void;
+  onDragEnd?: () => void;
 }
 
-export function TaskCard({ task, role, engagementTitle, onSelect }: TaskCardProps) {
+export function TaskCard({ task, role, engagementTitle, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
   const nextStatus = NEXT_STATUS[task.status];
   const [isDragging, setIsDragging] = useState(false);
+  const requestDone = useRequestDone();
 
   async function handleStatusClick() {
     if (!nextStatus) return;
-    await updateTaskStatus(task.id, nextStatus);
+    if (nextStatus === "done") {
+      requestDone({ task });
+    } else {
+      await updateTaskStatus(task.id, nextStatus);
+    }
   }
 
   async function handleVisibilityToggle() {
@@ -66,8 +74,12 @@ export function TaskCard({ task, role, engagementTitle, onSelect }: TaskCardProp
         setIsDragging(true);
         e.dataTransfer.setData("taskId", task.id);
         e.dataTransfer.effectAllowed = "move";
+        onDragStart?.(task);
       }}
-      onDragEnd={() => setIsDragging(false)}
+      onDragEnd={() => {
+        setIsDragging(false);
+        onDragEnd?.();
+      }}
     >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">

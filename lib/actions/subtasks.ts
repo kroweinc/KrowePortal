@@ -1,0 +1,119 @@
+"use server";
+
+import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { z } from "zod";
+import type { Subtask } from "@/lib/types";
+
+async function getClient(profileId: string) {
+  return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
+}
+
+const titleSchema = z.string().min(1).max(300);
+
+export async function createSubtask(
+  taskId: string,
+  title: string
+): Promise<{ subtask?: Subtask; error?: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsedTitle = titleSchema.safeParse(title.trim());
+  if (!parsedTitle.success) return { error: "Title is required (max 300 chars)" };
+
+  const supabase = await getClient(profile.id);
+
+  const { data: maxRow } = await supabase
+    .from("task_subtasks")
+    .select("position")
+    .eq("task_id", taskId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .single();
+
+  const position = (maxRow?.position ?? -1) + 1;
+
+  const { data, error } = await supabase
+    .from("task_subtasks")
+    .insert({
+      task_id: taskId,
+      created_by: profile.id,
+      title: parsedTitle.data,
+      position,
+    })
+    .select()
+    .single();
+
+  if (error) return { error: error.message };
+  return { subtask: data as Subtask };
+}
+
+export async function toggleSubtask(
+  id: string,
+  completed: boolean
+): Promise<{ error?: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("task_subtasks")
+    .update({ completed, updated_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function updateSubtaskTitle(
+  id: string,
+  title: string
+): Promise<{ error?: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsedTitle = titleSchema.safeParse(title.trim());
+  if (!parsedTitle.success) return { error: "Title is required (max 300 chars)" };
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("task_subtasks")
+    .update({ title: parsedTitle.data, updated_at: new Date().toISOString() })
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function deleteSubtask(id: string): Promise<{ error?: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase.from("task_subtasks").delete().eq("id", id);
+
+  if (error) return { error: error.message };
+  return {};
+}
+
+export async function reorderSubtasks(
+  updates: { id: string; position: number }[]
+): Promise<{ error?: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const supabase = await getClient(profile.id);
+  const results = await Promise.all(
+    updates.map(({ id, position }) =>
+      supabase
+        .from("task_subtasks")
+        .update({ position, updated_at: new Date().toISOString() })
+        .eq("id", id)
+    )
+  );
+
+  const failed = results.find((r) => r.error);
+  if (failed?.error) return { error: failed.error.message };
+  return {};
+}

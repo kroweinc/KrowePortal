@@ -6,6 +6,7 @@ import { DEV_PROFILE_IDS } from "@/lib/auth";
 import { Nav } from "@/components/nav";
 import { OperatorTaskList } from "@/components/operator-task-list";
 import { NewTaskForm } from "@/components/new-task-form";
+import { DoneDeliverableProvider } from "@/components/done-deliverable-provider";
 import type { Engagement, Task } from "@/lib/types";
 
 export default async function OperatorDashboard() {
@@ -32,7 +33,7 @@ export default async function OperatorDashboard() {
     : "engagement_id.is.null";
   const { data } = await supabase
     .from("tasks")
-    .select("*")
+    .select("*, task_attachments(*, uploader:profiles!uploaded_by(id, display_name, role))")
     .or(filter)
     .order("created_at", { ascending: false });
   tasks = (data ?? []) as Task[];
@@ -52,9 +53,11 @@ export default async function OperatorDashboard() {
           )}
         </div>
 
-        <Suspense>
-          <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
-        </Suspense>
+        <DoneDeliverableProvider>
+          <Suspense>
+            <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
+          </Suspense>
+        </DoneDeliverableProvider>
       </main>
       <NewTaskForm
         engagementId={firstEngagement?.id}

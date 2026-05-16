@@ -48,20 +48,42 @@ export interface Task {
   priority: TaskPriority;
   operator_visible: boolean;
   builder_estimate_hours: number | null;
+  sort_order: number;
   created_by: string;
   created_at: string;
   updated_at: string;
+  pushed_to_main: boolean;
+  completion_note: string | null;
+  completed_at: string | null;
   engagement?: Engagement;
+  task_attachments?: TaskAttachment[];
 }
+
+export interface Subtask {
+  id: string;
+  task_id: string;
+  created_by: string;
+  title: string;
+  completed: boolean;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AttachmentType = "file" | "link" | "text";
 
 export interface TaskAttachment {
   id: string;
   task_id: string;
   uploaded_by: string;
+  attachment_type: AttachmentType;
   file_name: string;
-  storage_path: string;
-  mime_type: string;
-  size_bytes: number;
+  storage_path: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  url: string | null;
+  text_content: string | null;
+  is_deliverable: boolean;
   created_at: string;
   uploader?: Pick<Profile, "id" | "display_name" | "role">;
 }

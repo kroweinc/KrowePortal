@@ -17,20 +17,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const isDeliverableParam = request.nextUrl.searchParams.get("isDeliverable");
-
   const supabase = await getClient(profile.id);
-  let query = supabase
-    .from("task_attachments")
-    .select("*, uploader:profiles!uploaded_by(id, display_name, role)")
+  const { data, error } = await supabase
+    .from("task_subtasks")
+    .select("*")
     .eq("task_id", taskId)
-    .order("created_at", { ascending: false });
-
-  if (isDeliverableParam !== null) {
-    query = query.eq("is_deliverable", isDeliverableParam === "true");
-  }
-
-  const { data, error } = await query;
+    .order("position", { ascending: true })
+    .order("created_at", { ascending: true });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
