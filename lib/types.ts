@@ -21,7 +21,7 @@ export interface GitHubRepo {
 export type Role = "operator" | "builder";
 export type TaskStatus = "inbox" | "in_progress" | "blocked" | "done";
 export type TaskSource = "operator_request" | "builder_added";
-export type TaskPriority = "low" | "medium" | "high";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
 export interface Profile {
   id: string;
@@ -52,4 +52,16 @@ export interface Task {
   created_at: string;
   updated_at: string;
   engagement?: Engagement;
+}
+
+export interface TaskAttachment {
+  id: string;
+  task_id: string;
+  uploaded_by: string;
+  file_name: string;
+  storage_path: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+  uploader?: Pick<Profile, "id" | "display_name" | "role">;
 }

@@ -1,11 +1,11 @@
 import { notFound, redirect } from "next/navigation";
-import { getCurrentProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { BuilderTaskActions } from "./builder-task-actions";
+import { TaskAttachments } from "@/components/task-attachments";
 import Link from "next/link";
-import type { Task } from "@/lib/types";
+import type { Task, TaskAttachment } from "@/lib/types";
 
 const STATUS_LABELS: Record<string, string> = {
   inbox: "Inbox",
@@ -24,15 +24,26 @@ export default async function BuilderTaskDetail({
   if (!profile) redirect("/login");
   if (profile.role !== "builder") redirect("/o");
 
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("tasks")
-    .select("*, engagement:engagements(*)")
-    .eq("id", id)
-    .single();
+  const supabase = DEV_PROFILE_IDS.has(profile.id)
+    ? createAdminClient()
+    : await createClient();
+
+  const [{ data }, { data: attachmentRows }] = await Promise.all([
+    supabase
+      .from("tasks")
+      .select("*, engagement:engagements(*)")
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("task_attachments")
+      .select("*, uploader:profiles!uploaded_by(id, display_name, role)")
+      .eq("task_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
 
   if (!data) notFound();
   const task = data as Task;
+  const attachments = (attachmentRows ?? []) as TaskAttachment[];
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">
@@ -73,6 +84,13 @@ export default async function BuilderTaskDetail({
             <span>Estimate: {task.builder_estimate_hours}h</span>
           )}
         </div>
+
+        <TaskAttachments
+          taskId={task.id}
+          role="builder"
+          currentUserId={profile.id}
+          initial={attachments}
+        />
       </div>
 
       <BuilderTaskActions task={task} />

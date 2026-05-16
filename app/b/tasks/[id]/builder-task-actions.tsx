@@ -18,6 +18,7 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
 ];
 
 const PRIORITIES: { value: TaskPriority; label: string }[] = [
+  { value: "urgent", label: "Urgent" },
   { value: "high", label: "High" },
   { value: "medium", label: "Medium" },
   { value: "low", label: "Low" },

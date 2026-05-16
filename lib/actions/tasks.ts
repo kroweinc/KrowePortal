@@ -15,7 +15,7 @@ const createTaskSchema = z.object({
   engagement_id: z.string().uuid().optional(),
   title: z.string().min(1).max(300),
   description: z.string().optional(),
-  priority: z.enum(["low", "medium", "high"]).default("medium"),
+  priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
 });
 
 export async function createTask(formData: FormData) {
@@ -53,7 +53,7 @@ const updateTaskSchema = z.object({
   title: z.string().min(1).max(300).optional(),
   description: z.string().optional(),
   builder_estimate_hours: z.coerce.number().min(0).optional(),
-  priority: z.enum(["low", "medium", "high"]).optional(),
+  priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
 });
 
 export async function updateTask(formData: FormData) {

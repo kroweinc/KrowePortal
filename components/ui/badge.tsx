@@ -16,6 +16,7 @@ const badgeVariants = cva(
         done: "bg-green-50 text-green-700",
         operator: "bg-violet-50 text-violet-700",
         builder: "bg-sky-50 text-sky-700",
+        urgent: "bg-red-100 text-red-800",
         low: "bg-green-50 text-green-700",
         medium: "bg-amber-50 text-amber-700",
         high: "bg-red-50 text-red-700",

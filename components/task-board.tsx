@@ -18,9 +18,10 @@ const COLUMNS: { status: TaskStatus; label: string }[] = [
 interface TaskBoardProps {
   tasks: Task[];
   engagements: Engagement[];
+  currentUserId: string;
 }
 
-export function TaskBoard({ tasks, engagements }: TaskBoardProps) {
+export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps) {
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const router = useRouter();
   const pathname = usePathname();
@@ -125,6 +126,7 @@ export function TaskBoard({ tasks, engagements }: TaskBoardProps) {
       <TaskDetailSheet
         task={selectedTask}
         role="builder"
+        currentUserId={currentUserId}
         engagementTitle={selectedTask ? engagementMap.get(selectedTask.engagement_id) : undefined}
         onOpenChange={(open) => !open && syncSelected(null)}
       />

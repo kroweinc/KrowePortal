@@ -53,7 +53,7 @@ export default async function BuilderDashboard() {
         </div>
 
         <Suspense>
-          <TaskBoard tasks={tasks} engagements={engagementList} />
+          <TaskBoard tasks={tasks} engagements={engagementList} currentUserId={profile.id} />
         </Suspense>
       </main>
       <NewTaskForm

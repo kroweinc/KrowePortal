@@ -15,13 +15,15 @@ import {
   InlineToggle,
 } from "@/components/inline-edit";
 import { updateTask, updateTaskStatus, toggleVisibility } from "@/lib/actions/tasks";
+import { TaskAttachments } from "@/components/task-attachments";
 import { STATUS_LABELS } from "@/lib/utils";
 import type { Task, Role, TaskStatus, TaskPriority } from "@/lib/types";
 
 const PRIORITY_OPTIONS = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
+  { value: "urgent", label: "Urgent" },
   { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
 ];
 
 const STATUS_OPTIONS = [
@@ -34,6 +36,7 @@ const STATUS_OPTIONS = [
 interface TaskDetailSheetProps {
   task: Task | null;
   role: Role;
+  currentUserId: string;
   engagementTitle?: string;
   onOpenChange: (open: boolean) => void;
 }
@@ -41,6 +44,7 @@ interface TaskDetailSheetProps {
 export function TaskDetailSheet({
   task,
   role,
+  currentUserId,
   engagementTitle,
   onOpenChange,
 }: TaskDetailSheetProps) {
@@ -143,6 +147,13 @@ export function TaskDetailSheet({
 
                 <span>Added: {new Date(task.created_at).toLocaleDateString()}</span>
               </div>
+
+              <TaskAttachments
+                taskId={task.id}
+                role={role}
+                currentUserId={currentUserId}
+                initial={[]}
+              />
 
               <DeleteTaskButton
                 taskId={task.id}

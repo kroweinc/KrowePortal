@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+@theme {
+  --animate-urgent-pulse: urgent-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes urgent-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+  }
+  50% {
+    opacity: 0.92;
+    box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-urgent-pulse { animation: none; }
+}
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

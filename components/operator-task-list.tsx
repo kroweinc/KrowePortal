@@ -17,9 +17,10 @@ const STATUS_LABELS: Record<string, string> = {
 
 interface OperatorTaskListProps {
   tasks: Task[];
+  currentUserId: string;
 }
 
-export function OperatorTaskList({ tasks }: OperatorTaskListProps) {
+export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -78,6 +79,7 @@ export function OperatorTaskList({ tasks }: OperatorTaskListProps) {
       <TaskDetailSheet
         task={selectedTask}
         role="operator"
+        currentUserId={currentUserId}
         onOpenChange={(open) => !open && syncSelected(null)}
       />
     </>

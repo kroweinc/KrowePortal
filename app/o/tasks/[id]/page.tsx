@@ -1,12 +1,13 @@
 import { notFound, redirect } from "next/navigation";
-import { getCurrentProfile } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
+import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { Nav } from "@/components/nav";
 import { Badge } from "@/components/ui/badge";
 import { DeleteTaskButton } from "@/components/delete-task-button";
 import { OperatorTaskActions } from "@/app/o/tasks/[id]/operator-task-actions";
+import { TaskAttachments } from "@/components/task-attachments";
 import Link from "next/link";
-import type { Task, TaskPriority } from "@/lib/types";
+import type { Task, TaskAttachment, TaskPriority } from "@/lib/types";
 
 const STATUS_LABELS: Record<string, string> = {
   inbox: "In Progress",
@@ -16,6 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  urgent: "Urgent",
   low: "Low",
   medium: "Medium",
   high: "High",
@@ -31,15 +33,26 @@ export default async function OperatorTaskDetail({
   if (!profile) redirect("/login");
   if (profile.role !== "operator") redirect("/b");
 
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("tasks")
-    .select("*, engagement:engagements(*)")
-    .eq("id", id)
-    .single();
+  const supabase = DEV_PROFILE_IDS.has(profile.id)
+    ? createAdminClient()
+    : await createClient();
+
+  const [{ data }, { data: attachmentRows }] = await Promise.all([
+    supabase
+      .from("tasks")
+      .select("*, engagement:engagements(*)")
+      .eq("id", id)
+      .single(),
+    supabase
+      .from("task_attachments")
+      .select("*, uploader:profiles!uploaded_by(id, display_name, role)")
+      .eq("task_id", id)
+      .order("created_at", { ascending: false }),
+  ]);
 
   if (!data) notFound();
   const task = data as Task;
+  const attachments = (attachmentRows ?? []) as TaskAttachment[];
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -80,6 +93,14 @@ export default async function OperatorTaskDetail({
             )}
             <span>Added: {new Date(task.created_at).toLocaleDateString()}</span>
           </div>
+
+          <TaskAttachments
+            taskId={task.id}
+            role="operator"
+            currentUserId={profile.id}
+            initial={attachments}
+          />
+
           <OperatorTaskActions task={task} />
           <DeleteTaskButton
             taskId={task.id}

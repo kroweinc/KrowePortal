@@ -63,6 +63,7 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
             <div>
               <label className="block text-xs font-medium text-neutral-700 mb-1">Priority</label>
               <Select name="priority" defaultValue="medium">
+                <option value="urgent">Urgent</option>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>

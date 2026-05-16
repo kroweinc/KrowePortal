@@ -7,6 +7,7 @@ import type { Task, TaskPriority } from "@/lib/types";
 import { useRouter } from "next/navigation";
 
 const PRIORITIES: { value: TaskPriority; label: string }[] = [
+  { value: "urgent", label: "Urgent" },
   { value: "high", label: "High" },
   { value: "medium", label: "Medium" },
   { value: "low", label: "Low" },

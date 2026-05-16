@@ -53,7 +53,7 @@ export default async function OperatorDashboard() {
         </div>
 
         <Suspense>
-          <OperatorTaskList tasks={tasks} />
+          <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
         </Suspense>
       </main>
       <NewTaskForm

@@ -11,12 +11,14 @@ import { DeleteTaskButton } from "@/components/delete-task-button";
 import type { Task, TaskStatus, Role, TaskPriority } from "@/lib/types";
 
 const PRIORITY_TINT: Record<TaskPriority, string> = {
+  urgent: "bg-red-100/60 animate-urgent-pulse",
   low: "bg-green-50/40",
   medium: "bg-amber-50/40",
   high: "bg-red-50/40",
 };
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
+  urgent: "Urgent",
   low: "Low",
   medium: "Medium",
   high: "High",
