@@ -11,6 +11,7 @@ import {
   deleteSubtask,
   reorderSubtasks,
 } from "@/lib/actions/subtasks";
+import { AiSubtaskGeneratorDialog } from "@/components/ai-subtask-generator-dialog";
 import type { Subtask } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -208,16 +209,24 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
             </span>
           )}
         </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs text-neutral-400 hover:text-neutral-700"
-          onClick={() => setAdding(true)}
-          disabled={isPending}
-        >
-          <Plus className="mr-1 h-3 w-3" />
-          Add
-        </Button>
+        <div className="flex items-center gap-1">
+          <AiSubtaskGeneratorDialog
+            taskId={taskId}
+            onAccept={(newSubtasks) =>
+              setSubtasks((prev) => [...prev, ...newSubtasks])
+            }
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-neutral-400 hover:text-neutral-700"
+            onClick={() => setAdding(true)}
+            disabled={isPending}
+          >
+            <Plus className="mr-1 h-3 w-3" />
+            Add
+          </Button>
+        </div>
       </div>
 
       {subtasks.length === 0 && !adding ? (
