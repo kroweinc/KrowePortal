@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
+import Image from "next/image";
 import { RoleSwitcher } from "@/components/role-switcher";
 import type { Profile } from "@/lib/types";
 
@@ -8,29 +7,34 @@ interface NavProps {
 }
 
 export function Nav({ profile }: NavProps) {
+  const role = profile.role;
+  const displayName = profile.display_name ?? "—";
+
   return (
-    <header className="border-b border-neutral-200 bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-        <Link href="/" className="text-sm font-semibold tracking-tight text-neutral-900">
-          Krowe Portal
-        </Link>
-        <div className="flex items-center gap-4">
-          <Badge variant={profile.role === "operator" ? "operator" : "builder"}>
-            {profile.role}
-          </Badge>
-          <RoleSwitcher />
-          <span className="text-sm text-neutral-500">
-            {profile.display_name ?? "—"}
-          </span>
-          <form action="/api/auth/logout" method="POST">
-            <button
-              type="submit"
-              className="text-xs text-neutral-400 hover:text-neutral-700 transition-colors"
-            >
-              Sign out
-            </button>
-          </form>
-        </div>
+    <header className="krowe-topbar">
+      <div className="krowe-brand">
+        <Image
+          src="/images/KroweLogo.png"
+          alt="Krowe"
+          width={96}
+          height={26}
+          style={{ objectFit: "contain" }}
+          priority
+        />
+        <span className="krowe-brand-portal">Portal</span>
+      </div>
+      <div className="krowe-topbar-right">
+        <span className={`krowe-role-pill ${role}`}>
+          <span className="dot" />
+          {role}
+        </span>
+        <RoleSwitcher />
+        <span className="krowe-user-name">{displayName}</span>
+        <form action="/api/auth/logout" method="POST">
+          <button type="submit" className="krowe-signout">
+            Sign out
+          </button>
+        </form>
       </div>
     </header>
   );

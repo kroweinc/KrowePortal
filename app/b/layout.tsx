@@ -1,21 +1,19 @@
-import { redirect } from "next/navigation"
-import { getCurrentProfile } from "@/lib/auth"
-import { Nav } from "@/components/nav"
-import { BuilderTabs } from "@/components/builder-tabs"
-import { DoneDeliverableProvider } from "@/components/done-deliverable-provider"
+import { redirect } from "next/navigation";
+import { getCurrentProfile } from "@/lib/auth";
+import { Nav } from "@/components/nav";
+import { BuilderTabs } from "@/components/builder-tabs";
+import { DoneDeliverableProvider } from "@/components/done-deliverable-provider";
 
 export default async function BuilderLayout({ children }: { children: React.ReactNode }) {
-  const profile = await getCurrentProfile()
-  if (!profile) redirect("/login")
-  if (profile.role !== "builder") redirect("/o")
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") redirect("/o");
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="krowe-app">
       <Nav profile={profile} />
       <BuilderTabs />
-      <DoneDeliverableProvider>
-        {children}
-      </DoneDeliverableProvider>
+      <DoneDeliverableProvider>{children}</DoneDeliverableProvider>
     </div>
-  )
+  );
 }

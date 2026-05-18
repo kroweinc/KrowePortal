@@ -23,21 +23,32 @@ export default async function OperatorDashboard() {
     .select("*, task_attachments(*, uploader:profiles!uploaded_by(id, display_name, role))")
     .eq("operator_visible", true)
     .order("created_at", { ascending: false });
+
   const tasks = (data ?? []) as Task[];
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="krowe-app">
       <Nav profile={profile} />
-      <main className="mx-auto max-w-3xl px-6 py-10 space-y-8">
-        <div>
-          <h2 className="text-xl font-semibold text-neutral-900">Your Tasks</h2>
+      <main className="krowe-page">
+        <div className="krowe-page-inner" style={{ maxWidth: 960 }}>
+          <div className="krowe-page-head">
+            <div>
+              <h1 className="krowe-page-title">Your Tasks</h1>
+              <div className="krowe-page-sub">
+                <span>{tasks.length} task{tasks.length !== 1 ? "s" : ""}</span>
+                <span className="sep">·</span>
+                <span style={{ fontStyle: "italic", textTransform: "none", letterSpacing: "normal" }}>
+                  Here&apos;s what your builder is working on.
+                </span>
+              </div>
+            </div>
+          </div>
+          <DoneDeliverableProvider>
+            <Suspense>
+              <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
+            </Suspense>
+          </DoneDeliverableProvider>
         </div>
-
-        <DoneDeliverableProvider>
-          <Suspense>
-            <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
-          </Suspense>
-        </DoneDeliverableProvider>
       </main>
       <NewTaskForm placeholder="Describe something that needs to be built or fixed…" />
     </div>

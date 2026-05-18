@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { DEV_PROFILE_IDS } from "@/lib/auth";
+import { Ember } from "@/components/design-atoms";
 import { TaskBoard } from "@/components/task-board";
 import { NewTaskForm } from "@/components/new-task-form";
 import { CreateInvitationDialog } from "@/components/create-invitation-dialog";
@@ -31,26 +32,31 @@ export default async function BuilderDashboard() {
   const operatorName = engagement?.operator?.display_name ?? null;
 
   return (
-    <>
-      <main className="mx-auto max-w-6xl px-6 py-10 space-y-8">
-        <div className="flex items-start justify-between">
+    <main className="krowe-page">
+      <div className="krowe-page-inner">
+        <div className="krowe-page-head">
           <div>
-            <h2 className="text-xl font-semibold text-neutral-900">Build Board</h2>
-            <p className="mt-0.5 text-sm text-neutral-400">
-              {tasks.length} task{tasks.length !== 1 ? "s" : ""}
-            </p>
+            <h1 className="krowe-page-title">
+              <Ember size={22} /> Build Board
+            </h1>
+            <div className="krowe-page-sub">
+              <span>{tasks.length} task{tasks.length !== 1 ? "s" : ""}</span>
+              <span className="sep">·</span>
+              <span style={{ fontStyle: "italic", textTransform: "none", letterSpacing: "normal" }}>
+                Let&apos;s see what&apos;s on deck today.
+              </span>
+            </div>
           </div>
           <CreateInvitationDialog
             existingToken={pendingInvite?.token}
             operatorName={operatorName ?? undefined}
           />
         </div>
-
         <Suspense>
           <TaskBoard tasks={tasks} currentUserId={profile.id} />
         </Suspense>
-      </main>
+      </div>
       <NewTaskForm placeholder="Add something to the build queue…" />
-    </>
+    </main>
   );
 }

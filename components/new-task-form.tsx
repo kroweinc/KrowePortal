@@ -2,44 +2,32 @@
 
 import { useRef, useState, useTransition } from "react";
 import { Plus, X, Paperclip, Maximize2, Minimize2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Select } from "@/components/ui/select";
+import { Ember } from "@/components/design-atoms";
 import { createTask } from "@/lib/actions/tasks";
 import { uploadAttachment } from "@/lib/actions/attachments";
 
 const MAX_SIZE = 25 * 1024 * 1024;
-
 const ALLOWED_EXTENSIONS = new Set([
-  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
-  ".pdf",
-  ".txt", ".csv", ".md", ".json",
-  ".html", ".htm",
-  ".zip",
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf",
+  ".txt", ".csv", ".md", ".json", ".html", ".htm", ".zip",
   ".docx", ".xlsx", ".pptx", ".doc", ".xls",
 ]);
-
 const ACCEPT = [
   "image/jpeg,image/png,image/gif,image/webp,image/svg+xml",
-  "application/pdf",
-  "text/plain,text/csv,text/html",
-  "application/json",
-  "application/zip",
-  ".md,.html,.htm,.docx,.xlsx,.pptx,.doc,.xls",
+  "application/pdf", "text/plain,text/csv,text/html", "application/json",
+  "application/zip", ".md,.html,.htm,.docx,.xlsx,.pptx,.doc,.xls",
 ].join(",");
 
-function getExt(fileName: string) {
-  return "." + (fileName.split(".").pop()?.toLowerCase() ?? "bin");
-}
+function getExt(name: string) { return "." + (name.split(".").pop()?.toLowerCase() ?? "bin"); }
 
 interface NewTaskFormProps {
+  engagementId?: string;
   placeholder?: string;
   onSuccess?: () => void;
 }
 
-export function NewTaskForm({ placeholder, onSuccess }: NewTaskFormProps) {
-  const [expanded, setExpanded] = useState(false);
+export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFormProps) {
+  const [open, setOpen] = useState(false);
   const [modal, setModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -50,169 +38,123 @@ export function NewTaskForm({ placeholder, onSuccess }: NewTaskFormProps) {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(e.target.files ?? []);
     e.target.value = "";
-    const valid = selected.filter((f) => {
-      if (f.size > MAX_SIZE) return false;
-      if (!ALLOWED_EXTENSIONS.has(getExt(f.name))) return false;
-      return true;
-    });
+    const valid = selected.filter((f) => f.size <= MAX_SIZE && ALLOWED_EXTENSIONS.has(getExt(f.name)));
     setFiles((prev) => [...prev, ...valid]);
   }
 
-  function removeFile(index: number) {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  function handleClose() {
-    setExpanded(false);
-    setModal(false);
-    setError(null);
-    setFiles([]);
-  }
+  function handleClose() { setOpen(false); setModal(false); setError(null); setFiles([]); }
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
       const result = await createTask(formData);
-      if (result?.error) {
-        setError(result.error);
-        return;
-      }
-
+      if (result?.error) { setError(result.error); return; }
       if (result?.taskId && files.length > 0) {
-        await Promise.all(
-          files.map((file) => {
-            const fd = new FormData();
-            fd.set("task_id", result.taskId!);
-            fd.set("file", file);
-            return uploadAttachment(fd);
-          })
-        );
+        await Promise.all(files.map((file) => {
+          const fd = new FormData();
+          fd.set("task_id", result.taskId!);
+          fd.set("file", file);
+          return uploadAttachment(fd);
+        }));
       }
-
       formRef.current?.reset();
       handleClose();
       onSuccess?.();
     });
   }
 
-  const formContent = (
-    <>
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-neutral-900">New task</span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setModal((v) => !v)}
-            className="text-neutral-400 hover:text-neutral-700 transition-colors"
-            aria-label={modal ? "Collapse" : "Expand"}
-          >
-            {modal ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+  const panel = (
+    <div className="krowe-newtask-panel" style={modal ? { position: "static", width: "min(520px, 92vw)" } : undefined}>
+      <div className="krowe-newtask-head">
+        <div className="krowe-newtask-title"><Ember size={14} /> New task</div>
+        <div className="krowe-newtask-head-actions">
+          <button className="krowe-iconbtn" onClick={() => setModal((v) => !v)} title={modal ? "Collapse" : "Expand"}>
+            {modal ? <Minimize2 width={14} height={14} /> : <Maximize2 width={14} height={14} />}
           </button>
-          <button
-            onClick={handleClose}
-            className="text-neutral-400 hover:text-neutral-700 transition-colors"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
+          <button className="krowe-iconbtn" onClick={handleClose} title="Close">
+            <X width={14} height={14} />
           </button>
         </div>
       </div>
-      <form ref={formRef} action={handleSubmit} className="space-y-3">
-        <Input
-          name="title"
-          placeholder={placeholder ?? "What needs to be built or fixed?"}
-          required
-          autoFocus
-        />
-        <Textarea
-          name="description"
-          placeholder="More context (optional)"
-          rows={modal ? 5 : 3}
-        />
-        <div>
-          <label className="block text-xs font-medium text-neutral-700 mb-1">Priority</label>
-          <Select name="priority" defaultValue="medium">
+      <form ref={formRef} action={handleSubmit}>
+        {engagementId && <input type="hidden" name="engagement_id" value={engagementId} />}
+        <div className="krowe-form-row">
+          <input
+            className="krowe-input"
+            name="title"
+            placeholder={placeholder ?? "What needs to be built or fixed?"}
+            required
+            autoFocus
+          />
+        </div>
+        <div className="krowe-form-row">
+          <textarea
+            className="krowe-textarea"
+            name="description"
+            placeholder="More context — a sentence or two is fine."
+            rows={modal ? 5 : 3}
+          />
+        </div>
+        <div className="krowe-form-row">
+          <label className="krowe-form-label">Priority</label>
+          <select className="krowe-select" name="priority" defaultValue="medium">
             <option value="urgent">Urgent</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
-          </Select>
+          </select>
         </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-medium text-neutral-700">Attachments</label>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 text-xs text-neutral-400 hover:text-neutral-700 transition-colors"
-            >
-              <Paperclip className="h-3 w-3" />
-              Add file
+        <div className="krowe-form-row">
+          <div className="krowe-form-label-row">
+            <span className="krowe-form-label">Attachments</span>
+            <button type="button" className="krowe-link-btn" onClick={() => fileInputRef.current?.click()}>
+              <Paperclip width={12} height={12} /> Add file
             </button>
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPT}
-            className="hidden"
-            onChange={handleFileChange}
-          />
+          <input ref={fileInputRef} type="file" multiple accept={ACCEPT} className="sr-only" onChange={handleFileChange} />
           {files.length > 0 && (
-            <ul className="space-y-1">
+            <ul style={{ listStyle: "none", padding: 0, margin: "4px 0 0", display: "flex", flexDirection: "column", gap: 4 }}>
               {files.map((f, i) => (
-                <li
-                  key={i}
-                  className="flex items-center justify-between gap-2 rounded-md border border-neutral-100 bg-neutral-50 px-2 py-1 text-xs"
-                >
-                  <span className="truncate text-neutral-700">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeFile(i)}
-                    className="shrink-0 text-neutral-400 hover:text-red-500 transition-colors"
-                  >
-                    <X className="h-3 w-3" />
+                <li key={i} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: "var(--surface-subtle)", border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-sm)", padding: "4px 8px", fontSize: 12,
+                }}>
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</span>
+                  <button type="button" className="krowe-iconbtn" onClick={() => setFiles((p) => p.filter((_, idx) => idx !== i))}>
+                    <X width={12} height={12} />
                   </button>
                 </li>
               ))}
             </ul>
           )}
         </div>
-
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        <Button type="submit" size="sm" className="w-full" disabled={isPending}>
-          {isPending ? "Adding…" : "Add task"}
-        </Button>
+        {error && <p style={{ color: "var(--danger)", fontSize: 12, marginBottom: 8 }}>{error}</p>}
+        <button className="krowe-btn-primary accent" type="submit" disabled={isPending}>
+          <Plus width={14} height={14} /> {isPending ? "Adding…" : "Add task"}
+        </button>
       </form>
-    </>
+    </div>
   );
 
   return (
     <>
-      {expanded && modal && (
+      {open && modal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30"
+          className="krowe-modal-backdrop"
           onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
         >
-          <div className="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white shadow-2xl p-6 space-y-3 mx-4">
-            {formContent}
-          </div>
+          {panel}
         </div>
       )}
-
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
-        {expanded && !modal && (
-          <div className="w-80 rounded-xl border border-neutral-200 bg-white shadow-xl p-4 space-y-3">
-            {formContent}
-          </div>
-        )}
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-900 text-white shadow-lg hover:bg-neutral-700 transition-colors"
-          aria-label="New task"
-        >
-          <Plus className="h-5 w-5" />
-        </button>
-      </div>
+      {open && !modal && panel}
+      <button
+        className={`krowe-fab ${open ? "open" : ""}`}
+        onClick={() => setOpen((v) => !v)}
+        title="New task"
+        aria-label="New task"
+      >
+        {open ? <X width={20} height={20} /> : <Plus width={20} height={20} />}
+      </button>
     </>
   );
 }
