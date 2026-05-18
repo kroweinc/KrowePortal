@@ -4,11 +4,10 @@ import { useEffect, useState } from "react"
 import type { GitHubRepo } from "@/lib/types"
 
 interface RepoSelectorProps {
-  engagementId?: string
   currentRepo?: string | null
 }
 
-export function RepoSelector({ engagementId, currentRepo }: RepoSelectorProps) {
+export function RepoSelector({ currentRepo }: RepoSelectorProps) {
   const [repos, setRepos] = useState<GitHubRepo[]>([])
   const [selected, setSelected] = useState<string>(currentRepo ?? "")
   const [loading, setLoading] = useState(true)
@@ -28,14 +27,13 @@ export function RepoSelector({ engagementId, currentRepo }: RepoSelectorProps) {
     if (!repo) return
     setSelected(fullName)
     setSaving(true)
-    const body: Record<string, unknown> = {
+    const body = {
       repo_id: repo.id,
       repo_full_name: repo.full_name,
       repo_name: repo.name,
       repo_owner: repo.owner.login,
       default_branch: repo.default_branch,
     }
-    if (engagementId) body.engagement_id = engagementId
     await fetch("/api/github/repos/select", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

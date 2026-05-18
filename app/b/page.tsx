@@ -5,7 +5,9 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { DEV_PROFILE_IDS } from "@/lib/auth";
 import { TaskBoard } from "@/components/task-board";
 import { NewTaskForm } from "@/components/new-task-form";
-import type { Engagement, Task } from "@/lib/types";
+import { CreateInvitationDialog } from "@/components/create-invitation-dialog";
+import { getMyEngagement, getMyPendingInvite } from "@/lib/actions/invitations";
+import type { Task } from "@/lib/types";
 
 export default async function BuilderDashboard() {
   const profile = await getCurrentProfile();
@@ -16,27 +18,17 @@ export default async function BuilderDashboard() {
     ? createAdminClient()
     : await createClient();
 
-  const { data: engagements } = await supabase
-    .from("engagements")
-    .select("*")
-    .eq("builder_id", profile.id)
-    .order("created_at", { ascending: true });
+  const [{ data }, engagement, pendingInvite] = await Promise.all([
+    supabase
+      .from("tasks")
+      .select("*, task_attachments(*, uploader:profiles!uploaded_by(id, display_name, role))")
+      .order("created_at", { ascending: false }),
+    getMyEngagement(),
+    getMyPendingInvite(),
+  ]);
+  const tasks = (data ?? []) as Task[];
 
-  const engagementList = (engagements ?? []) as Engagement[];
-  const engagementIds = engagementList.map((e) => e.id);
-
-  let tasks: Task[] = [];
-  const filter = engagementIds.length > 0
-    ? `engagement_id.in.(${engagementIds.join(",")}),engagement_id.is.null`
-    : "engagement_id.is.null";
-  const { data } = await supabase
-    .from("tasks")
-    .select("*, task_attachments(*, uploader:profiles!uploaded_by(id, display_name, role))")
-    .or(filter)
-    .order("created_at", { ascending: false });
-  tasks = (data ?? []) as Task[];
-
-  const firstEngagement = engagementList[0];
+  const operatorName = engagement?.operator?.display_name ?? null;
 
   return (
     <>
@@ -45,21 +37,20 @@ export default async function BuilderDashboard() {
           <div>
             <h2 className="text-xl font-semibold text-neutral-900">Build Board</h2>
             <p className="mt-0.5 text-sm text-neutral-400">
-              {engagementList.length} engagement{engagementList.length !== 1 ? "s" : ""}
-              {" · "}
               {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             </p>
           </div>
+          <CreateInvitationDialog
+            existingToken={pendingInvite?.token}
+            operatorName={operatorName ?? undefined}
+          />
         </div>
 
         <Suspense>
-          <TaskBoard tasks={tasks} engagements={engagementList} currentUserId={profile.id} />
+          <TaskBoard tasks={tasks} currentUserId={profile.id} />
         </Suspense>
       </main>
-      <NewTaskForm
-        engagementId={firstEngagement?.id}
-        placeholder="Add something to the build queue…"
-      />
+      <NewTaskForm placeholder="Add something to the build queue…" />
     </>
   );
 }

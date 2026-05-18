@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toggleVisibility, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { DeleteTaskButton } from "@/components/delete-task-button";
-import type { Task, TaskStatus, Role, TaskPriority } from "@/lib/types";
+import { useActiveRole } from "@/lib/role-context";
+import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
 
 const PRIORITY_TINT: Record<TaskPriority, string> = {
   urgent: "bg-red-100/60 animate-urgent-pulse",
@@ -41,14 +42,13 @@ const NEXT_STATUS: Record<TaskStatus, TaskStatus | null> = {
 
 interface TaskCardProps {
   task: Task;
-  role: Role;
-  engagementTitle?: string;
   onSelect?: (task: Task) => void;
   onDragStart?: (task: Task) => void;
   onDragEnd?: () => void;
 }
 
-export function TaskCard({ task, role, engagementTitle, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
+export function TaskCard({ task, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
+  const role = useActiveRole();
   const nextStatus = NEXT_STATUS[task.status];
   const [isDragging, setIsDragging] = useState(false);
   const requestDone = useRequestDone();
@@ -101,9 +101,6 @@ export function TaskCard({ task, role, engagementTitle, onSelect, onDragStart, o
             <Badge variant={task.priority}>{PRIORITY_LABELS[task.priority]}</Badge>
           </div>
         </div>
-        {engagementTitle && (
-          <p className="text-xs text-neutral-400">{engagementTitle}</p>
-        )}
       </CardHeader>
       <CardContent>
         {task.description && (

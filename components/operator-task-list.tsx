@@ -67,7 +67,6 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
                   <TaskCard
                     key={task.id}
                     task={task}
-                    role="operator"
                     onSelect={(t) => syncSelected(t.id)}
                   />
                 ))}
@@ -78,7 +77,6 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
       </div>
       <TaskDetailSheet
         task={selectedTask}
-        role="operator"
         currentUserId={currentUserId}
         onOpenChange={(open) => !open && syncSelected(null)}
       />

@@ -34,12 +34,11 @@ function getExt(fileName: string) {
 }
 
 interface NewTaskFormProps {
-  engagementId?: string;
   placeholder?: string;
   onSuccess?: () => void;
 }
 
-export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFormProps) {
+export function NewTaskForm({ placeholder, onSuccess }: NewTaskFormProps) {
   const [expanded, setExpanded] = useState(false);
   const [modal, setModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,7 +116,6 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
         </div>
       </div>
       <form ref={formRef} action={handleSubmit} className="space-y-3">
-        {engagementId && <input type="hidden" name="engagement_id" value={engagementId} />}
         <Input
           name="title"
           placeholder={placeholder ?? "What needs to be built or fixed?"}

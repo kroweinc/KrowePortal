@@ -22,7 +22,8 @@ import {
   addLinkAttachment,
   addTextAttachment,
 } from "@/lib/actions/attachments";
-import type { TaskAttachment, Role } from "@/lib/types";
+import { useActiveRole } from "@/lib/role-context";
+import type { TaskAttachment } from "@/lib/types";
 import {
   MAX_ATTACHMENT_SIZE,
   ALLOWED_ATTACHMENT_EXTENSIONS,
@@ -47,7 +48,6 @@ function formatBytes(bytes: number) {
 
 interface TaskAttachmentsProps {
   taskId: string;
-  role: Role;
   currentUserId: string;
   initial: TaskAttachment[];
   isDeliverable?: boolean;
@@ -56,12 +56,12 @@ interface TaskAttachmentsProps {
 
 export function TaskAttachments({
   taskId,
-  role,
   currentUserId,
   initial,
   isDeliverable = false,
   readOnly = false,
 }: TaskAttachmentsProps) {
+  const role = useActiveRole();
   const [attachments, setAttachments] = useState<TaskAttachment[]>(initial);
   const [isPending, startTransition] = useTransition();
   const [collapsed, setCollapsed] = useState(false);

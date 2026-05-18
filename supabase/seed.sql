@@ -39,7 +39,7 @@ begin
        'operator_request', 'in_progress', true, op_id),
 
       (eng_id, 'Set up Supabase schema and auth',
-       'Create profiles, engagements, tasks tables with RLS. Wire up magic-link auth.',
+       'Create profiles, engagements, tasks tables with RLS. Wire up Google OAuth.',
        'builder_added', 'done', false, bl_id),
 
       (eng_id, 'Wire frontend to live database',

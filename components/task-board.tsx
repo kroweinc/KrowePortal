@@ -6,7 +6,7 @@ import { TaskCard } from "@/components/task-card";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
-import type { Task, Engagement, TaskStatus, TaskPriority } from "@/lib/types";
+import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
 
 const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
@@ -33,12 +33,10 @@ type OptimisticAction =
 
 interface TaskBoardProps {
   tasks: Task[];
-  engagements: Engagement[];
   currentUserId: string;
 }
 
-export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps) {
-  const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
+export function TaskBoard({ tasks, currentUserId }: TaskBoardProps) {
   const requestDone = useRequestDone();
   const router = useRouter();
   const pathname = usePathname();
@@ -190,7 +188,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     return (
       <div className="rounded-lg border border-dashed border-neutral-200 py-12 text-center">
         <p className="text-sm text-neutral-400">
-          No tasks across any of your engagements yet.
+          No tasks yet.
         </p>
       </div>
     );
@@ -238,8 +236,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
                       <div className="mb-3">
                         <TaskCard
                           task={task}
-                          role="builder"
-                          engagementTitle={engagementMap.get(task.engagement_id)}
                           onSelect={(t) => syncSelected(t.id)}
                           onDragStart={(t) => setDraggingTask(t)}
                           onDragEnd={() => {
@@ -261,9 +257,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       </div>
       <TaskDetailSheet
         task={selectedTask}
-        role="builder"
         currentUserId={currentUserId}
-        engagementTitle={selectedTask ? engagementMap.get(selectedTask.engagement_id) : undefined}
         onOpenChange={(open) => !open && syncSelected(null)}
       />
     </>

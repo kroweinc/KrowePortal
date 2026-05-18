@@ -19,7 +19,8 @@ import { useRequestDone } from "@/components/done-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
 import { TaskSubtasks } from "@/components/task-subtasks";
 import { STATUS_LABELS } from "@/lib/utils";
-import type { Task, Role, TaskStatus, TaskPriority } from "@/lib/types";
+import { useActiveRole } from "@/lib/role-context";
+import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
 
 const PRIORITY_OPTIONS = [
   { value: "urgent", label: "Urgent" },
@@ -37,19 +38,16 @@ const STATUS_OPTIONS = [
 
 interface TaskDetailSheetProps {
   task: Task | null;
-  role: Role;
   currentUserId: string;
-  engagementTitle?: string;
   onOpenChange: (open: boolean) => void;
 }
 
 export function TaskDetailSheet({
   task,
-  role,
   currentUserId,
-  engagementTitle,
   onOpenChange,
 }: TaskDetailSheetProps) {
+  const role = useActiveRole();
   const requestDone = useRequestDone();
 
   async function saveField(field: string, value: string) {
@@ -96,9 +94,6 @@ export function TaskDetailSheet({
                   />
                 </div>
               </SheetTitle>
-              {engagementTitle && (
-                <p className="text-xs text-neutral-400 mt-1">{engagementTitle}</p>
-              )}
             </SheetHeader>
 
             <div className="flex-1 space-y-5 px-6 pt-2 pb-5">
@@ -142,7 +137,6 @@ export function TaskDetailSheet({
                     <TaskAttachments
                       key={`deliverable-attachments-${task.id}`}
                       taskId={task.id}
-                      role={role}
                       currentUserId={currentUserId}
                       initial={deliverableAttachments}
                       isDeliverable={true}
@@ -202,7 +196,6 @@ export function TaskDetailSheet({
               <TaskAttachments
                 key={`attachments-${task.id}`}
                 taskId={task.id}
-                role={role}
                 currentUserId={currentUserId}
                 initial={(task.task_attachments ?? []).filter(a => !a.is_deliverable)}
                 isDeliverable={false}
