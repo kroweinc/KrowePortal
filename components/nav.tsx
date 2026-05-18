@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { RoleSwitcher } from "@/components/role-switcher";
+import { DEV_TOGGLE_ENABLED } from "@/lib/auth";
 import type { Profile } from "@/lib/types";
 
 interface NavProps {
@@ -28,12 +28,21 @@ export function Nav({ profile }: NavProps) {
           <span className="dot" />
           {role}
         </span>
-        <RoleSwitcher />
+        {DEV_TOGGLE_ENABLED && (
+          <form action="/api/dev/role" method="POST">
+            <input
+              type="hidden"
+              name="role"
+              value={role === "operator" ? "builder" : "operator"}
+            />
+            <button type="submit" className="krowe-view-switch">
+              view as {role === "operator" ? "builder" : "operator"}
+            </button>
+          </form>
+        )}
         <span className="krowe-user-name">{displayName}</span>
         <form action="/api/auth/logout" method="POST">
-          <button type="submit" className="krowe-signout">
-            Sign out
-          </button>
+          <button type="submit" className="krowe-signout">Sign out</button>
         </form>
       </div>
     </header>

@@ -1,3 +1,48 @@
+import { ExternalLink, GitBranch, Paperclip } from "lucide-react";
+import type { Task } from "@/lib/types";
+
+export function DeliveryChips({ task }: { task: Pick<Task, "status" | "pushed_to_main" | "completion_note" | "task_attachments"> }) {
+  if (task.status !== "done") return null;
+
+  const deliverables = (task.task_attachments ?? []).filter((a) => a.is_deliverable);
+  const note = task.completion_note?.trim();
+  const isUrl = note ? /^https?:\/\//i.test(note) : false;
+
+  if (!task.pushed_to_main && !note && deliverables.length === 0) return null;
+
+  return (
+    <div className="krowe-delivery-row">
+      {isUrl && (
+        <a
+          href={note}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="krowe-chip krowe-chip-delivery-live"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ExternalLink width={10} height={10} />
+          Live
+        </a>
+      )}
+      {task.pushed_to_main && (
+        <span className="krowe-chip krowe-chip-delivery-git">
+          <GitBranch width={10} height={10} />
+          → main
+        </span>
+      )}
+      {deliverables.map((att) => {
+        const ext = (att.file_name.split(".").pop() ?? "file").toUpperCase();
+        return (
+          <span key={att.id} className="krowe-chip krowe-chip-delivery-file">
+            <Paperclip width={10} height={10} />
+            {ext}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export function BrandMark({ size = 26 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">

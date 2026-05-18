@@ -31,7 +31,7 @@ export default async function BuilderTaskDetail({
   const [{ data }, { data: attachmentRows }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("*")
+      .select("*, engagement:engagements(*)")
       .eq("id", id)
       .single(),
     supabase
@@ -87,6 +87,7 @@ export default async function BuilderTaskDetail({
 
         <TaskAttachments
           taskId={task.id}
+          role="builder"
           currentUserId={profile.id}
           initial={attachments}
         />

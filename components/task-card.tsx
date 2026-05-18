@@ -5,8 +5,8 @@ import Link from "next/link";
 import { Eye, EyeOff, Trash2 } from "lucide-react";
 import { toggleVisibility, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
-import { useActiveRole } from "@/lib/role-context";
-import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
+import { DeliveryChips } from "@/components/design-atoms";
+import type { Task, Role, TaskStatus, TaskPriority } from "@/lib/types";
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   urgent: "Urgent", high: "High", medium: "Medium", low: "Low",
@@ -22,13 +22,14 @@ const ADVANCE_LABEL: Record<TaskStatus, string> = {
 
 interface TaskCardProps {
   task: Task;
+  role: Role;
+  engagementTitle?: string;
   onSelect?: (task: Task) => void;
   onDragStart?: (task: Task) => void;
   onDragEnd?: () => void;
 }
 
-export function TaskCard({ task, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
-  const role = useActiveRole();
+export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const requestDone = useRequestDone();
   const nextStatus = NEXT_STATUS[task.status];
@@ -99,6 +100,8 @@ export function TaskCard({ task, onSelect, onDragStart, onDragEnd }: TaskCardPro
       {task.description && (
         <p className="krowe-card-desc">{task.description}</p>
       )}
+
+      <DeliveryChips task={task} />
 
       <div className="krowe-card-meta">
         <div className="krowe-card-meta-left">

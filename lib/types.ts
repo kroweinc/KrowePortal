@@ -1,23 +1,3 @@
-export interface Engagement {
-  id: string;
-  builder_id: string;
-  operator_id: string | null;
-  title: string;
-  created_at: string;
-  operator?: { display_name: string | null } | null;
-}
-
-export interface Invitation {
-  id: string;
-  engagement_id: string;
-  token: string;
-  status: "pending" | "accepted" | "expired";
-  created_by: string;
-  created_at: string;
-  expires_at: string;
-  accepted_at: string | null;
-}
-
 export interface GitHubConnection {
   id: string;
   user_id: string;
@@ -50,9 +30,18 @@ export interface Profile {
   created_at: string;
 }
 
+export interface Engagement {
+  id: string;
+  operator_id: string;
+  builder_id: string;
+  title: string;
+  created_at: string;
+  operator?: { display_name: string | null };
+}
+
 export interface Task {
   id: string;
-  engagement_id: string | null;
+  engagement_id: string;
   title: string;
   description: string | null;
   source: TaskSource;
@@ -67,6 +56,7 @@ export interface Task {
   pushed_to_main: boolean;
   completion_note: string | null;
   completed_at: string | null;
+  engagement?: Engagement;
   task_attachments?: TaskAttachment[];
 }
 

@@ -7,13 +7,14 @@ import { DoneDeliverableProvider } from "@/components/done-deliverable-provider"
 export default async function BuilderLayout({ children }: { children: React.ReactNode }) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "builder") redirect("/o");
 
   return (
     <div className="krowe-app">
       <Nav profile={profile} />
       <BuilderTabs />
-      <DoneDeliverableProvider>{children}</DoneDeliverableProvider>
+      <DoneDeliverableProvider>
+        {children}
+      </DoneDeliverableProvider>
     </div>
   );
 }

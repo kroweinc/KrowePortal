@@ -21,6 +21,7 @@ export function OnboardingForm({ defaultName = "" }: { defaultName?: string }) {
       action={handleSubmit}
       className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm space-y-5"
     >
+      <input type="hidden" name="role" value="builder" />
       <div>
         <label className="block text-xs font-medium text-neutral-700 mb-2">
           Your name

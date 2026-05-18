@@ -1,20 +1,14 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
-import { PENDING_INVITE_COOKIE } from "@/lib/auth-shared";
-import { validatePendingInvite } from "@/lib/invitations";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function RootPage() {
   const profile = await getCurrentProfile();
 
   if (!profile) {
-    const cookieStore = await cookies();
-    const inviteToken = cookieStore.get(PENDING_INVITE_COOKIE)?.value;
-    const validToken = await validatePendingInvite(inviteToken);
-    if (validToken) {
-      redirect(`/join/${validToken}`);
-    }
-    redirect("/onboarding");
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    redirect(user ? "/onboarding" : "/login");
   }
 
   if (profile.role === "operator") {

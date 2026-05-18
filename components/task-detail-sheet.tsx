@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { X, Paperclip, CheckSquare } from "lucide-react";
+import { X, Paperclip, CheckSquare, ExternalLink, GitBranch } from "lucide-react";
 import { Ember } from "@/components/design-atoms";
 import { InlineText, InlineTextarea, InlineSelect, InlineToggle } from "@/components/inline-edit";
 import { updateTask, updateTaskStatus, toggleVisibility } from "@/lib/actions/tasks";
@@ -9,8 +9,7 @@ import { useRequestDone } from "@/components/done-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
 import { TaskSubtasks } from "@/components/task-subtasks";
 import { DeleteTaskButton } from "@/components/delete-task-button";
-import { useActiveRole } from "@/lib/role-context";
-import type { Task, TaskStatus } from "@/lib/types";
+import type { Task, Role, TaskStatus } from "@/lib/types";
 
 const PRIORITY_OPTIONS = [
   { value: "urgent", label: "Urgent" },
@@ -30,23 +29,18 @@ const STATUS_FULL: Record<string, string> = {
 
 interface TaskDetailSheetProps {
   task: Task | null;
+  role: Role;
   currentUserId: string;
+  engagementTitle?: string;
   onOpenChange: (open: boolean) => void;
 }
 
-export function TaskDetailSheet({
-  task,
-  currentUserId,
-  onOpenChange,
-}: TaskDetailSheetProps) {
-  const role = useActiveRole();
+export function TaskDetailSheet({ task, role, currentUserId, engagementTitle, onOpenChange }: TaskDetailSheetProps) {
   const requestDone = useRequestDone();
 
   useEffect(() => {
     if (!task) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onOpenChange(false);
-    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onOpenChange(false); }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [task, onOpenChange]);
@@ -72,11 +66,6 @@ export function TaskDetailSheet({
   }
 
   const sourceLabel = task.source === "operator_request" ? "operator" : "builder";
-  const deliverableAttachments = (task.task_attachments ?? []).filter((a) => a.is_deliverable);
-  const hasDeliverable =
-    task.pushed_to_main ||
-    task.completion_note ||
-    deliverableAttachments.length > 0;
 
   return (
     <>
@@ -94,7 +83,7 @@ export function TaskDetailSheet({
               />
             </div>
             <div className="krowe-sheet-sub">
-              Krowe Portal · {STATUS_FULL[task.status]}
+              {engagementTitle ?? "Krowe Portal"} · {STATUS_FULL[task.status]}
             </div>
           </div>
           <button className="krowe-iconbtn" onClick={() => onOpenChange(false)} aria-label="Close">
@@ -117,52 +106,11 @@ export function TaskDetailSheet({
             </div>
           </section>
 
-          {task.status === "done" && hasDeliverable && (
-            <section>
-              <div className="krowe-section-label">Deliverable</div>
-              {(task.pushed_to_main || task.completion_note) && (
-                <div
-                  style={{
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid color-mix(in srgb, var(--success) 30%, transparent)",
-                    background: "color-mix(in srgb, var(--success) 8%, transparent)",
-                    padding: "10px 12px",
-                    marginBottom: 8,
-                    fontSize: 12,
-                  }}
-                >
-                  {task.pushed_to_main && (
-                    <p style={{ fontWeight: 600, color: "var(--success)", margin: 0 }}>
-                      Pushed to main
-                    </p>
-                  )}
-                  {task.completion_note && (
-                    <p style={{ color: "var(--success)", margin: task.pushed_to_main ? "4px 0 0" : 0 }}>
-                      {task.completion_note}
-                    </p>
-                  )}
-                </div>
-              )}
-              <TaskAttachments
-                key={`deliverable-${task.id}`}
-                taskId={task.id}
-                currentUserId={currentUserId}
-                initial={deliverableAttachments}
-                isDeliverable
-                readOnly
-              />
-            </section>
-          )}
-
           <section>
             <div className="krowe-section-label">Details</div>
             <dl className="krowe-kv-grid">
               <dt>Source</dt>
-              <dd>
-                <span className={`krowe-chip krowe-chip-source ${sourceLabel}`}>
-                  {sourceLabel} added
-                </span>
-              </dd>
+              <dd><span className={`krowe-chip krowe-chip-source ${sourceLabel}`}>{sourceLabel} added</span></dd>
 
               <dt>Priority</dt>
               <dd>
@@ -177,18 +125,58 @@ export function TaskDetailSheet({
               <dt>Status</dt>
               <dd>
                 {role === "builder" ? (
-                  <InlineSelect
-                    label=""
-                    value={task.status}
-                    options={STATUS_OPTIONS}
-                    onSave={saveStatus}
-                  />
+                  <InlineSelect label="" value={task.status} options={STATUS_OPTIONS} onSave={saveStatus} />
                 ) : (
-                  <span className={`krowe-chip krowe-chip-status ${task.status}`}>
-                    {STATUS_FULL[task.status]}
-                  </span>
+                  <span className={`krowe-chip krowe-chip-status ${task.status}`}>{STATUS_FULL[task.status]}</span>
                 )}
               </dd>
+
+              {task.status === "done" && (() => {
+                const deliverables = (task.task_attachments ?? []).filter((a) => a.is_deliverable);
+                const note = task.completion_note?.trim();
+                const isUrl = note ? /^https?:\/\//i.test(note) : false;
+                if (!task.pushed_to_main && !note && deliverables.length === 0) return null;
+                return (
+                  <>
+                    <dt>Delivered via</dt>
+                    <dd>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {task.pushed_to_main && (
+                          <span className="krowe-chip krowe-chip-delivery-git" style={{ alignSelf: "flex-start" }}>
+                            <GitBranch width={10} height={10} />
+                            → main
+                          </span>
+                        )}
+                        {isUrl ? (
+                          <a
+                            href={note}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="krowe-chip krowe-chip-delivery-live"
+                            style={{ alignSelf: "flex-start" }}
+                          >
+                            <ExternalLink width={10} height={10} />
+                            Live — {note}
+                          </a>
+                        ) : note ? (
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted-foreground)" }}>
+                            {note}
+                          </span>
+                        ) : null}
+                        {deliverables.map((att) => {
+                          const ext = (att.file_name.split(".").pop() ?? "file").toUpperCase();
+                          return (
+                            <span key={att.id} className="krowe-chip krowe-chip-delivery-file" style={{ alignSelf: "flex-start" }}>
+                              <Paperclip width={10} height={10} />
+                              {ext} — {att.file_name}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </dd>
+                  </>
+                );
+              })()}
 
               {role === "builder" && (
                 <>
@@ -196,7 +184,7 @@ export function TaskDetailSheet({
                   <dd>
                     <InlineToggle
                       value={task.operator_visible}
-                      onToggle={async (v) => { await toggleVisibility(task.id, v); }}
+                      onToggle={(v) => toggleVisibility(task.id, v)}
                       trueLabel="Visible to operator"
                       falseLabel="Hidden from operator"
                       trueBadgeVariant="secondary"
@@ -220,6 +208,7 @@ export function TaskDetailSheet({
             <TaskAttachments
               key={`att-${task.id}`}
               taskId={task.id}
+              role={role}
               currentUserId={currentUserId}
               initial={(task.task_attachments ?? []).filter((a) => !a.is_deliverable)}
               isDeliverable={false}

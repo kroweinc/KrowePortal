@@ -1,13 +1,15 @@
 import { cookies } from "next/headers";
-import { ROLE_SWITCHER_ENABLED, DEV_ROLE_COOKIE } from "@/lib/auth-shared";
+import { redirect } from "next/navigation";
+import { DEV_TOGGLE_ENABLED, DEV_ROLE_COOKIE } from "@/lib/auth";
 
 export async function POST(request: Request) {
-  if (!ROLE_SWITCHER_ENABLED) {
+  if (!DEV_TOGGLE_ENABLED) {
     return new Response(null, { status: 404 });
   }
 
-  const body = await request.json().catch(() => ({}));
-  const role = body.role === "builder" ? "builder" : "operator";
+  const form = await request.formData();
+  const next = form.get("role");
+  const role = next === "builder" ? "builder" : "operator";
 
   const cookieStore = await cookies();
   cookieStore.set(DEV_ROLE_COOKIE, role, {
@@ -17,5 +19,5 @@ export async function POST(request: Request) {
     maxAge: 60 * 60 * 24 * 30,
   });
 
-  return Response.json({ ok: true });
+  redirect("/");
 }

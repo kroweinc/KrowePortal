@@ -12,6 +12,7 @@ async function getClient(profileId: string) {
 }
 
 const createTaskSchema = z.object({
+  engagement_id: z.string().uuid().optional(),
   title: z.string().min(1).max(300),
   description: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
@@ -21,7 +22,9 @@ export async function createTask(formData: FormData) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
 
+  const rawEngagementId = formData.get("engagement_id");
   const parsed = createTaskSchema.safeParse({
+    engagement_id: rawEngagementId || undefined,
     title: formData.get("title"),
     description: formData.get("description") || undefined,
     priority: formData.get("priority") || undefined,
@@ -30,21 +33,13 @@ export async function createTask(formData: FormData) {
   if (!parsed.success) return { error: "Invalid input" };
 
   const supabase = await getClient(profile.id);
-
-  // Attach to the user's engagement if one exists so builder + operator share the task
-  const { data: eng } = await supabase
-    .from("engagements")
-    .select("id")
-    .or(`builder_id.eq.${profile.id},operator_id.eq.${profile.id}`)
-    .maybeSingle();
-
   const { data, error } = await supabase.from("tasks").insert({
+    engagement_id: parsed.data.engagement_id ?? null,
     title: parsed.data.title,
     description: parsed.data.description ?? null,
     priority: parsed.data.priority,
     source: profile.role === "operator" ? "operator_request" : "builder_added",
     created_by: profile.id,
-    engagement_id: eng?.id ?? null,
   }).select("id").single();
 
   if (error) return { error: error.message };

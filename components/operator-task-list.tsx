@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
+import { DeliveryChips } from "@/components/design-atoms";
 import { deleteTask } from "@/lib/actions/tasks";
 import { sortByPriority } from "@/lib/utils";
 import type { Task } from "@/lib/types";
@@ -87,6 +88,7 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
                     {task.description && (
                       <p className="krowe-op-card-desc">{task.description}</p>
                     )}
+                    <DeliveryChips task={task} />
                     <div className="krowe-op-card-foot">
                       <span className={`krowe-chip krowe-chip-source ${sourceLabel(task)}`}>
                         {sourceLabel(task)}
@@ -112,6 +114,7 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
       </div>
       <TaskDetailSheet
         task={selectedTask}
+        role="operator"
         currentUserId={currentUserId}
         onOpenChange={(open) => !open && syncSelected(null)}
       />

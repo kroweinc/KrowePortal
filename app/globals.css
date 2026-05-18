@@ -373,6 +373,24 @@ button:focus-visible {
 
 .krowe-chip-approval { background: var(--success-soft); color: var(--success); }
 
+/* ── Delivery chips (shown on done tasks) ── */
+.krowe-delivery-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding-top: 6px;
+}
+.krowe-chip-delivery-live {
+  background: color-mix(in srgb, #059669 10%, white); color: #047857;
+  border-color: color-mix(in srgb, #059669 20%, transparent); text-decoration: none;
+}
+.krowe-chip-delivery-live:hover { background: color-mix(in srgb, #059669 16%, white); }
+.krowe-chip-delivery-git {
+  background: color-mix(in srgb, #6366f1 10%, white); color: #4338ca;
+  border-color: color-mix(in srgb, #6366f1 20%, transparent); font-family: var(--font-mono);
+}
+.krowe-chip-delivery-file {
+  background: var(--primary-soft); color: color-mix(in srgb, var(--primary) 90%, black);
+  border-color: color-mix(in srgb, var(--primary) 20%, transparent); font-family: var(--font-mono);
+}
+
 /* ── Icon buttons ── */
 .krowe-iconbtn {
   background: none; border: 1px solid transparent; color: var(--muted-foreground);

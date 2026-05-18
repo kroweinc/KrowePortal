@@ -1,27 +1,13 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { PENDING_INVITE_COOKIE } from "@/lib/auth-shared";
-import { validatePendingInvite } from "@/lib/invitations";
 import { OnboardingForm } from "./onboarding-form";
 
 export default async function OnboardingPage() {
   const profile = await getCurrentProfile();
 
-  // Already onboarded
   if (profile?.role) {
     redirect(profile.role === "operator" ? "/o" : "/b");
-  }
-
-  // If the visitor has a pending invite cookie, send them to the invite page
-  // instead of writing role="builder". This covers the case where they
-  // drifted to /onboarding after the OAuth round-trip dropped next=/join/<token>.
-  const cookieStore = await cookies();
-  const inviteToken = cookieStore.get(PENDING_INVITE_COOKIE)?.value;
-  const validToken = await validatePendingInvite(inviteToken);
-  if (validToken) {
-    redirect(`/join/${validToken}`);
   }
 
   const supabase = await createClient();

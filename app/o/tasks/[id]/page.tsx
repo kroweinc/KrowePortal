@@ -40,7 +40,7 @@ export default async function OperatorTaskDetail({
   const [{ data }, { data: attachmentRows }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("*")
+      .select("*, engagement:engagements(*)")
       .eq("id", id)
       .single(),
     supabase
@@ -96,6 +96,7 @@ export default async function OperatorTaskDetail({
 
           <TaskAttachments
             taskId={task.id}
+            role="operator"
             currentUserId={profile.id}
             initial={attachments}
           />
