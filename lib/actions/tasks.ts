@@ -117,6 +117,40 @@ export async function markTaskDone(
   return { success: true };
 }
 
+const markForApprovalSchema = z.object({
+  taskId: z.string().uuid(),
+  note: z.string().trim().max(2000).nullish(),
+});
+
+export async function markTaskForApproval(
+  taskId: string,
+  payload: { note: string | null }
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsed = markForApprovalSchema.safeParse({ taskId, ...payload });
+  if (!parsed.success) return { error: "Invalid input" };
+
+  const now = new Date().toISOString();
+  const updates: Record<string, string | null> = {
+    status: "blocked",
+    approval_sent_at: now,
+    updated_at: now,
+  };
+  if (parsed.data.note) {
+    updates.completion_note = parsed.data.note;
+  }
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/b");
+  revalidatePath("/o");
+  return { success: true };
+}
+
 export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");

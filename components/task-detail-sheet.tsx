@@ -184,7 +184,7 @@ export function TaskDetailSheet({ task, role, currentUserId, engagementTitle, on
                   <dd>
                     <InlineToggle
                       value={task.operator_visible}
-                      onToggle={(v) => toggleVisibility(task.id, v)}
+                      onToggle={async (v) => { await toggleVisibility(task.id, v); }}
                       trueLabel="Visible to operator"
                       falseLabel="Hidden from operator"
                       trueBadgeVariant="secondary"

@@ -56,6 +56,8 @@ export interface Task {
   pushed_to_main: boolean;
   completion_note: string | null;
   completed_at: string | null;
+  approval_sent_at: string | null;
+  approval_approved_at: string | null;
   engagement?: Engagement;
   task_attachments?: TaskAttachment[];
 }
