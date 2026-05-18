@@ -27,37 +27,44 @@ export default async function OperatorDashboard() {
   const engagementList = (engagements ?? []) as Engagement[];
   const engagementIds = engagementList.map((e) => e.id);
 
-  let tasks: Task[] = [];
   const filter = engagementIds.length > 0
     ? `engagement_id.in.(${engagementIds.join(",")}),engagement_id.is.null`
     : "engagement_id.is.null";
+
   const { data } = await supabase
     .from("tasks")
     .select("*, task_attachments(*, uploader:profiles!uploaded_by(id, display_name, role))")
     .or(filter)
     .order("created_at", { ascending: false });
-  tasks = (data ?? []) as Task[];
 
+  const tasks = (data ?? []) as Task[];
   const firstEngagement = engagementList[0];
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="krowe-app">
       <Nav profile={profile} />
-      <main className="mx-auto max-w-3xl px-6 py-10 space-y-8">
-        <div>
-          <h2 className="text-xl font-semibold text-neutral-900">Your Tasks</h2>
-          {firstEngagement && (
-            <p className="mt-0.5 text-sm text-neutral-400">
-              {firstEngagement.title}
-            </p>
-          )}
+      <main className="krowe-page">
+        <div className="krowe-page-inner" style={{ maxWidth: 960 }}>
+          <div className="krowe-page-head">
+            <div>
+              <h1 className="krowe-page-title">Your Tasks</h1>
+              <div className="krowe-page-sub">
+                <span>{engagementList.length} engagement{engagementList.length !== 1 ? "s" : ""}</span>
+                <span className="sep">·</span>
+                <span>{tasks.length} task{tasks.length !== 1 ? "s" : ""}</span>
+                <span className="sep">·</span>
+                <span style={{ fontStyle: "italic", textTransform: "none", letterSpacing: "normal" }}>
+                  Here&apos;s what your builder is working on.
+                </span>
+              </div>
+            </div>
+          </div>
+          <DoneDeliverableProvider>
+            <Suspense>
+              <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
+            </Suspense>
+          </DoneDeliverableProvider>
         </div>
-
-        <DoneDeliverableProvider>
-          <Suspense>
-            <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
-          </Suspense>
-        </DoneDeliverableProvider>
       </main>
       <NewTaskForm
         engagementId={firstEngagement?.id}
