@@ -36,6 +36,7 @@ export interface Engagement {
   builder_id: string;
   title: string;
   created_at: string;
+  operator?: { display_name: string | null };
 }
 
 export interface Task {

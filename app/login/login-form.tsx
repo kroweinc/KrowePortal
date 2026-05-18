@@ -1,68 +1,47 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
 
+const ERROR_MESSAGES: Record<string, string> = {
+  auth_failed: "Sign-in failed. Please try again.",
+};
+
 export function LoginForm() {
-  const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const urlError = searchParams.get("error");
   const [isPending, startTransition] = useTransition();
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  const displayError = urlError
+    ? (ERROR_MESSAGES[urlError] ?? "Something went wrong. Please try again.")
+    : null;
+
+  function handleGoogleSignIn() {
     startTransition(async () => {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: `${location.origin}/auth/callback` },
+      const next = searchParams.get("next") ?? "/";
+      await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+          queryParams: { access_type: "offline", prompt: "consent" },
+        },
       });
-      if (error) {
-        setError(error.message);
-      } else {
-        setSent(true);
-      }
     });
   }
 
-  if (sent) {
-    return (
-      <div className="rounded-lg border border-neutral-200 bg-white p-6 text-center shadow-sm">
-        <p className="text-sm text-neutral-700">
-          Check <strong>{email}</strong> for a magic link.
-        </p>
-        <p className="mt-1 text-xs text-neutral-400">
-          You can close this tab — click the link in your email to sign in.
-        </p>
-      </div>
-    );
-  }
-
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm space-y-4"
-    >
-      <div>
-        <label htmlFor="email" className="block text-xs font-medium text-neutral-700 mb-1">
-          Email address
-        </label>
-        <Input
-          id="email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="you@example.com"
-          required
-          autoFocus
-        />
-      </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
-      <Button type="submit" className="w-full" disabled={isPending}>
-        {isPending ? "Sending…" : "Send magic link"}
+    <div className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm space-y-4">
+      {displayError && <p className="text-xs text-red-600">{displayError}</p>}
+      <Button
+        onClick={handleGoogleSignIn}
+        disabled={isPending}
+        className="w-full"
+      >
+        {isPending ? "Redirecting…" : "Continue with Google"}
       </Button>
-    </form>
+    </div>
   );
 }

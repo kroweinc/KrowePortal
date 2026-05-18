@@ -2,7 +2,9 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 
-export const DEV_TOGGLE_ENABLED = process.env.NODE_ENV !== "production";
+export const DEV_TOGGLE_ENABLED =
+  process.env.NODE_ENV !== "production" &&
+  process.env.NEXT_PUBLIC_ENABLE_ROLE_SWITCHER !== "false";
 export const DEV_ROLE_COOKIE = "dev_role";
 export const DEV_PROFILE_IDS = new Set([
   "00000000-0000-0000-0000-000000000001",

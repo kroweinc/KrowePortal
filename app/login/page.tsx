@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { LoginForm } from "./login-form";
 
 export default function LoginPage() {
@@ -9,10 +10,12 @@ export default function LoginPage() {
             Krowe Portal
           </h1>
           <p className="mt-1 text-sm text-neutral-500">
-            Sign in with your email — we&apos;ll send a magic link.
+            Sign in to Krowe Portal with your Google account.
           </p>
         </div>
-        <LoginForm />
+        <Suspense>
+          <LoginForm />
+        </Suspense>
       </div>
     </main>
   );

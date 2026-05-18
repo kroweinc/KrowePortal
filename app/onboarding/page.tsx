@@ -1,14 +1,21 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
 import { OnboardingForm } from "./onboarding-form";
 
 export default async function OnboardingPage() {
   const profile = await getCurrentProfile();
 
-  // Already onboarded
   if (profile?.role) {
     redirect(profile.role === "operator" ? "/o" : "/b");
   }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const fullName =
+    (user?.user_metadata?.full_name as string | undefined) ??
+    (user?.user_metadata?.name as string | undefined) ??
+    "";
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-neutral-50 px-4">
@@ -19,7 +26,7 @@ export default async function OnboardingPage() {
           </h1>
           <p className="mt-1 text-sm text-neutral-500">Tell us who you are to get started.</p>
         </div>
-        <OnboardingForm />
+        <OnboardingForm defaultName={fullName} />
       </div>
     </main>
   );
