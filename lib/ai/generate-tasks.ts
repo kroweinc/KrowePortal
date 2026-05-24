@@ -1,15 +1,13 @@
 import { openai, AI_MODEL } from "./client";
-import { GenerationResult, SubtasksOnlyResult } from "./schemas";
-import { buildSystemPrompt, buildUserPrompt } from "./prompts";
+import { TaskGenerationResult, TaskOnlyResult } from "./schemas";
+import { buildTaskSystemPrompt, buildTaskUserPrompt } from "./prompts";
 import type { RepoContext } from "@/lib/github/types";
-import type { Task, TaskAttachment } from "@/lib/types";
 import { runWithTools, type RepoToolContext } from "@/lib/github/ai-tools";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 
 interface GenerateInput {
-  task: Pick<Task, "title" | "description">;
+  rawDescription: string;
   repoContext: RepoContext | null;
-  attachments?: Pick<TaskAttachment, "text_content">[];
   answers?: { questionId: string; answer: string }[];
   toolContext?: RepoToolContext;
 }
@@ -52,7 +50,7 @@ async function callOpenAI(
     responseFormat: { type: "json_object" },
   });
 
-  console.log("[generateSubtasks] tool loop", {
+  console.log("[generateTask] tool loop", {
     repo: `${toolContext.owner}/${toolContext.repo}`,
     ...result.telemetry,
   });
@@ -60,14 +58,14 @@ async function callOpenAI(
   return result.content;
 }
 
-export async function generateSubtasks(input: GenerateInput): Promise<GenerationResult> {
-  const { task, repoContext, attachments = [], answers, toolContext } = input;
-  const forceSubtasks = (answers?.length ?? 0) > 0;
-  const schema = forceSubtasks ? SubtasksOnlyResult : GenerationResult;
-  const systemPrompt = buildSystemPrompt(repoContext, { forceSubtasks });
-  const userPrompt = buildUserPrompt(task, attachments, answers);
+export async function generateTask(input: GenerateInput): Promise<TaskGenerationResult> {
+  const { rawDescription, repoContext, answers, toolContext } = input;
+  const forceTask = (answers?.length ?? 0) > 0;
+  const schema = forceTask ? TaskOnlyResult : TaskGenerationResult;
+  const systemPrompt = buildTaskSystemPrompt(repoContext, { forceTask });
+  const userPrompt = buildTaskUserPrompt(rawDescription, answers);
 
-  let raw = await callOpenAI(systemPrompt, userPrompt, 1024, toolContext);
+  let raw = await callOpenAI(systemPrompt, userPrompt, 1500, toolContext);
 
   let parsed: unknown;
   try {
@@ -77,13 +75,13 @@ export async function generateSubtasks(input: GenerateInput): Promise<Generation
   }
 
   const result = schema.safeParse(parsed);
-  if (result.success) return result.data as GenerationResult;
+  if (result.success) return result.data as TaskGenerationResult;
 
   const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
   raw = await callOpenAIOneShot(
     systemPrompt,
     `${userPrompt}\n\nYour previous response did not match the required schema. Errors: ${errorDesc}\nPlease try again.`,
-    1024
+    1500
   );
 
   try {
@@ -96,5 +94,5 @@ export async function generateSubtasks(input: GenerateInput): Promise<Generation
   if (!retryResult.success) {
     throw new Error("AI response validation failed after retry");
   }
-  return retryResult.data as GenerationResult;
+  return retryResult.data as TaskGenerationResult;
 }

@@ -1,9 +1,13 @@
 export type RepoContext = {
   fullName: string;
+  owner: string;
+  repo: string;
   defaultBranch: string;
   description: string | null;
   readmeExcerpt: string;
   topLevelTree: string[];
+  fileManifest: string[];
+  manifestTruncated: boolean;
   languages: { name: string; pct: number }[];
   recentCommits: { sha: string; message: string; date: string }[];
   degraded: string[];

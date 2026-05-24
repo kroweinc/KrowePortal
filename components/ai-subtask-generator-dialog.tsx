@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useRef } from "react";
 import { Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,10 +18,17 @@ import {
 import type { Subtask } from "@/lib/types";
 import type { Question, SubtaskDraft } from "@/lib/ai/schemas";
 
+const OTHER = "__other__";
+
 type DialogState =
   | { kind: "idle" }
   | { kind: "loading" }
-  | { kind: "questions"; items: Question[]; answers: Record<string, string> }
+  | {
+      kind: "questions";
+      items: Question[];
+      selections: Record<string, string>;
+      otherText: Record<string, string>;
+    }
   | { kind: "drafts"; items: SubtaskDraft[]; selected: Set<number>; edited: Record<number, string> }
   | { kind: "accepting" };
 
@@ -34,14 +41,19 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<DialogState>({ kind: "idle" });
   const [isPending, startTransition] = useTransition();
+  const askedOnceRef = useRef(false);
 
   function openDialog() {
+    askedOnceRef.current = false;
     setState({ kind: "idle" });
     setOpen(true);
   }
 
   function handleOpenChange(next: boolean) {
-    if (!next) setState({ kind: "idle" });
+    if (!next) {
+      askedOnceRef.current = false;
+      setState({ kind: "idle" });
+    }
     setOpen(next);
   }
 
@@ -57,10 +69,17 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
       }
 
       if (result.kind === "questions") {
+        if (askedOnceRef.current) {
+          toast.error("Couldn't break this task down — try adding more detail to the task description and run again.");
+          setState({ kind: "idle" });
+          return;
+        }
+        askedOnceRef.current = true;
         setState({
           kind: "questions",
           items: result.items,
-          answers: Object.fromEntries(result.items.map((q) => [q.id, ""])),
+          selections: Object.fromEntries(result.items.map((q) => [q.id, ""])),
+          otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
         });
       } else {
         setState({
@@ -73,14 +92,24 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
     });
   }
 
+  function answerFor(q: Question, selections: Record<string, string>, otherText: Record<string, string>): string {
+    const sel = selections[q.id] ?? "";
+    if (sel === OTHER) return (otherText[q.id] ?? "").trim();
+    return sel;
+  }
+
   function submitAnswers() {
     if (state.kind !== "questions") return;
     const answers = state.items.map((q) => ({
       questionId: q.id,
-      answer: state.answers[q.id] ?? "",
+      answer: answerFor(q, state.selections, state.otherText),
     }));
     generate(answers);
   }
+
+  const questionsReady =
+    state.kind === "questions" &&
+    state.items.every((q) => answerFor(q, state.selections, state.otherText).length > 0);
 
   function accept() {
     if (state.kind !== "drafts") return;
@@ -125,7 +154,7 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
       </Button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] flex flex-col" aria-describedby={undefined}>
           {state.kind === "idle" && (
             <>
               <DialogHeader>
@@ -160,32 +189,86 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
               <DialogHeader>
                 <DialogTitle>A few questions first</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4 px-6 py-4">
-                {state.items.map((q) => (
-                  <div key={q.id} className="space-y-1.5">
-                    <label className="text-sm font-medium text-neutral-800">{q.text}</label>
-                    {q.hint && (
-                      <p className="text-xs text-neutral-400">e.g. {q.hint}</p>
-                    )}
-                    <textarea
-                      rows={2}
-                      value={state.answers[q.id] ?? ""}
-                      onChange={(e) =>
-                        setState((prev) =>
-                          prev.kind === "questions"
-                            ? { ...prev, answers: { ...prev.answers, [q.id]: e.target.value } }
-                            : prev
-                        )
-                      }
-                      placeholder="Your answer…"
-                      className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 outline-none focus:border-neutral-400 resize-none"
-                    />
-                  </div>
-                ))}
+              <div className="space-y-5 px-6 py-4 flex-1 min-h-0 overflow-y-auto">
+                {state.items.map((q) => {
+                  const selected = state.selections[q.id] ?? "";
+                  return (
+                    <div key={q.id} className="space-y-2">
+                      <p className="text-sm font-medium text-neutral-800">{q.text}</p>
+                      <div className="space-y-1.5">
+                        {q.options.map((opt) => (
+                          <label
+                            key={opt}
+                            className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition ${
+                              selected === opt
+                                ? "border-neutral-700 bg-neutral-50 text-neutral-900"
+                                : "border-neutral-200 text-neutral-700 hover:border-neutral-300"
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name={q.id}
+                              value={opt}
+                              checked={selected === opt}
+                              onChange={() =>
+                                setState((prev) =>
+                                  prev.kind === "questions"
+                                    ? { ...prev, selections: { ...prev.selections, [q.id]: opt } }
+                                    : prev
+                                )
+                              }
+                              className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700"
+                            />
+                            <span className="leading-snug">{opt}</span>
+                          </label>
+                        ))}
+                        <label
+                          className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition ${
+                            selected === OTHER
+                              ? "border-neutral-700 bg-neutral-50 text-neutral-900"
+                              : "border-neutral-200 text-neutral-700 hover:border-neutral-300"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={q.id}
+                            value={OTHER}
+                            checked={selected === OTHER}
+                            onChange={() =>
+                              setState((prev) =>
+                                prev.kind === "questions"
+                                  ? { ...prev, selections: { ...prev.selections, [q.id]: OTHER } }
+                                  : prev
+                              )
+                            }
+                            className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700"
+                          />
+                          <span className="leading-snug">Other (specify)</span>
+                        </label>
+                        {selected === OTHER && (
+                          <textarea
+                            rows={2}
+                            autoFocus
+                            value={state.otherText[q.id] ?? ""}
+                            onChange={(e) =>
+                              setState((prev) =>
+                                prev.kind === "questions"
+                                  ? { ...prev, otherText: { ...prev.otherText, [q.id]: e.target.value } }
+                                  : prev
+                              )
+                            }
+                            placeholder="Type your answer…"
+                            className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 outline-none focus:border-neutral-400 resize-none"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setState({ kind: "idle" })}>Back</Button>
-                <Button onClick={submitAnswers} disabled={isLoading}>
+                <Button onClick={submitAnswers} disabled={isLoading || !questionsReady}>
                   {isLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1.5 h-3.5 w-3.5" />}
                   Generate subtasks
                 </Button>
@@ -198,7 +281,7 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
               <DialogHeader>
                 <DialogTitle>Proposed subtasks</DialogTitle>
               </DialogHeader>
-              <div className="space-y-1 px-6 py-4">
+              <div className="space-y-1 px-6 py-4 flex-1 min-h-0 overflow-y-auto">
                 <p className="mb-3 text-xs text-neutral-500">
                   Uncheck or edit any subtask before adding. All are selected by default.
                 </p>

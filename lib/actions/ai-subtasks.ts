@@ -4,21 +4,13 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { generateSubtasks } from "@/lib/ai/generate-subtasks";
-import { buildRepoContext } from "@/lib/github/repo-context";
-import { getUserGithubToken } from "@/lib/github/token";
+import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import type { Subtask } from "@/lib/types";
 import type { GenerationResult } from "@/lib/ai/schemas";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
 }
-
-type EngagementWithRepo = {
-  github_repo_owner: string | null;
-  github_repo_name: string | null;
-  github_repo_full_name: string | null;
-  github_default_branch: string | null;
-};
 
 export async function generateSubtaskDrafts(input: {
   taskId: string;
@@ -31,13 +23,7 @@ export async function generateSubtaskDrafts(input: {
 
   const { data: task, error: taskError } = await supabase
     .from("tasks")
-    .select(
-      `id, title, description, engagement_id,
-       engagements:engagement_id (
-         github_repo_owner, github_repo_name,
-         github_repo_full_name, github_default_branch
-       )`
-    )
+    .select("id, title, description, engagement_id")
     .eq("id", input.taskId)
     .single();
 
@@ -49,31 +35,13 @@ export async function generateSubtaskDrafts(input: {
     .eq("task_id", input.taskId)
     .eq("attachment_type", "text");
 
-  const engagement = Array.isArray(task.engagements)
-    ? (task.engagements[0] as EngagementWithRepo | undefined)
-    : (task.engagements as EngagementWithRepo | null);
+  const { repoContext, toolContext, source } = await resolveRepoForGeneration({
+    profileId: profile.id,
+    engagementId: task.engagement_id,
+    logPrefix: "[generateSubtaskDrafts]",
+  });
 
-  let repoContext = null;
-
-  if (
-    engagement?.github_repo_owner &&
-    engagement?.github_repo_name &&
-    engagement?.github_default_branch
-  ) {
-    const token = await getUserGithubToken(profile.id);
-    if (token) {
-      try {
-        repoContext = await buildRepoContext(
-          token,
-          engagement.github_repo_owner,
-          engagement.github_repo_name,
-          engagement.github_default_branch
-        );
-      } catch {
-        // non-fatal — fall through to task-only generation
-      }
-    }
-  }
+  console.log("[generateSubtaskDrafts] mode:", toolContext ? `tool-loop (${source})` : "one-shot");
 
   try {
     const result = await generateSubtasks({
@@ -81,6 +49,7 @@ export async function generateSubtaskDrafts(input: {
       repoContext,
       attachments: attachments ?? [],
       answers: input.answers,
+      toolContext,
     });
     return result;
   } catch (err) {

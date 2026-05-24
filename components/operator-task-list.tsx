@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { TaskCard } from "@/components/task-card";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
+import { PlainEnglishProvider } from "@/components/plain-english-context";
 import { sortByPriority } from "@/lib/utils";
 import type { Task } from "@/lib/types";
 
@@ -52,7 +53,7 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
   }, {} as Record<string, Task[]>);
 
   return (
-    <>
+    <PlainEnglishProvider>
       <div className="space-y-8">
         {STATUS_ORDER.map((status) => {
           const group = grouped[status];
@@ -82,6 +83,6 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
         currentUserId={currentUserId}
         onOpenChange={(open) => !open && syncSelected(null)}
       />
-    </>
+    </PlainEnglishProvider>
   );
 }

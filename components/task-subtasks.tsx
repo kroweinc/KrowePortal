@@ -12,15 +12,17 @@ import {
   reorderSubtasks,
 } from "@/lib/actions/subtasks";
 import { AiSubtaskGeneratorDialog } from "@/components/ai-subtask-generator-dialog";
-import type { Subtask } from "@/lib/types";
+import { usePlainEnglish } from "@/components/plain-english-context";
+import type { Subtask, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface TaskSubtasksProps {
   taskId: string;
   initial?: Subtask[];
+  task?: Task;
 }
 
-export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
+export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) {
   const [subtasks, setSubtasks] = useState<Subtask[]>(initial);
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -29,6 +31,7 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
   const [isPending, startTransition] = useTransition();
   const addInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const { enabled: plainEnabled, getSubtaskView, registerSubtasks } = usePlainEnglish();
 
   const dragSrcIndex = useRef<number | null>(null);
   const [dropLineIndex, setDropLineIndex] = useState<number | null>(null);
@@ -42,6 +45,13 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
       })
       .catch(() => {});
   }, [taskId, initial.length]);
+
+  useEffect(() => {
+    if (!plainEnabled || !task || subtasks.length === 0) return;
+    const real = subtasks.filter((s) => !s.id.startsWith("temp-"));
+    if (real.length === 0) return;
+    registerSubtasks(task, real);
+  }, [plainEnabled, task, subtasks, registerSubtasks]);
 
   useEffect(() => {
     if (adding) addInputRef.current?.focus();
@@ -281,7 +291,7 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
                         : "text-neutral-700"
                     )}
                   >
-                    {subtask.title}
+                    {getSubtaskView(subtask).title}
                   </button>
                 )}
 
