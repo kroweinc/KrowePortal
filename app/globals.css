@@ -27,9 +27,18 @@
   /* Warm neutrals — oklch hue 60. Never cold gray. */
   --background:       oklch(99% 0.003 60);
   --surface-subtle:   oklch(98% 0.005 60);
+  --surface-sunken:   oklch(96.5% 0.006 60);
   --foreground:       oklch(20% 0.01 60);
   --muted-foreground: oklch(50% 0.01 60);
+  --faint-foreground: oklch(64% 0.008 60);
   --border:           oklch(92% 0.005 60);
+  --border-strong:    oklch(86% 0.006 60);
+
+  /* Role accents */
+  --builder-text:   #1d4ed8;
+  --builder-soft:   color-mix(in srgb, #3b82f6 12%, white);
+  --operator-text:  #6d28d9;
+  --operator-soft:  color-mix(in srgb, #8b5cf6 12%, white);
 
   /* Semantic */
   --success:      #15803d;
@@ -630,3 +639,422 @@ button:focus-visible {
   background-repeat: repeat;
 }
 .krowe-sunrise { background: var(--sunrise-gradient) !important; }
+
+/* ============================================================
+   TASK DETAIL SHEET — Redesigned sidebar (Krowe brand)
+   ============================================================ */
+
+/* SheetContent overrides */
+.krowe-task-sheet {
+  background: var(--background) !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  max-width: min(560px, 96vw) !important;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sticky topbar inside the sheet */
+.krowe-task-sheet-topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  flex-shrink: 0;
+}
+.krowe-task-crumb {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--muted-foreground);
+  min-width: 0;
+}
+.krowe-task-crumb .sep { color: var(--border-strong); }
+.krowe-task-crumb .id {
+  font-family: var(--font-mono); font-size: 11.5px;
+  background: var(--surface-subtle); color: var(--faint-foreground);
+  padding: 2px 7px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); letter-spacing: 0.02em;
+}
+.krowe-task-crumb .engage {
+  color: var(--foreground); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.krowe-task-sheet-actions { display: flex; align-items: center; gap: 2px; }
+.krowe-task-iconbtn {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none; border-radius: var(--radius-md);
+  color: var(--muted-foreground); cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-task-iconbtn:hover { background: var(--surface-subtle); color: var(--foreground); }
+.krowe-task-iconbtn.danger:hover { color: var(--danger); background: var(--danger-soft); }
+
+/* Scrollable body */
+.krowe-task-sheet-body {
+  flex: 1; overflow-y: auto;
+  padding: 22px 24px;
+  display: flex; flex-direction: column; gap: 22px;
+  min-height: 0;
+}
+.krowe-task-sheet-body::-webkit-scrollbar { width: 10px; }
+.krowe-task-sheet-body::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 999px;
+  border: 3px solid var(--background);
+}
+
+/* Hero */
+.krowe-task-hero { padding: 4px 0 2px 0; }
+.krowe-task-hero-top {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 10px;
+}
+.krowe-status-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px 5px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11.5px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase;
+}
+.krowe-status-pill .pulse {
+  width: 7px; height: 7px; border-radius: 999px; background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: krowe-pulse 2.2s var(--ease-out-smooth) infinite;
+}
+@keyframes krowe-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-status-pill .pulse { animation: none; }
+}
+.krowe-status-pill.inbox       { background: color-mix(in srgb, var(--primary-accent) 12%, white); color: color-mix(in srgb, var(--primary-accent) 68%, black); }
+.krowe-status-pill.in_progress { background: color-mix(in srgb, var(--primary) 12%, white);        color: var(--primary-hover); }
+.krowe-status-pill.blocked     { background: var(--warning-soft);                                  color: var(--warning); }
+.krowe-status-pill.done        { background: var(--success-soft);                                  color: var(--success); }
+
+.krowe-prio-dot {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 500; color: var(--muted-foreground);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.krowe-prio-dot .d {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--primary-accent);
+}
+.krowe-prio-dot.urgent .d { background: var(--danger);          box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, white); }
+.krowe-prio-dot.high   .d { background: var(--warning);         box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 18%, white); }
+.krowe-prio-dot.medium .d { background: var(--primary-accent);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-accent) 18%, white); }
+.krowe-prio-dot.low    .d { background: var(--success);         box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, white); }
+
+.krowe-task-hero-title {
+  font-family: var(--font-serif);
+  font-size: 30px; line-height: 1.18;
+  letter-spacing: -0.012em; color: var(--foreground);
+  margin: 4px 0 6px 0;
+  text-wrap: pretty;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.krowe-task-hero-title .ember { flex-shrink: 0; margin-top: 8px; }
+.krowe-task-hero-title-text { flex: 1; min-width: 0; }
+
+/* Override Inline* default text styling when used inside the hero title */
+.krowe-hero-inline-title,
+button.krowe-hero-inline-title,
+span.krowe-hero-inline-title {
+  font-family: var(--font-serif);
+  font-size: 30px; line-height: 1.18;
+  letter-spacing: -0.012em;
+  color: var(--foreground);
+  padding: 0; margin: 0;
+}
+button.krowe-hero-inline-title:hover {
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+
+/* Override Inline* default text styling when used inside the description block */
+.krowe-desc-inline-text,
+button.krowe-desc-inline-text,
+p.krowe-desc-inline-text {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--foreground);
+  padding: 0; margin: 0;
+  background: transparent;
+}
+button.krowe-desc-inline-text:hover {
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
+}
+
+/* Status pipeline (4-step stepper) */
+.krowe-pipeline {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 6px;
+}
+.krowe-pipe-step {
+  position: relative;
+  padding: 10px 8px 9px;
+  border-radius: var(--radius-md);
+  text-align: center;
+  font-size: 11.5px; font-weight: 500;
+  color: var(--faint-foreground);
+  background: none; border: none;
+  cursor: pointer;
+  transition: all var(--duration-normal) var(--ease-out-smooth);
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+}
+.krowe-pipe-step:hover:not(.active) { color: var(--muted-foreground); }
+.krowe-pipe-step .num {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--faint-foreground); letter-spacing: 0.04em;
+}
+.krowe-pipe-step .lbl { font-size: 12px; }
+.krowe-pipe-step.done { color: var(--success); }
+.krowe-pipe-step.done .num { color: color-mix(in srgb, var(--success) 70%, white); }
+.krowe-pipe-step.active {
+  background: white; color: var(--foreground);
+  box-shadow: var(--shadow-1), 0 0 0 1px var(--border);
+}
+.krowe-pipe-step.active .num { color: var(--primary); }
+.krowe-pipe-step.active .lbl { font-weight: 600; }
+.krowe-pipe-step:not(:last-child)::after {
+  content: ""; position: absolute; right: -2px; top: 50%;
+  width: 4px; height: 4px; border-radius: 999px;
+  background: var(--border-strong); transform: translateY(-50%);
+}
+.krowe-pipe-step.done:not(:last-child)::after { background: var(--success); opacity: 0.6; }
+
+/* Section labels */
+.krowe-task-section { display: flex; flex-direction: column; gap: 8px; }
+.krowe-task-section-h {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.krowe-task-section-h .label {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+.krowe-task-section-h .label svg { color: var(--faint-foreground); }
+
+/* Description block (with left ember rail) */
+.krowe-task-desc {
+  font-size: 14px; line-height: 1.65;
+  color: var(--foreground);
+  padding: 14px 16px 14px 20px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  position: relative;
+}
+.krowe-task-desc::before {
+  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px;
+  width: 2px; background: var(--primary); border-radius: 999px;
+  opacity: 0.7;
+}
+.krowe-task-desc-empty {
+  color: var(--faint-foreground);
+  font-family: var(--font-serif); font-style: italic;
+  font-size: 14px;
+}
+
+/* Meta card — compact 2-column grid (rev) */
+.krowe-meta-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.krowe-meta-cell {
+  padding: 9px 14px;
+  display: flex; flex-direction: column; gap: 3px;
+  position: relative; min-width: 0;
+}
+.krowe-meta-cell:nth-child(odd) { border-right: 1px solid var(--border); }
+.krowe-meta-cell:nth-child(n+3) { border-top:   1px solid var(--border); }
+.krowe-meta-cell.full           { grid-column: 1 / -1; border-right: none; }
+.krowe-meta-cell .k {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--muted-foreground);
+  line-height: 1;
+}
+.krowe-meta-cell .v {
+  color: var(--foreground); font-weight: 500;
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; min-width: 0;
+}
+.krowe-meta-cell .v.mono  { font-family: var(--font-mono); font-size: 12px; }
+.krowe-meta-cell .v.muted { color: var(--muted-foreground); font-weight: 400; }
+.krowe-meta-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: var(--radius-full);
+  font-size: 11px; font-weight: 500;
+}
+.krowe-meta-badge.builder  { background: var(--builder-soft);  color: var(--builder-text); }
+.krowe-meta-badge.operator { background: var(--operator-soft); color: var(--operator-text); }
+
+/* Subtasks card */
+.krowe-subs-card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.krowe-subs-h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+  gap: 12px;
+}
+.krowe-subs-progress { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.krowe-subs-meta { font-size: 11.5px; color: var(--muted-foreground); margin: 2px 0 0; }
+.krowe-subs-meta strong { color: var(--foreground); font-weight: 600; }
+.krowe-subs-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+.krowe-progress-ring { position: relative; flex-shrink: 0; }
+.krowe-progress-ring svg { transform: rotate(-90deg); display: block; }
+.krowe-progress-ring .track { stroke: var(--border); }
+.krowe-progress-ring .fill  { stroke: var(--primary); transition: stroke-dashoffset 380ms cubic-bezier(0.16, 1, 0.3, 1); }
+.krowe-progress-ring .pct {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  color: var(--foreground);
+}
+
+.krowe-sub-list { list-style: none; padding: 4px; margin: 0; }
+.krowe-sub-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: var(--radius-md);
+  font-size: 13.5px; color: var(--foreground);
+  transition: background 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+.krowe-sub-item:hover { background: var(--surface-subtle); }
+.krowe-sub-item .grip {
+  width: 14px; color: var(--border-strong);
+  opacity: 0; transition: opacity 160ms;
+  display: inline-flex; align-items: center; cursor: grab;
+  flex-shrink: 0;
+}
+.krowe-sub-item:hover .grip { opacity: 1; }
+.krowe-sub-item .grip:active { cursor: grabbing; }
+.krowe-sub-item .check {
+  width: 18px; height: 18px; flex-shrink: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  background: white; color: white;
+  position: relative; cursor: pointer;
+}
+.krowe-sub-item.done .check {
+  background: var(--primary); border-color: var(--primary);
+}
+.krowe-sub-item.done .check svg { animation: krowe-scale-pop 280ms cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes krowe-scale-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+.krowe-sub-item .stext { flex: 1; line-height: 1.45; min-width: 0; }
+.krowe-sub-item.done .stext {
+  color: var(--faint-foreground);
+  text-decoration: line-through; text-decoration-thickness: 1px;
+}
+.krowe-sub-item .x {
+  width: 22px; height: 22px; border-radius: var(--radius-sm);
+  border: none; background: none; color: var(--faint-foreground);
+  opacity: 0; transition: opacity 160ms;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; cursor: pointer;
+}
+.krowe-sub-item:hover .x { opacity: 1; }
+.krowe-sub-item .x:hover { background: var(--danger-soft); color: var(--danger); }
+.krowe-sub-item .check input[type="checkbox"] {
+  position: absolute; opacity: 0; pointer-events: none;
+  width: 0; height: 0; margin: 0;
+}
+.krowe-sub-item .check:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 25%, transparent);
+}
+
+.krowe-mini-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: var(--radius-sm);
+  background: none; border: none; color: var(--muted-foreground);
+  font-size: 11.5px; font-weight: 500; cursor: pointer;
+  transition: color 160ms, background 160ms;
+}
+.krowe-mini-btn:hover { background: var(--surface-subtle); color: var(--foreground); }
+.krowe-mini-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.krowe-mini-btn.ai { color: var(--primary); }
+.krowe-mini-btn.ai:hover { background: var(--primary-soft); color: var(--primary-hover); }
+
+.krowe-sub-droplane {
+  height: 2px; border-radius: 999px;
+  background: var(--primary);
+  margin: 0 8px;
+  list-style: none;
+}
+
+/* Attachments / deliverable section frames */
+.krowe-attach-frame {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+}
+.krowe-deliverable-block {
+  background: color-mix(in srgb, var(--success) 5%, white);
+  border: 1px solid color-mix(in srgb, var(--success) 22%, var(--border));
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.krowe-deliverable-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: var(--success);
+}
+.krowe-deliverable-note { font-size: 13px; color: var(--success); line-height: 1.5; }
+
+/* Sticky footer */
+.krowe-task-sheet-footer {
+  flex-shrink: 0;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+}
+.krowe-btn-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px; border-radius: var(--radius-full);
+  font-size: 13px; font-weight: 500;
+  border: 1px solid transparent;
+  background: transparent; color: var(--foreground);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-btn-pill.primary {
+  background: var(--primary); color: var(--primary-foreground);
+  border-color: var(--primary);
+}
+.krowe-btn-pill.primary:hover {
+  background: var(--primary-hover); border-color: var(--primary-hover);
+  transform: translateY(-1px); box-shadow: var(--shadow-4);
+}
+.krowe-btn-pill.primary:active { transform: translateY(0) scale(0.98); }
+.krowe-btn-pill.primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+.krowe-btn-pill.ghost-danger {
+  color: var(--muted-foreground);
+}
+.krowe-btn-pill.ghost-danger:hover {
+  color: var(--danger); background: var(--danger-soft);
+}
+.krowe-btn-pill.ghost-danger:disabled { opacity: 0.5; cursor: not-allowed; }

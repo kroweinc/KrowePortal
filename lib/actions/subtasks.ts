@@ -4,6 +4,7 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
 import type { Subtask } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -46,6 +47,9 @@ export async function createSubtask(
     .single();
 
   if (error) return { error: error.message };
+
+  await recomputeTaskEstimate(taskId);
+
   return { subtask: data as Subtask };
 }
 
@@ -86,7 +90,10 @@ export async function updateSubtaskTitle(
   return {};
 }
 
-export async function deleteSubtask(id: string): Promise<{ error?: string }> {
+export async function deleteSubtask(
+  id: string,
+  taskId: string
+): Promise<{ error?: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
 
@@ -94,6 +101,9 @@ export async function deleteSubtask(id: string): Promise<{ error?: string }> {
   const { error } = await supabase.from("task_subtasks").delete().eq("id", id);
 
   if (error) return { error: error.message };
+
+  await recomputeTaskEstimate(taskId);
+
   return {};
 }
 

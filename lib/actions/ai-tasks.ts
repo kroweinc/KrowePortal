@@ -7,6 +7,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { generateTask } from "@/lib/ai/generate-tasks";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
+import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
+import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import type { TaskGenerationResult } from "@/lib/ai/schemas";
 import type { TaskPriority } from "@/lib/types";
 
@@ -62,13 +64,21 @@ const acceptSchema = z.object({
     description: z.string().max(2000).optional(),
     priority: z.enum(["low", "medium", "high", "urgent"]),
   }),
-  subtasks: z.array(z.object({ title: z.string().min(1).max(300) })).max(20),
+  subtasks: z
+    .array(
+      z.object({
+        title: z.string().min(1).max(300),
+        estLowMin: z.number().int().min(1).max(4800).nullable().optional(),
+        estHighMin: z.number().int().min(1).max(4800).nullable().optional(),
+      })
+    )
+    .max(20),
 });
 
 export async function acceptGeneratedTask(input: {
   engagementId?: string;
   task: { title: string; description?: string; priority: TaskPriority };
-  subtasks: { title: string }[];
+  subtasks: { title: string; estLowMin?: number | null; estHighMin?: number | null }[];
 }): Promise<{ taskId: string } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -95,6 +105,10 @@ export async function acceptGeneratedTask(input: {
 
   const taskId = taskRow.id as string;
 
+  const hasSubtaskEstimates = parsed.data.subtasks.some(
+    (s) => s.estLowMin != null && s.estHighMin != null
+  );
+
   if (parsed.data.subtasks.length > 0) {
     const rows = parsed.data.subtasks.map((s, i) => ({
       task_id: taskId,
@@ -102,12 +116,25 @@ export async function acceptGeneratedTask(input: {
       completed: false,
       position: i,
       created_by: profile.id,
+      ai_est_low_min: s.estLowMin ?? null,
+      ai_est_high_min: s.estHighMin ?? null,
     }));
 
     const { error: subtaskError } = await supabase.from("task_subtasks").insert(rows);
     if (subtaskError) {
       console.error("[acceptGeneratedTask] subtask insert failed:", subtaskError.message);
+    } else if (hasSubtaskEstimates) {
+      await recomputeTaskEstimate(taskId);
     }
+  }
+
+  if (!hasSubtaskEstimates) {
+    await estimateAndSaveTaskHours({
+      taskId,
+      title: parsed.data.task.title,
+      description: parsed.data.task.description ?? null,
+      priority: parsed.data.task.priority,
+    });
   }
 
   revalidatePath("/b");

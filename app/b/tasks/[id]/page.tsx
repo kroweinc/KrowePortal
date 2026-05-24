@@ -6,6 +6,7 @@ import { BuilderTaskActions } from "./builder-task-actions";
 import { TaskAttachments } from "@/components/task-attachments";
 import Link from "next/link";
 import type { Task, TaskAttachment } from "@/lib/types";
+import { formatHoursRange } from "@/lib/format-estimate";
 
 const STATUS_LABELS: Record<string, string> = {
   inbox: "Inbox",
@@ -80,9 +81,14 @@ export default async function BuilderTaskDetail({
               {task.operator_visible ? "Visible to operator" : "Hidden"}
             </Badge>
           </span>
-          {task.builder_estimate_hours && (
-            <span>Estimate: {task.builder_estimate_hours}h</span>
-          )}
+          {(() => {
+            const label = formatHoursRange(
+              task.builder_estimate_low_hours,
+              task.builder_estimate_high_hours,
+              task.builder_estimate_hours
+            );
+            return label ? <span>Estimate: {label}</span> : null;
+          })()}
         </div>
 
         <TaskAttachments

@@ -6,10 +6,17 @@ const Question = z.object({
   options: z.array(z.string().min(1).max(80)).min(3).max(5),
 });
 
-export const SubtaskDraft = z.object({
-  title: z.string().min(3).max(200),
-  rationale: z.string().max(300).optional(),
-});
+export const SubtaskDraft = z
+  .object({
+    title: z.string().min(3).max(200),
+    rationale: z.string().max(300).optional(),
+    estLowMin: z.number().int().min(5).max(2400),
+    estHighMin: z.number().int().min(5).max(2400),
+  })
+  .refine((d) => d.estHighMin >= d.estLowMin, {
+    message: "estHighMin must be >= estLowMin",
+    path: ["estHighMin"],
+  });
 
 export const GenerationResult = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("questions"), items: z.array(Question).min(2).max(4) }),
@@ -38,6 +45,16 @@ export const TaskOnlyResult = z.object({
   item: TaskDraft,
 });
 
+export const TaskEstimateResult = z
+  .object({
+    hoursLow: z.number().min(0.25).max(2000),
+    hoursHigh: z.number().min(0.25).max(2000),
+  })
+  .refine((d) => d.hoursHigh >= d.hoursLow, {
+    message: "hoursHigh must be >= hoursLow",
+    path: ["hoursHigh"],
+  });
+
 export const SimplifiedSubtask = z.object({
   id: z.string(),
   simpleTitle: z.string().min(1).max(300),
@@ -61,6 +78,7 @@ export type SubtaskDraft = z.infer<typeof SubtaskDraft>;
 export type TaskDraft = z.infer<typeof TaskDraft>;
 export type TaskGenerationResult = z.infer<typeof TaskGenerationResult>;
 export type TaskOnlyResult = z.infer<typeof TaskOnlyResult>;
+export type TaskEstimateResult = z.infer<typeof TaskEstimateResult>;
 export type SimplifiedSubtask = z.infer<typeof SimplifiedSubtask>;
 export type SimplifiedTask = z.infer<typeof SimplifiedTask>;
 export type SimplifyTasksResult = z.infer<typeof SimplifyTasksResult>;

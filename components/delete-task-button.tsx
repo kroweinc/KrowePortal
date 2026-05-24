@@ -9,7 +9,7 @@ import { deleteTask } from "@/lib/actions/tasks";
 interface DeleteTaskButtonProps {
   taskId: string;
   taskTitle: string;
-  variant?: "icon" | "full";
+  variant?: "icon" | "full" | "ghost";
   redirectTo?: string;
   onSuccess?: () => void;
 }
@@ -53,6 +53,20 @@ export function DeleteTaskButton({
         className="text-neutral-400 hover:text-red-600 transition-colors disabled:opacity-50"
       >
         <Trash2 className="h-4 w-4" />
+      </button>
+    );
+  }
+
+  if (variant === "ghost") {
+    return (
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={isPending}
+        className="krowe-btn-pill ghost-danger"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+        {isPending ? "Deleting…" : "Delete task"}
       </button>
     );
   }

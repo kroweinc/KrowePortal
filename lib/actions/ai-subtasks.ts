@@ -5,6 +5,7 @@ import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { generateSubtasks } from "@/lib/ai/generate-subtasks";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
+import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
 import type { Subtask } from "@/lib/types";
 import type { GenerationResult } from "@/lib/ai/schemas";
 
@@ -60,7 +61,7 @@ export async function generateSubtaskDrafts(input: {
 
 export async function acceptGeneratedSubtasks(
   taskId: string,
-  drafts: { title: string }[]
+  drafts: { title: string; estLowMin: number; estHighMin: number }[]
 ): Promise<{ inserted: Subtask[]; error?: string }> {
   if (drafts.length === 0) return { inserted: [] };
 
@@ -85,6 +86,8 @@ export async function acceptGeneratedSubtasks(
     completed: false,
     position: start + i,
     created_by: profile.id,
+    ai_est_low_min: d.estLowMin,
+    ai_est_high_min: d.estHighMin,
   }));
 
   const { data, error } = await supabase
@@ -93,5 +96,8 @@ export async function acceptGeneratedSubtasks(
     .select();
 
   if (error) return { inserted: [], error: error.message };
+
+  await recomputeTaskEstimate(taskId);
+
   return { inserted: (data ?? []) as Subtask[] };
 }

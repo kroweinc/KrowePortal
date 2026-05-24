@@ -5,6 +5,7 @@ import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import type { TaskStatus, TaskPriority } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -43,6 +44,13 @@ export async function createTask(formData: FormData) {
   }).select("id").single();
 
   if (error) return { error: error.message };
+
+  await estimateAndSaveTaskHours({
+    taskId: data.id as string,
+    title: parsed.data.title,
+    description: parsed.data.description ?? null,
+    priority: parsed.data.priority,
+  });
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true, taskId: data.id as string };
@@ -110,6 +118,40 @@ export async function markTaskDone(
       updated_at: new Date().toISOString(),
     })
     .eq("id", taskId);
+
+  if (error) return { error: error.message };
+  revalidatePath("/b");
+  revalidatePath("/o");
+  return { success: true };
+}
+
+const markForApprovalSchema = z.object({
+  taskId: z.string().uuid(),
+  note: z.string().trim().max(2000).nullish(),
+});
+
+export async function markTaskForApproval(
+  taskId: string,
+  payload: { note: string | null }
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsed = markForApprovalSchema.safeParse({ taskId, ...payload });
+  if (!parsed.success) return { error: "Invalid input" };
+
+  const now = new Date().toISOString();
+  const updates: Record<string, string | null> = {
+    status: "blocked",
+    approval_sent_at: now,
+    updated_at: now,
+  };
+  if (parsed.data.note) {
+    updates.completion_note = parsed.data.note;
+  }
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);
 
   if (error) return { error: error.message };
   revalidatePath("/b");

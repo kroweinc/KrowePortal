@@ -17,6 +17,7 @@ import {
 } from "@/lib/actions/ai-subtasks";
 import type { Subtask } from "@/lib/types";
 import type { Question, SubtaskDraft } from "@/lib/ai/schemas";
+import { formatEstimate } from "@/lib/format-estimate";
 
 const OTHER = "__other__";
 
@@ -35,9 +36,10 @@ type DialogState =
 interface Props {
   taskId: string;
   onAccept: (subtasks: Subtask[]) => void;
+  triggerClassName?: string;
 }
 
-export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
+export function AiSubtaskGeneratorDialog({ taskId, onAccept, triggerClassName }: Props) {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<DialogState>({ kind: "idle" });
   const [isPending, startTransition] = useTransition();
@@ -116,7 +118,11 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
     const draftsState = state;
     const drafts = [...draftsState.selected]
       .sort((a, b) => a - b)
-      .map((i) => ({ title: draftsState.edited[i] ?? draftsState.items[i].title }));
+      .map((i) => ({
+        title: draftsState.edited[i] ?? draftsState.items[i].title,
+        estLowMin: draftsState.items[i].estLowMin,
+        estHighMin: draftsState.items[i].estHighMin,
+      }));
 
     if (drafts.length === 0) {
       toast.error("Select at least one subtask to add.");
@@ -142,16 +148,28 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
 
   return (
     <>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-6 px-2 text-xs text-neutral-400 hover:text-neutral-700"
-        onClick={openDialog}
-        title="Generate subtasks with AI"
-      >
-        <Sparkles className="mr-1 h-3 w-3" />
-        AI
-      </Button>
+      {triggerClassName ? (
+        <button
+          type="button"
+          className={triggerClassName}
+          onClick={openDialog}
+          title="Generate subtasks with AI"
+        >
+          <Sparkles className="h-3 w-3" />
+          AI
+        </button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs text-neutral-400 hover:text-neutral-700"
+          onClick={openDialog}
+          title="Generate subtasks with AI"
+        >
+          <Sparkles className="mr-1 h-3 w-3" />
+          AI
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-lg max-h-[90vh] flex flex-col" aria-describedby={undefined}>
@@ -285,39 +303,63 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept }: Props) {
                 <p className="mb-3 text-xs text-neutral-500">
                   Uncheck or edit any subtask before adding. All are selected by default.
                 </p>
-                {state.items.map((draft, i) => (
-                  <div key={i} className="flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-neutral-50">
-                    <input
-                      type="checkbox"
-                      checked={state.selected.has(i)}
-                      onChange={() =>
-                        setState((prev) => {
-                          if (prev.kind !== "drafts") return prev;
-                          const next = new Set(prev.selected);
-                          if (next.has(i)) next.delete(i); else next.add(i);
-                          return { ...prev, selected: next };
-                        })
-                      }
-                      className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700 cursor-pointer"
-                    />
-                    <div className="min-w-0 flex-1 space-y-0.5">
+                {state.items.map((draft, i) => {
+                  const chip = formatEstimate(draft.estLowMin, draft.estHighMin);
+                  return (
+                    <div key={i} className="flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-neutral-50">
                       <input
-                        value={state.edited[i] ?? draft.title}
-                        onChange={(e) =>
-                          setState((prev) =>
-                            prev.kind === "drafts"
-                              ? { ...prev, edited: { ...prev.edited, [i]: e.target.value } }
-                              : prev
-                          )
+                        type="checkbox"
+                        checked={state.selected.has(i)}
+                        onChange={() =>
+                          setState((prev) => {
+                            if (prev.kind !== "drafts") return prev;
+                            const next = new Set(prev.selected);
+                            if (next.has(i)) next.delete(i); else next.add(i);
+                            return { ...prev, selected: next };
+                          })
                         }
-                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-neutral-800 outline-none focus:border-neutral-300 focus:bg-white"
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700 cursor-pointer"
                       />
-                      {draft.rationale && (
-                        <p className="px-1 text-xs text-neutral-400">{draft.rationale}</p>
-                      )}
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={state.edited[i] ?? draft.title}
+                            onChange={(e) =>
+                              setState((prev) =>
+                                prev.kind === "drafts"
+                                  ? { ...prev, edited: { ...prev.edited, [i]: e.target.value } }
+                                  : prev
+                              )
+                            }
+                            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-neutral-800 outline-none focus:border-neutral-300 focus:bg-white"
+                          />
+                          {chip && (
+                            <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-500">
+                              {chip}
+                            </span>
+                          )}
+                        </div>
+                        {draft.rationale && (
+                          <p className="px-1 text-xs text-neutral-400">{draft.rationale}</p>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+                {(() => {
+                  const selectedIdxs = [...state.selected];
+                  if (selectedIdxs.length === 0) return null;
+                  const totalLow = selectedIdxs.reduce((s, i) => s + state.items[i].estLowMin, 0);
+                  const totalHigh = selectedIdxs.reduce((s, i) => s + state.items[i].estHighMin, 0);
+                  const totalChip = formatEstimate(totalLow, totalHigh);
+                  if (!totalChip) return null;
+                  return (
+                    <div className="mt-2 flex items-center justify-end gap-2 border-t border-neutral-100 px-2 pt-2 text-xs text-neutral-500">
+                      <span>Total estimate:</span>
+                      <span className="font-medium text-neutral-700">~{totalChip}</span>
+                    </div>
+                  );
+                })()}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => generate()}>Regenerate</Button>
