@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { DeliveryChips } from "@/components/design-atoms";
+import { PlainEnglishProvider } from "@/components/plain-english-context";
 import { deleteTask } from "@/lib/actions/tasks";
 import { sortByPriority } from "@/lib/utils";
 import type { Task } from "@/lib/types";
@@ -54,7 +55,7 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
   const showApproval = (t: Task) => t.status === "blocked" || t.status === "done";
 
   return (
-    <>
+    <PlainEnglishProvider>
       <div className="krowe-op-list">
         {STATUS_ORDER.map((status) => {
           const group = grouped[status];
@@ -118,6 +119,6 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
         currentUserId={currentUserId}
         onOpenChange={(open) => !open && syncSelected(null)}
       />
-    </>
+    </PlainEnglishProvider>
   );
 }

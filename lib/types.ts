@@ -49,6 +49,8 @@ export interface Task {
   priority: TaskPriority;
   operator_visible: boolean;
   builder_estimate_hours: number | null;
+  builder_estimate_low_hours: number | null;
+  builder_estimate_high_hours: number | null;
   sort_order: number;
   created_by: string;
   created_at: string;
@@ -69,6 +71,9 @@ export interface Subtask {
   title: string;
   completed: boolean;
   position: number;
+  ai_est_low_min: number | null;
+  ai_est_high_min: number | null;
+  actual_hours: number | null;
   created_at: string;
   updated_at: string;
 }

@@ -5,6 +5,7 @@ import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import type { TaskStatus, TaskPriority } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -43,6 +44,13 @@ export async function createTask(formData: FormData) {
   }).select("id").single();
 
   if (error) return { error: error.message };
+
+  await estimateAndSaveTaskHours({
+    taskId: data.id as string,
+    title: parsed.data.title,
+    description: parsed.data.description ?? null,
+    priority: parsed.data.priority,
+  });
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true, taskId: data.id as string };

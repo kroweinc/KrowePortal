@@ -3,7 +3,6 @@
 import { Fragment, useRef, useState, useTransition, useEffect } from "react";
 import { toast } from "sonner";
 import { ListTodo, Plus, X, GripVertical } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
   createSubtask,
   toggleSubtask,
@@ -11,15 +10,19 @@ import {
   deleteSubtask,
   reorderSubtasks,
 } from "@/lib/actions/subtasks";
-import type { Subtask } from "@/lib/types";
+import { AiSubtaskGeneratorDialog } from "@/components/ai-subtask-generator-dialog";
+import { usePlainEnglish } from "@/components/plain-english-context";
+import type { Subtask, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { formatEstimate } from "@/lib/format-estimate";
 
 interface TaskSubtasksProps {
   taskId: string;
   initial?: Subtask[];
+  task?: Task;
 }
 
-export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
+export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) {
   const [subtasks, setSubtasks] = useState<Subtask[]>(initial);
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -28,6 +31,7 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
   const [isPending, startTransition] = useTransition();
   const addInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const { enabled: plainEnabled, getSubtaskView, registerSubtasks } = usePlainEnglish();
 
   const dragSrcIndex = useRef<number | null>(null);
   const [dropLineIndex, setDropLineIndex] = useState<number | null>(null);
@@ -41,6 +45,13 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
       })
       .catch(() => {});
   }, [taskId, initial.length]);
+
+  useEffect(() => {
+    if (!plainEnabled || !task || subtasks.length === 0) return;
+    const real = subtasks.filter((s) => !s.id.startsWith("temp-"));
+    if (real.length === 0) return;
+    registerSubtasks(task, real);
+  }, [plainEnabled, task, subtasks, registerSubtasks]);
 
   useEffect(() => {
     if (adding) addInputRef.current?.focus();
@@ -76,6 +87,9 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
       title,
       completed: false,
       position: subtasks.length,
+      ai_est_low_min: null,
+      ai_est_high_min: null,
+      actual_hours: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
@@ -116,7 +130,7 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
     const removed = subtasks.find((s) => s.id === id);
     setSubtasks((prev) => prev.filter((s) => s.id !== id));
     startTransition(async () => {
-      const result = await deleteSubtask(id);
+      const result = await deleteSubtask(id, taskId);
       if (result.error) {
         toast.error(result.error);
         if (removed) setSubtasks((prev) => [...prev, removed]);
@@ -197,122 +211,202 @@ export function TaskSubtasks({ taskId, initial = [] }: TaskSubtasksProps) {
   const done = subtasks.filter((s) => s.completed).length;
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-          <ListTodo className="h-3 w-3" />
-          Sub-tasks
-          {subtasks.length > 0 && (
-            <span className="font-normal text-neutral-400">
-              ({done}/{subtasks.length})
-            </span>
-          )}
-        </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs text-neutral-400 hover:text-neutral-700"
-          onClick={() => setAdding(true)}
-          disabled={isPending}
-        >
-          <Plus className="mr-1 h-3 w-3" />
-          Add
-        </Button>
+    <>
+      <div className="krowe-subs-h">
+        <div className="krowe-subs-progress">
+          <ProgressRing done={done} total={subtasks.length} />
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.09em] text-neutral-500">
+              <ListTodo className="h-3 w-3" />
+              Sub-tasks
+            </p>
+            <p className="krowe-subs-meta">
+              <strong>{done}</strong> of {subtasks.length} complete
+            </p>
+          </div>
+        </div>
+        <div className="krowe-subs-actions">
+          <AiSubtaskGeneratorDialog
+            taskId={taskId}
+            onAccept={(newSubtasks) =>
+              setSubtasks((prev) => [...prev, ...newSubtasks])
+            }
+            triggerClassName="krowe-mini-btn ai"
+          />
+          <button
+            type="button"
+            className="krowe-mini-btn"
+            onClick={() => setAdding(true)}
+            disabled={isPending}
+          >
+            <Plus className="h-3 w-3" /> Add
+          </button>
+        </div>
       </div>
 
-      {subtasks.length === 0 && !adding ? (
-        <p className="py-1 text-xs text-neutral-400">No sub-tasks yet</p>
-      ) : (
-        <ul>
-          {subtasks.map((subtask, index) => (
-            <Fragment key={subtask.id}>
-              {dropLineIndex === index && (
-                <li
-                  aria-hidden
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={handleDrop}
-                  className="h-0.5 rounded-full bg-blue-400 mx-2 my-0.5"
-                />
-              )}
-              <li
-                draggable
-                onDragStart={() => handleDragStart(index)}
-                onDragOver={(e) => handleDragOver(e, index)}
-                onDrop={handleDrop}
-                onDragEnd={handleDragEnd}
-                className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-neutral-50"
-              >
-                <GripVertical className="h-3 w-3 shrink-0 cursor-grab text-neutral-300 opacity-0 group-hover:opacity-100 active:cursor-grabbing" />
+      <ul className="krowe-sub-list">
+        {subtasks.length === 0 && !adding && (
+          <li className="px-3 py-2 text-xs italic text-neutral-400">
+            No sub-tasks yet
+          </li>
+        )}
 
+        {subtasks.map((subtask, index) => (
+          <Fragment key={subtask.id}>
+            {dropLineIndex === index && (
+              <li
+                aria-hidden
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleDrop}
+                className="krowe-sub-droplane"
+              />
+            )}
+            <li
+              draggable
+              onDragStart={() => handleDragStart(index)}
+              onDragOver={(e) => handleDragOver(e, index)}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
+              className={cn("krowe-sub-item", subtask.completed && "done")}
+            >
+              <span className="grip" aria-hidden>
+                <GripVertical className="h-3.5 w-3.5" />
+              </span>
+              <label className="check">
                 <input
                   type="checkbox"
                   checked={subtask.completed}
                   onChange={() => handleToggle(subtask)}
                   disabled={isPending}
-                  className="h-3.5 w-3.5 shrink-0 accent-neutral-700 cursor-pointer"
+                  aria-label={`Mark "${subtask.title}" as ${
+                    subtask.completed ? "incomplete" : "complete"
+                  }`}
                 />
-
-                {editingId === subtask.id ? (
-                  <input
-                    ref={editInputRef}
-                    value={editingTitle}
-                    onChange={(e) => setEditingTitle(e.target.value)}
-                    onBlur={() => commitEdit(subtask)}
-                    onKeyDown={(e) => handleEditKeyDown(e, subtask)}
-                    className="min-w-0 flex-1 rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-xs text-neutral-900 outline-none focus:border-neutral-900"
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => startEdit(subtask)}
-                    className={cn(
-                      "min-w-0 flex-1 text-left cursor-text rounded px-1 py-0.5 -mx-1 transition-colors hover:bg-neutral-100",
-                      subtask.completed
-                        ? "text-neutral-400 line-through"
-                        : "text-neutral-700"
-                    )}
+                {subtask.completed && (
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    aria-hidden
                   >
-                    {subtask.title}
-                  </button>
+                    <path
+                      d="M3.5 8.5l3 3 6-6.5"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 )}
-
+              </label>
+              {editingId === subtask.id ? (
+                <input
+                  ref={editInputRef}
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={() => commitEdit(subtask)}
+                  onKeyDown={(e) => handleEditKeyDown(e, subtask)}
+                  className="stext min-w-0 flex-1 rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-[13.5px] text-neutral-900 outline-none focus:border-neutral-900"
+                />
+              ) : (
                 <button
-                  onClick={() => handleDelete(subtask.id)}
-                  disabled={isPending}
-                  title="Delete"
-                  className="shrink-0 rounded p-0.5 text-neutral-300 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-500"
+                  type="button"
+                  onClick={() => startEdit(subtask)}
+                  className="stext text-left cursor-text"
                 >
-                  <X className="h-3 w-3" />
+                  {getSubtaskView(subtask).title}
                 </button>
-              </li>
-            </Fragment>
-          ))}
-          {dropLineIndex === subtasks.length && (
-            <li
-              aria-hidden
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              className="h-0.5 rounded-full bg-blue-400 mx-2 my-0.5"
-            />
-          )}
-        </ul>
-      )}
-
-      {adding && (
-        <div className="flex items-center gap-2 rounded-md px-2 py-1.5">
-          <div className="h-3 w-3 shrink-0" />
-          <div className="h-3.5 w-3.5 shrink-0 rounded border border-neutral-300" />
-          <input
-            ref={addInputRef}
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            onBlur={submitNew}
-            onKeyDown={handleAddKeyDown}
-            placeholder="Sub-task title…"
-            className="min-w-0 flex-1 rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-xs text-neutral-900 outline-none focus:border-neutral-900 placeholder:text-neutral-400"
+              )}
+              <EstimateChip subtask={subtask} />
+              <button
+                type="button"
+                className="x"
+                onClick={() => handleDelete(subtask.id)}
+                disabled={isPending}
+                title="Delete"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          </Fragment>
+        ))}
+        {dropLineIndex === subtasks.length && (
+          <li
+            aria-hidden
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            className="krowe-sub-droplane"
           />
-        </div>
-      )}
+        )}
+
+        {adding && (
+          <li className="krowe-sub-item">
+            <span className="grip" aria-hidden />
+            <span className="check" aria-hidden />
+            <input
+              ref={addInputRef}
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              onBlur={submitNew}
+              onKeyDown={handleAddKeyDown}
+              placeholder="Sub-task title…"
+              className="stext min-w-0 flex-1 rounded border border-neutral-300 bg-white px-1.5 py-0.5 text-[13.5px] text-neutral-900 outline-none focus:border-neutral-900 placeholder:text-neutral-400"
+            />
+          </li>
+        )}
+      </ul>
+    </>
+  );
+}
+
+function ProgressRing({
+  done,
+  total,
+  size = 32,
+}: {
+  done: number;
+  total: number;
+  size?: number;
+}) {
+  const r = size / 2 - 3;
+  const C = 2 * Math.PI * r;
+  const pct = total === 0 ? 0 : done / total;
+  const offset = C * (1 - pct);
+  return (
+    <div className="krowe-progress-ring" style={{ width: size, height: size }}>
+      <svg width={size} height={size}>
+        <circle
+          className="track"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          strokeWidth={3}
+        />
+        <circle
+          className="fill"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeDasharray={C}
+          strokeDashoffset={offset}
+        />
+      </svg>
+      <div className="pct">{Math.round(pct * 100)}</div>
     </div>
+  );
+}
+
+function EstimateChip({ subtask }: { subtask: Subtask }) {
+  const chip = formatEstimate(subtask.ai_est_low_min, subtask.ai_est_high_min);
+  if (!chip) return null;
+  return (
+    <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-500">
+      {chip}
+    </span>
   );
 }
