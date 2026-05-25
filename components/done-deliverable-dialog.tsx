@@ -14,12 +14,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { uploadAttachment } from "@/lib/actions/attachments";
 import { markTaskDone } from "@/lib/actions/tasks";
+import { linkTaskCommit } from "@/lib/actions/task-commits";
 import {
   MAX_ATTACHMENT_SIZE,
   ALLOWED_ATTACHMENT_EXTENSIONS,
   ATTACHMENT_ACCEPT,
 } from "@/lib/attachments-constants";
 import type { Task } from "@/lib/types";
+import { CommitPicker, type PickedCommit } from "@/components/done-deliverable-dialog/commit-picker";
 
 function getExt(fileName: string) {
   return "." + (fileName.split(".").pop()?.toLowerCase() ?? "bin");
@@ -46,6 +48,8 @@ export function DoneDeliverableDialog({
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [pushedToMain, setPushedToMain] = useState(false);
   const [note, setNote] = useState("");
+  const [pickedCommits, setPickedCommits] = useState<PickedCommit[]>([]);
+  const [showNoteFallback, setShowNoteFallback] = useState(false);
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +58,8 @@ export function DoneDeliverableDialog({
       setStagedFiles([]);
       setPushedToMain(false);
       setNote("");
+      setPickedCommits([]);
+      setShowNoteFallback(false);
     }
   }, [open]);
 
@@ -101,13 +107,36 @@ export function DoneDeliverableDialog({
       }
 
       const result = await markTaskDone(task.id, {
-        pushed_to_main: pushedToMain,
+        pushed_to_main: pushedToMain || pickedCommits.length > 0,
         completion_note: note.trim() || null,
       });
 
       if ("error" in result) {
         toast.error(result.error);
         return;
+      }
+
+      if (pushedToMain && pickedCommits.length > 0) {
+        let linked = 0;
+        for (const commit of pickedCommits) {
+          const linkResult = await linkTaskCommit(task.id, {
+            sha: commit.sha,
+            url: commit.html_url,
+            message: commit.message,
+            author_name: commit.author_name,
+            author_login: commit.author_login,
+            committed_at: commit.committed_at,
+            repo_full_name: commit.repo_full_name,
+          });
+          if ("error" in linkResult) {
+            toast.error(`Couldn't link ${commit.short_sha}: ${linkResult.error}`);
+          } else {
+            linked++;
+          }
+        }
+        if (linked < pickedCommits.length) {
+          toast.warning(`${linked} of ${pickedCommits.length} commits linked`);
+        }
       }
 
       toast.success("Task marked as done");
@@ -220,7 +249,11 @@ export function DoneDeliverableDialog({
                 checked={pushedToMain}
                 onChange={(e) => {
                   setPushedToMain(e.target.checked);
-                  if (!e.target.checked) setNote("");
+                  if (!e.target.checked) {
+                    setNote("");
+                    setPickedCommits([]);
+                    setShowNoteFallback(false);
+                  }
                 }}
                 disabled={isPending}
                 className="h-4 w-4 rounded border-neutral-300"
@@ -230,15 +263,38 @@ export function DoneDeliverableDialog({
                 Pushed to main
               </span>
             </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. PR #123, commit abc123"
-              maxLength={2000}
-              disabled={isPending || !pushedToMain}
-              rows={2}
-              className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 disabled:opacity-40 resize-none"
-            />
+
+            {pushedToMain && task && (
+              <>
+                <CommitPicker
+                  taskId={task.id}
+                  selected={pickedCommits}
+                  onChange={setPickedCommits}
+                  disabled={isPending}
+                />
+
+                {!showNoteFallback ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowNoteFallback(true)}
+                    disabled={isPending}
+                    className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors disabled:opacity-50"
+                  >
+                    + Or paste a note instead
+                  </button>
+                ) : (
+                  <textarea
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="e.g. PR #123, commit abc123"
+                    maxLength={2000}
+                    disabled={isPending}
+                    rows={2}
+                    className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 disabled:opacity-40 resize-none"
+                  />
+                )}
+              </>
+            )}
           </div>
         </div>
 

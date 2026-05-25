@@ -8,3 +8,9 @@ export { RefreshButton } from "./refresh-button";
 export { ReadmePreview } from "./readme-preview";
 export { FileTreeSnapshot } from "./file-tree-snapshot";
 export { NotConnected, NoRepoSelected, RepoFetchError } from "./empty-states";
+export {
+  BranchesTree,
+  BranchesTreeWithPurposes,
+  BranchesTreeSkeleton,
+  BranchesUnavailable,
+} from "./branches-tree";

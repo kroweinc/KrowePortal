@@ -6,22 +6,24 @@ import type { GitHubRepo } from "@/lib/types"
 interface RepoSelectorProps {
   engagementId?: string
   currentRepo?: string | null
+  initialRepos?: GitHubRepo[]
 }
 
-export function RepoSelector({ engagementId, currentRepo }: RepoSelectorProps) {
-  const [repos, setRepos] = useState<GitHubRepo[]>([])
+export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSelectorProps) {
+  const [repos, setRepos] = useState<GitHubRepo[]>(initialRepos ?? [])
   const [selected, setSelected] = useState<string>(currentRepo ?? "")
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!initialRepos)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
+    if (initialRepos) return
     fetch("/api/github/repos")
       .then((r) => r.json())
       .then((data) => {
         setRepos(data.repos ?? [])
         setLoading(false)
       })
-  }, [])
+  }, [initialRepos])
 
   async function handleSelect(fullName: string) {
     const repo = repos.find((r) => r.full_name === fullName)

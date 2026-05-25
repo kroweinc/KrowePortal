@@ -123,6 +123,21 @@ function describe(entry: AuditEntry): React.ReactNode {
       return <>added a note</>;
     case "attachment.removed":
       return <>removed <em className="krowe-audit-em">{String(meta.file_name ?? "attachment")}</em></>;
+    case "task.commit_linked":
+      return (
+        <>
+          linked commit{" "}
+          <em className="krowe-audit-em">{String(meta.short_sha ?? "")}</em>
+          {meta.message ? <> — {String(meta.message)}</> : null}
+        </>
+      );
+    case "task.commit_unlinked":
+      return (
+        <>
+          unlinked commit{" "}
+          <em className="krowe-audit-em">{String(meta.short_sha ?? "")}</em>
+        </>
+      );
     default:
       return <>{entry.action.replace(/[._]/g, " ")}</>;
   }

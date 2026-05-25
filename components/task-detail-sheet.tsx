@@ -13,6 +13,8 @@ import {
   X,
 } from "lucide-react";
 import { TaskAuditLog } from "@/components/task-audit-log";
+import { TaskBuildPrompt } from "@/components/task-build-prompt";
+import { TaskCommits } from "@/components/task-commits";
 import {
   Sheet,
   SheetClose,
@@ -125,7 +127,7 @@ function TaskDetailBody({
     : task.description ?? "";
 
   const [toast, setToast] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "audit">("overview");
+  const [tab, setTab] = useState<"overview" | "build" | "audit">("overview");
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 1800);
@@ -191,9 +193,9 @@ function TaskDetailBody({
   const regularAttachments = (task.task_attachments ?? []).filter(
     (a) => !a.is_deliverable,
   );
-  const hasDeliverable =
-    task.status === "done" &&
-    (task.pushed_to_main || task.completion_note || deliverableAttachments.length > 0);
+  const hasDeliverable = task.status === "done";
+  const hasDeliverableSummary =
+    task.pushed_to_main || task.completion_note || deliverableAttachments.length > 0;
 
   return (
     <>
@@ -244,6 +246,13 @@ function TaskDetailBody({
         </button>
         <button
           type="button"
+          className={`krowe-task-tab ${tab === "build" ? "active" : ""}`}
+          onClick={() => setTab("build")}
+        >
+          Build
+        </button>
+        <button
+          type="button"
           className={`krowe-task-tab ${tab === "audit" ? "active" : ""}`}
           onClick={() => setTab("audit")}
         >
@@ -255,6 +264,8 @@ function TaskDetailBody({
       <div className="krowe-task-sheet-body">
         {tab === "audit" ? (
           <TaskAuditLog taskId={task.id} />
+        ) : tab === "build" ? (
+          <TaskBuildPrompt task={task} />
         ) : (
         <>
         {/* HERO */}
@@ -329,7 +340,7 @@ function TaskDetailBody({
                 Deliverable
               </span>
             </div>
-            {(task.pushed_to_main || task.completion_note) && (
+            {hasDeliverableSummary && (task.pushed_to_main || task.completion_note) && (
               <div className="krowe-deliverable-block">
                 {task.pushed_to_main && (
                   <div className="krowe-deliverable-pill">
@@ -342,6 +353,11 @@ function TaskDetailBody({
                 )}
               </div>
             )}
+            <TaskCommits
+              key={`commits-${task.id}`}
+              taskId={task.id}
+              canUnlink={role === "builder"}
+            />
             {deliverableAttachments.length > 0 && (
               <TaskAttachments
                 key={`deliverable-attachments-${task.id}`}
