@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
+import { writeAuditEntry } from "@/lib/actions/audit-log";
 import type { TaskStatus, TaskPriority } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -45,6 +46,17 @@ export async function createTask(formData: FormData) {
 
   if (error) return { error: error.message };
 
+  await writeAuditEntry({
+    taskId: data.id as string,
+    actorId: profile.id,
+    action: "task.created",
+    metadata: {
+      title: parsed.data.title,
+      source: profile.role === "operator" ? "operator_request" : "builder_added",
+      priority: parsed.data.priority,
+    },
+  });
+
   await estimateAndSaveTaskHours({
     taskId: data.id as string,
     title: parsed.data.title,
@@ -80,12 +92,34 @@ export async function updateTask(formData: FormData) {
 
   const supabase = await getClient(profile.id);
   const { id, ...updates } = parsed.data;
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("title, description, builder_estimate_hours, priority")
+    .eq("id", id)
+    .single();
+
   const { error } = await supabase
     .from("tasks")
     .update({ ...updates, updated_at: new Date().toISOString() })
     .eq("id", id);
 
   if (error) return { error: error.message };
+
+  if (before) {
+    for (const [field, newValue] of Object.entries(updates)) {
+      const oldValue = (before as Record<string, unknown>)[field];
+      if (oldValue === newValue) continue;
+      await writeAuditEntry({
+        taskId: id,
+        actorId: profile.id,
+        action: "task.field_changed",
+        field,
+        oldValue,
+        newValue,
+      });
+    }
+  }
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true };
@@ -108,6 +142,13 @@ export async function markTaskDone(
   if (!parsed.success) return { error: "Invalid input" };
 
   const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("status")
+    .eq("id", taskId)
+    .single();
+
   const { error } = await supabase
     .from("tasks")
     .update({
@@ -120,6 +161,27 @@ export async function markTaskDone(
     .eq("id", taskId);
 
   if (error) return { error: error.message };
+
+  if (before && before.status !== "done") {
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.status_changed",
+      field: "status",
+      oldValue: before.status,
+      newValue: "done",
+    });
+  }
+  await writeAuditEntry({
+    taskId,
+    actorId: profile.id,
+    action: "task.completed",
+    metadata: {
+      pushed_to_main: parsed.data.pushed_to_main,
+      completion_note: parsed.data.completion_note ?? null,
+    },
+  });
+
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -151,9 +213,34 @@ export async function markTaskForApproval(
   }
 
   const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("status")
+    .eq("id", taskId)
+    .single();
+
   const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);
 
   if (error) return { error: error.message };
+
+  if (before && before.status !== "blocked") {
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.status_changed",
+      field: "status",
+      oldValue: before.status,
+      newValue: "blocked",
+    });
+  }
+  await writeAuditEntry({
+    taskId,
+    actorId: profile.id,
+    action: "task.sent_for_approval",
+    metadata: parsed.data.note ? { note: parsed.data.note } : null,
+  });
+
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -164,12 +251,30 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   if (!profile) redirect("/login");
 
   const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("status")
+    .eq("id", taskId)
+    .single();
+
   const { error } = await supabase
     .from("tasks")
     .update({ status, updated_at: new Date().toISOString() })
     .eq("id", taskId);
 
   if (error) return { error: error.message };
+
+  if (before && before.status !== status) {
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.status_changed",
+      field: "status",
+      oldValue: before.status,
+      newValue: status,
+    });
+  }
 
   revalidatePath("/b");
   return { success: true };
@@ -180,12 +285,30 @@ export async function toggleVisibility(taskId: string, visible: boolean) {
   if (!profile || profile.role !== "builder") redirect("/login");
 
   const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("operator_visible")
+    .eq("id", taskId)
+    .single();
+
   const { error } = await supabase
     .from("tasks")
     .update({ operator_visible: visible, updated_at: new Date().toISOString() })
     .eq("id", taskId);
 
   if (error) return { error: error.message };
+
+  if (before && before.operator_visible !== visible) {
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.visibility_changed",
+      field: "operator_visible",
+      oldValue: before.operator_visible,
+      newValue: visible,
+    });
+  }
 
   revalidatePath("/b");
   return { success: true };

@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { TaskAttachment } from "@/lib/types";
 import { MAX_ATTACHMENT_SIZE, ALLOWED_ATTACHMENT_EXTENSIONS } from "@/lib/attachments-constants";
+import { writeAuditEntry } from "@/lib/actions/audit-log";
 
 const MAX_SIZE = MAX_ATTACHMENT_SIZE;
 const ALLOWED_EXTENSIONS = ALLOWED_ATTACHMENT_EXTENSIONS;
@@ -71,6 +72,18 @@ export async function uploadAttachment(formData: FormData): Promise<{ success?: 
     return { error: dbError.message };
   }
 
+  await writeAuditEntry({
+    taskId: parsed.data.task_id,
+    actorId: profile.id,
+    action: "attachment.uploaded",
+    metadata: {
+      file_name: file.name,
+      mime_type: file.type || "application/octet-stream",
+      size_bytes: file.size,
+      is_deliverable: parsed.data.is_deliverable === "true",
+    },
+  });
+
   revalidatePath(`/o/tasks/${parsed.data.task_id}`);
   revalidatePath(`/b/tasks/${parsed.data.task_id}`);
   return { success: true, attachment: data as TaskAttachment };
@@ -112,6 +125,16 @@ export async function addLinkAttachment(
 
   if (dbError) return { error: dbError.message };
 
+  await writeAuditEntry({
+    taskId,
+    actorId: profile.id,
+    action: "attachment.linked",
+    metadata: {
+      url: parsed.data.url,
+      label: parsed.data.label ?? null,
+    },
+  });
+
   revalidatePath(`/o/tasks/${taskId}`);
   revalidatePath(`/b/tasks/${taskId}`);
   return { success: true, attachment: data as TaskAttachment };
@@ -151,6 +174,15 @@ export async function addTextAttachment(
 
   if (dbError) return { error: dbError.message };
 
+  await writeAuditEntry({
+    taskId,
+    actorId: profile.id,
+    action: "attachment.note_added",
+    metadata: {
+      preview: parsed.data.content.slice(0, 120),
+    },
+  });
+
   revalidatePath(`/o/tasks/${taskId}`);
   revalidatePath(`/b/tasks/${taskId}`);
   return { success: true, attachment: data as TaskAttachment };
@@ -169,7 +201,7 @@ export async function deleteAttachment(attachmentId: string): Promise<{ success?
 
   const { data: attachment } = await supabase
     .from("task_attachments")
-    .select("storage_path, task_id")
+    .select("storage_path, task_id, file_name, attachment_type, is_deliverable")
     .eq("id", parsed.data.id)
     .single();
 
@@ -182,8 +214,21 @@ export async function deleteAttachment(attachmentId: string): Promise<{ success?
 
   if (dbError) return { error: dbError.message };
 
-  const adminClient = createAdminClient();
-  await adminClient.storage.from("task-attachments").remove([attachment.storage_path]);
+  if (attachment.storage_path) {
+    const adminClient = createAdminClient();
+    await adminClient.storage.from("task-attachments").remove([attachment.storage_path]);
+  }
+
+  await writeAuditEntry({
+    taskId: attachment.task_id as string,
+    actorId: profile.id,
+    action: "attachment.removed",
+    metadata: {
+      file_name: attachment.file_name as string,
+      attachment_type: (attachment.attachment_type as string | null) ?? "file",
+      is_deliverable: Boolean(attachment.is_deliverable),
+    },
+  });
 
   revalidatePath(`/o/tasks/${attachment.task_id}`);
   revalidatePath(`/b/tasks/${attachment.task_id}`);

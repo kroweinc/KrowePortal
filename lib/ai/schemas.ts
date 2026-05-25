@@ -55,6 +55,23 @@ export const TaskEstimateResult = z
     path: ["hoursHigh"],
   });
 
+export const ProjectProfileResult = z.object({
+  summary: z.string().min(20).max(600),
+  audience: z.string().min(10).max(400),
+  features: z.array(z.string().min(3).max(200)).min(1).max(10),
+  currentState: z.enum(["early", "active", "mature", "dormant"]),
+  stateRationale: z.string().min(10).max(300),
+  services: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(40),
+        purpose: z.string().min(3).max(80),
+      })
+    )
+    .max(15)
+    .default([]),
+});
+
 export const SimplifiedSubtask = z.object({
   id: z.string(),
   simpleTitle: z.string().min(1).max(300),

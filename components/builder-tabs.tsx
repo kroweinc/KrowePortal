@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 const TABS = [
   { label: "Tasks", href: "/b" },
-  { label: "GitHub", href: "/b/github" },
+  { label: "Project", href: "/b/github" },
 ];
 
 interface BuilderTabsProps {

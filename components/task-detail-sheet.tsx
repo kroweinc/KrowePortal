@@ -12,6 +12,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { TaskAuditLog } from "@/components/task-audit-log";
 import {
   Sheet,
   SheetClose,
@@ -124,11 +125,16 @@ function TaskDetailBody({
     : task.description ?? "";
 
   const [toast, setToast] = useState<string | null>(null);
+  const [tab, setTab] = useState<"overview" | "audit">("overview");
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 1800);
     return () => clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    setTab("overview");
+  }, [task.id]);
 
   useEffect(() => {
     if (role !== "operator") return;
@@ -227,8 +233,30 @@ function TaskDetailBody({
         </div>
       </div>
 
+      {/* ── Tabs strip ── */}
+      <div className="krowe-task-sheet-tabs">
+        <button
+          type="button"
+          className={`krowe-task-tab ${tab === "overview" ? "active" : ""}`}
+          onClick={() => setTab("overview")}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          className={`krowe-task-tab ${tab === "audit" ? "active" : ""}`}
+          onClick={() => setTab("audit")}
+        >
+          Audit Log
+        </button>
+      </div>
+
       {/* ── Scrollable body ── */}
       <div className="krowe-task-sheet-body">
+        {tab === "audit" ? (
+          <TaskAuditLog taskId={task.id} />
+        ) : (
+        <>
         {/* HERO */}
         <header className="krowe-task-hero">
           <div className="krowe-task-hero-top">
@@ -370,6 +398,8 @@ function TaskDetailBody({
             <TaskSubtasks key={`subtasks-${task.id}`} taskId={task.id} task={task} />
           </div>
         </section>
+        </>
+        )}
       </div>
 
       {/* ── Sticky footer ── */}

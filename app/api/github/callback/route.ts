@@ -52,5 +52,5 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${origin}/b?error=github_save_failed`)
   }
 
-  return NextResponse.redirect(`${origin}/b/github?github=connected`)
+  return NextResponse.redirect(`${origin}/b/github/settings?github=connected`)
 }

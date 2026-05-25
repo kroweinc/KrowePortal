@@ -67,7 +67,7 @@ function isNoisePath(path: string): boolean {
   return false;
 }
 
-async function fetchRepoContext(
+export async function fetchRepoContext(
   token: string,
   owner: string,
   repo: string,
