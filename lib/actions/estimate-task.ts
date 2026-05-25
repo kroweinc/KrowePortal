@@ -17,10 +17,11 @@ export async function estimateAndSaveTaskHours(input: EstimateTaskInput): Promis
       priority: input.priority,
     });
 
-    const roundQuarter = (n: number) => Math.round(n * 4) / 4;
-    const low = roundQuarter(hoursLow);
-    const high = roundQuarter(hoursHigh);
-    const midpoint = roundQuarter((hoursLow + hoursHigh) / 2);
+    const roundHours = (n: number) =>
+      n < 1 ? Math.round(n * 10) / 10 : Math.round(n * 4) / 4;
+    const low = Math.max(0.1, roundHours(hoursLow));
+    const high = Math.max(low, roundHours(hoursHigh));
+    const midpoint = roundHours((hoursLow + hoursHigh) / 2);
     if (midpoint <= 0) return;
 
     const supabase = createAdminClient();

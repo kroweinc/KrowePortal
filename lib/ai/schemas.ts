@@ -47,8 +47,8 @@ export const TaskOnlyResult = z.object({
 
 export const TaskEstimateResult = z
   .object({
-    hoursLow: z.number().min(0.25).max(2000),
-    hoursHigh: z.number().min(0.25).max(2000),
+    hoursLow: z.number().min(0.1).max(2000),
+    hoursHigh: z.number().min(0.1).max(2000),
   })
   .refine((d) => d.hoursHigh >= d.hoursLow, {
     message: "hoursHigh must be >= hoursLow",

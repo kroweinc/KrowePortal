@@ -30,10 +30,11 @@ export async function recomputeTaskEstimate(taskId: string): Promise<void> {
       0
     );
 
-    const roundQuarter = (n: number) => Math.round(n * 4) / 4;
-    const low = roundQuarter(lowHoursSum);
-    const high = roundQuarter(highHoursSum);
-    const midpoint = roundQuarter((lowHoursSum + highHoursSum) / 2);
+    const roundHours = (n: number) =>
+      n < 1 ? Math.round(n * 10) / 10 : Math.round(n * 4) / 4;
+    const low = Math.max(0.1, roundHours(lowHoursSum));
+    const high = Math.max(low, roundHours(highHoursSum));
+    const midpoint = roundHours((lowHoursSum + highHoursSum) / 2);
     if (midpoint <= 0) return;
 
     const { error: updateError } = await supabase
