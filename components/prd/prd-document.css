@@ -251,6 +251,37 @@
   justify-content: space-between;
   gap: 12px;
 }
+/* logo + text wrapper so the brand mark sits to the LEFT of a §8/§9 item */
+.prd-doc-stage .doc-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+}
+.prd-doc-stage .brand-logo {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 5px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--border);
+  padding: 2px;
+  box-sizing: border-box;
+}
+.prd-doc-stage .brand-logo--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted-foreground);
+  background: var(--surface-subtle);
+}
 .prd-doc-stage .doc-muted {
   color: var(--muted-foreground);
 }

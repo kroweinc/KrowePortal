@@ -18,6 +18,7 @@ import { analyzeFreeTierFitAction } from "@/lib/actions/free-tier";
 import { renameTechAcrossPrd } from "@/lib/prd/rename-tech";
 import { flowSteps } from "@/lib/prd/flow-steps";
 import { InlineText, InlineList, InlineSelect, AddButton, RemoveCard, useEditing } from "./inline-edit";
+import { BrandLogo } from "../brand-logo";
 
 /** Patch the PRD content. Accepts a partial (merged onto the current content) or
     a functional updater — the latter lets async work (e.g. the tech-stack
@@ -102,6 +103,7 @@ function fillStack(it: PrdStackItem, f: StackLookup): PrdStackItem {
     includes: f.includes && f.includes.length ? f.includes : it.includes ?? [],
     monthlyCost: f.monthlyCost ?? it.monthlyCost ?? null,
     estimated: f.monthlyCost ? true : it.estimated,
+    domain: f.domain ?? it.domain ?? null,
   };
 }
 
@@ -111,6 +113,7 @@ function fillIntegration(it: PrdIntegration, f: IntegrationLookup): PrdIntegrati
     purpose: f.purpose ?? it.purpose ?? null,
     monthlyCost: f.monthlyCost ?? it.monthlyCost ?? null,
     estimated: f.monthlyCost ? true : it.estimated,
+    domain: f.domain ?? it.domain ?? null,
   };
 }
 
@@ -343,6 +346,7 @@ function IntegrationsBody({ content, patch }: SectionBodyProps) {
         <div className="prd-card" key={i}>
           <RemoveCard onClick={() => h.remove(i)} />
           <div className="prd-card__head">
+            <BrandLogo domain={it.domain} name={it.name} />
             <InlineText
               value={it.name}
               onChange={(v) => renameAndLookup(i, v)}
@@ -436,6 +440,7 @@ function TechStackBody({ content, patch }: SectionBodyProps) {
             <div className="prd-card" key={idx}>
               <RemoveCard onClick={() => h.remove(idx)} />
               <div className="prd-card__head">
+                <BrandLogo domain={it.domain} name={it.name} />
                 <InlineText
                   value={it.name}
                   onChange={(v) => renameAndLookup(idx, v)}
@@ -518,6 +523,25 @@ function verdictInStack(verdict: { name: string; provider?: string | null }, cur
     }
   }
   return false;
+}
+
+/** Best logo domain for a free-tier verdict: reuse the domain already saved on
+    the matching §8/§9 item (matched leniently by name/provider). Returns null when
+    no match has a domain — BrandLogo then falls back to its built-in name directory. */
+function domainForVerdict(content: PrdContent, v: { name: string; provider?: string | null }): string | null {
+  const items = [...(content.techStack ?? []), ...(content.integrations ?? [])];
+  const candidates = [normName(v.name), normName(v.provider)].filter(Boolean);
+  // Exact name match first.
+  for (const it of items) {
+    if (it.domain && candidates.includes(normName(it.name))) return it.domain;
+  }
+  // Lenient substring match either way (mirrors verdictInStack).
+  for (const it of items) {
+    const itName = normName(it.name);
+    if (!itName || !it.domain) continue;
+    if (candidates.some((c) => itName.includes(c) || c.includes(itName))) return it.domain;
+  }
+  return null;
 }
 
 /** Coerce stored assumptions into editable {label, value} stats. Tolerates a
@@ -685,8 +709,9 @@ function FreeTierFitBody({ content, patch }: SectionBodyProps) {
           <AssumptionStats assumptions={assumptions} onChange={patchAssumptions} />
 
           {analysis.services.map((s, i) => (
-            <div className="prd-card" key={i}>
+            <div className="prd-card prd-card--freetier" key={i}>
               <div className="prd-card__head">
+                <BrandLogo domain={domainForVerdict(content, s)} name={s.name} />
                 <span className="prd-card__title">{s.name}</span>
                 <FitPill verdict={s.fitsFree} />
                 <CostTag value={s.recommendedPaidTier} />

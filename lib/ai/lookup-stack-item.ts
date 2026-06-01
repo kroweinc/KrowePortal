@@ -17,11 +17,13 @@ export type StackLookup = {
   layer: Layer | null;
   includes: string[];
   monthlyCost: string | null;
+  domain: string | null;
 };
 
 export type IntegrationLookup = {
   purpose: string | null;
   monthlyCost: string | null;
+  domain: string | null;
 };
 
 // Parse the model's JSON LENIENTLY: every field optional/any, so one off-spec
@@ -35,6 +37,7 @@ const LooseSchema = z
     includes: z.unknown(),
     purpose: z.unknown(),
     monthlyCost: z.unknown(),
+    domain: z.unknown(),
   })
   .partial();
 
@@ -48,6 +51,21 @@ function normLayer(v: unknown): Layer | null {
   if (typeof v !== "string") return null;
   const low = v.trim().toLowerCase();
   return (LAYERS as readonly string[]).includes(low) ? (low as Layer) : null;
+}
+
+/** Normalize a model-supplied domain to a bare host ("https://www.Stripe.com/"
+    → "stripe.com"). Returns null unless it looks like a real registrable host. */
+function normDomain(v: unknown): string | null {
+  if (typeof v !== "string") return null;
+  const host = v
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .replace(/\s/g, "");
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host)) return null;
+  return host.slice(0, 120);
 }
 
 function normIncludes(v: unknown): string[] {
@@ -91,11 +109,12 @@ export async function lookupStackItem(name: string, context?: string): Promise<S
   if (!clean) return null;
 
   const system = `You identify a single named technology in a software project's tech stack and return structured facts about it as JSON.
-Return ONLY this JSON shape: { "provider": string|null, "category": string|null, "layer": ${JSON.stringify(LAYERS)}, "includes": string[], "monthlyCost": string|null }
+Return ONLY this JSON shape: { "provider": string|null, "category": string|null, "layer": ${JSON.stringify(LAYERS)}, "includes": string[], "monthlyCost": string|null, "domain": string|null }
 - provider: the OFFICIAL corporate / legal company name of the organization that makes, owns, or operates this technology — ALWAYS fill this, even when the tech's name and the brand are the same. Use the proper corporate entity name, e.g. "Next.js" → "Vercel Inc.", "Vercel" → "Vercel Inc.", "Supabase" → "Supabase Inc.", "PostgreSQL" → "PostgreSQL Global Development Group", "Redis" → "Redis Ltd.", "S3" → "Amazon Web Services, Inc.", "React" → "Meta Platforms, Inc.", "MongoDB" → "MongoDB, Inc.". Only return null if it is a truly generic, unbranded technology with no company or steward behind it.
 - category: a short kind label (e.g. "Framework", "Managed Postgres", "Object storage", "Auth", "Email API").
 - layer: which layer of the stack this belongs to. Pick the single best fit.
 - includes: 1–4 SHORT phrases describing what this layer/tool covers FOR THIS PRODUCT given the context. Concrete, not generic.
+- domain: the technology's OWN official website host as a bare domain, no protocol or path, used to fetch its logo — e.g. "Next.js" → "nextjs.org", "Vercel" → "vercel.com", "Supabase" → "supabase.com", "PostgreSQL" → "postgresql.org", "S3" → "aws.amazon.com", "React" → "react.dev". Use the product's real primary domain. Return null only if you genuinely don't know it.
 - ${COST_NOTE}
 If the name is unrecognizable or not a real technology, return best-effort nulls and an empty includes array. Output valid JSON only.`;
 
@@ -108,6 +127,7 @@ If the name is unrecognizable or not a real technology, return best-effort nulls
     layer: normLayer(raw.layer),
     includes: normIncludes(raw.includes),
     monthlyCost: str(raw.monthlyCost, 80),
+    domain: normDomain(raw.domain),
   };
 }
 
@@ -117,8 +137,9 @@ export async function lookupIntegrationItem(name: string, context?: string): Pro
   if (!clean) return null;
 
   const system = `You identify a single named 3rd-party software product or integration and return structured facts about it as JSON.
-Return ONLY this JSON shape: { "purpose": string|null, "monthlyCost": string|null }
+Return ONLY this JSON shape: { "purpose": string|null, "monthlyCost": string|null, "domain": string|null }
 - purpose: one concise sentence on what this software is for IN THIS PRODUCT given the context (e.g. "Sends transactional emails to referrers", "Processes one-time card payments").
+- domain: the software's OWN official website host as a bare domain, no protocol or path, used to fetch its logo — e.g. "Stripe" → "stripe.com", "Twilio" → "twilio.com", "Google Maps" → "google.com", "QuickBooks" → "quickbooks.intuit.com". Use the product's real primary domain. Return null only if you genuinely don't know it.
 - ${COST_NOTE}
 If the name is unrecognizable, return best-effort nulls. Output valid JSON only.`;
 
@@ -128,5 +149,6 @@ If the name is unrecognizable, return best-effort nulls. Output valid JSON only.
   return {
     purpose: str(raw.purpose, 200),
     monthlyCost: str(raw.monthlyCost, 80),
+    domain: normDomain(raw.domain),
   };
 }

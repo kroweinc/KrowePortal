@@ -7,6 +7,7 @@
 import type { ReactNode } from "react";
 import type { PrdContent, PrdPriority, PrdStackItem } from "@/lib/types";
 import { flowSteps } from "@/lib/prd/flow-steps";
+import { BrandLogo } from "./brand-logo";
 import "./prd-document.css";
 
 const PRIORITY_LABEL: Record<PrdPriority, string> = { must: "Must", should: "Should", could: "Could" };
@@ -247,9 +248,12 @@ export function PrdDocument({ content: c }: { content: PrdContent }) {
           <ul className="doc-flat doc-flat--cost">
             {c.integrations!.map((it, i) => (
               <li key={i}>
-                <span>
-                  <span className="doc-obj__name">{it.name}</span>
-                  {it.purpose && <span className="doc-muted"> — {it.purpose}</span>}
+                <span className="doc-line">
+                  <BrandLogo domain={it.domain} name={it.name} size={20} />
+                  <span>
+                    <span className="doc-obj__name">{it.name}</span>
+                    {it.purpose && <span className="doc-muted"> — {it.purpose}</span>}
+                  </span>
                 </span>
                 <DocCost value={it.monthlyCost} estimated={it.estimated} />
               </li>
@@ -269,15 +273,18 @@ export function PrdDocument({ content: c }: { content: PrdContent }) {
                   <ul className="doc-flat doc-flat--cost">
                     {g.items.map((it, i) => (
                       <li key={i}>
-                        <span>
-                          <span className="doc-obj__name">{it.name}</span>
-                          {(it.includes ?? []).length > 0 && (
-                            <ul className="doc-subbullets">
-                              {it.includes!.map((inc, j) => (
-                                <li key={j}>{inc}</li>
-                              ))}
-                            </ul>
-                          )}
+                        <span className="doc-line">
+                          <BrandLogo domain={it.domain} name={it.name} size={20} />
+                          <span>
+                            <span className="doc-obj__name">{it.name}</span>
+                            {(it.includes ?? []).length > 0 && (
+                              <ul className="doc-subbullets">
+                                {it.includes!.map((inc, j) => (
+                                  <li key={j}>{inc}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </span>
                         </span>
                         <DocCost value={it.monthlyCost} estimated={it.estimated} />
                       </li>
@@ -290,7 +297,8 @@ export function PrdDocument({ content: c }: { content: PrdContent }) {
             <ul className="doc-flat doc-flat--cost">
               {c.techStack!.map((it, i) => (
                 <li key={i}>
-                  <span>
+                  <span className="doc-line">
+                    <BrandLogo domain={it.domain} name={it.name} size={20} />
                     <span className="doc-obj__name">{it.name}</span>
                   </span>
                   <DocCost value={it.monthlyCost} estimated={it.estimated} />

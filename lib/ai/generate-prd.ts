@@ -12,13 +12,15 @@ export type PrdGenInput = {
   answers?: PrdAnswer[];
   /** When true, the model must return a finished PRD and may NOT ask more questions. */
   forceFinal: boolean;
+  /** No written notes were given — interview broad→specific over more rounds and emit a contextSummary. */
+  deepContext?: boolean;
   /** Today's date as an ISO calendar date (YYYY-MM-DD). Anchors the back-planned timeline. */
   currentDate: string;
 };
 
 export type PrdGenResult =
   | { kind: "questions"; items: Question[] }
-  | { kind: "prd"; content: PrdContent };
+  | { kind: "prd"; content: PrdContent; contextSummary?: string };
 
 const SECTIONS = `The PRD uses these JSON keys. Write for a small-business owner who must recognize THEIR product — be specific and concrete, never generic. A shallow, one-line-per-section PRD is a FAILURE; aim for the depth of a polished, client-ready document.
 
@@ -46,9 +48,9 @@ const SECTIONS = `The PRD uses these JSON keys. Write for a small-business owner
 
 12. dataModel (array of { data, direction, source }) — what data is stored/imported/exported and where it comes from. direction is one of "import" | "export" | "both".
 
-13. integrations (array of { name, purpose, monthlyCost, estimated }) — every recommended 3rd-party software, what it's for, and the PRODUCT'S OWN subscription rate per month (NOT setup time or developer fees).
+13. integrations (array of { name, purpose, monthlyCost, estimated, domain }) — every recommended 3rd-party software, what it's for, and the PRODUCT'S OWN subscription rate per month (NOT setup time or developer fees). Set "domain" to the software's official website host as a bare domain (no protocol/path), used to show its brand logo — e.g. Stripe → "stripe.com", Twilio → "twilio.com". Use null only if genuinely unknown.
 
-14. techStack (array of { name, category, provider, layer, includes[], monthlyCost, estimated }) — the concrete named stack, BROKEN DOWN BY LAYER. Set "layer" to one of "frontend" | "backend" | "database" | "email" | "hosting" | "other". Use "includes" to list what that layer covers (e.g. Frontend → "Public referral form", "Thank-you page", "Admin dashboard UI"; Database → "Stores referral submissions", "Stores generated codes", "Stores status"). Right-size to the product — see the stack-scoping rules below.
+14. techStack (array of { name, category, provider, layer, includes[], monthlyCost, estimated, domain }) — the concrete named stack, BROKEN DOWN BY LAYER. Set "layer" to one of "frontend" | "backend" | "database" | "email" | "hosting" | "other". Use "includes" to list what that layer covers (e.g. Frontend → "Public referral form", "Thank-you page", "Admin dashboard UI"; Database → "Stores referral submissions", "Stores generated codes", "Stores status"). Set "domain" to the technology's official website host as a bare domain (no protocol/path), used to show its brand logo — e.g. Next.js → "nextjs.org", Vercel → "vercel.com", PostgreSQL → "postgresql.org". Use null only if genuinely unknown. Right-size to the product — see the stack-scoping rules below.
 
 15. uxFlows (array of { role, steps }) — per-role journeys as an ordered list of short single-action "steps" (about 5–8 each) that SUPPLEMENT (do not replace) the single coreUserFlow above. Each step is one concise sentence; do NOT number them yourself. Optional when coreUserFlow already covers the journey.
 
@@ -79,7 +81,15 @@ const CONDITIONAL_RULES = `Depth and examples:
 - Never include a project price or payment terms anywhere in the PRD — those live in the separate quote.
 - The finished PRD must contain NO open questions — every unknown should have been resolved by asking. If you are forced to finalize and a minor detail is still unknown, make a sensible, clearly-stated assumption and record it under "assumptions" (e.g. "Assumes Stripe for payments unless told otherwise"). Leave openQuestions empty.`;
 
-function buildSystemPrompt(forceFinal: boolean): string {
+function buildSystemPrompt(forceFinal: boolean, deepContext = false): string {
+  const deepBlock = deepContext
+    ? `
+
+No-context mode (the builder provided NO written notes):
+- Sequence your questions foundational → specific. On the FIRST round (no answers yet) ask ONLY broad foundational questions — what the business does, the core problem this product solves, who the users are, the single most important outcome, and the rough scope/scale. Do NOT open with detailed per-field questions. As answers accumulate across rounds, progressively drill into the per-section specifics (features and their fields, pages/screens, data, integrations, and the exact deadline).
+- Whenever you return the finished PRD (kind:"prd"), ALSO include a top-level "contextSummary": a concise 1–2 paragraph business-context narrative (what the business does, the problem being solved, who the users are, and the goal) synthesized from the answers, written so it can be saved and reused as the starting context for future documents about this client.`
+    : "";
+
   const base = `You are drafting an OUTBOUND Product Requirements Document (PRD) for a prospective software product, working from a builder's notes about a client they are pitching, plus answers the builder gave to your clarifying questions. The builder refines it and sends it to the prospect to align on scope before any contract. There is no existing codebase.
 
 Voice: clear, concrete, non-technical where possible. A small-business owner should recognize their own product. No marketing fluff.
@@ -90,7 +100,7 @@ ${COST_RULES}
 
 ${STACK_RULES}
 
-${CONDITIONAL_RULES}
+${CONDITIONAL_RULES}${deepBlock}
 
 Output ONLY valid JSON.`;
 
@@ -149,7 +159,7 @@ async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: n
 
 export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
   const schema = input.forceFinal ? PrdFinalResult : PrdGenerationResult;
-  const systemPrompt = buildSystemPrompt(input.forceFinal);
+  const systemPrompt = buildSystemPrompt(input.forceFinal, input.deepContext);
   const userPrompt = buildUserPrompt(input);
   // The final PRD is now far richer (deep feature mini-specs, examples, more
   // sections); 6000 truncated the JSON and silently fell back to an empty PRD.
@@ -194,5 +204,5 @@ export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
   if (data.kind === "questions") {
     return { kind: "questions", items: data.items };
   }
-  return { kind: "prd", content: data.content as PrdContent };
+  return { kind: "prd", content: data.content as PrdContent, contextSummary: data.contextSummary };
 }

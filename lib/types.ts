@@ -349,6 +349,7 @@ export interface PrdIntegration {
   purpose?: string | null;
   monthlyCost?: string | null;
   estimated?: boolean;
+  domain?: string | null; // official site host (e.g. "stripe.com") — drives the brand logo
 }
 
 // §9 — tech stack + infrastructure the builder will use.
@@ -360,6 +361,7 @@ export interface PrdStackItem {
   includes?: string[]; // what this layer covers
   monthlyCost?: string | null;
   estimated?: boolean;
+  domain?: string | null; // official site host (e.g. "vercel.com") — drives the brand logo
 }
 
 // Pages / screens: every screen in this version and what it displays.

@@ -16,6 +16,9 @@ import type { Prd, PrdContent } from "@/lib/types";
 /** Hard cap on adaptive question rounds before a PRD is forced. */
 const MAX_PRD_ROUNDS = 5;
 
+/** Raised cap for the no-notes "deep context" path: interview broad→specific over more rounds. */
+const MAX_PRD_ROUNDS_DEEP = 8;
+
 /** Hard cap on refine question rounds before a section patch is forced. */
 const MAX_REFINE_ROUNDS = 2;
 
@@ -94,7 +97,10 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   if (!project) return { error: "Project not found." };
   if (project.owner_id !== profile.id) return { error: "Not your project." };
 
-  const forceFinal = round >= MAX_PRD_ROUNDS;
+  // No written notes ⇒ deep context-gathering mode: more rounds, broad→specific
+  // questions, and a synthesized context summary saved back to the project.
+  const deepContext = !(notes && notes.trim().length > 0);
+  const forceFinal = round >= (deepContext ? MAX_PRD_ROUNDS_DEEP : MAX_PRD_ROUNDS);
 
   let result;
   try {
@@ -104,6 +110,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
       businessContext: project.context ?? undefined,
       answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
       forceFinal,
+      deepContext,
       currentDate: new Date().toISOString().slice(0, 10),
     });
   } catch (err) {
@@ -138,6 +145,21 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
     .single();
 
   if (error || !data) return { error: error?.message ?? "Failed to create PRD." };
+
+  // Deep-context path: persist the synthesized business context to the project so
+  // future documents (PRDs/quotes/contracts) start warm. Only when the project has
+  // no context yet — never clobber what the builder already wrote. Best-effort: a
+  // failed write-back must never break PRD creation.
+  if (deepContext && result.contextSummary && !project.context?.trim()) {
+    try {
+      await supabase
+        .from("projects")
+        .update({ context: result.contextSummary, updated_at: new Date().toISOString() })
+        .eq("id", projectId);
+    } catch {
+      // ignore — context write-back is non-critical
+    }
+  }
 
   revalidatePath(`/b/projects/${projectId}`);
   return { kind: "prd", prdId: data.id as string };

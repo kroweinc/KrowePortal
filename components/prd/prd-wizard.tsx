@@ -48,6 +48,8 @@ export function PrdWizard({ projectId, projectName, backHref, initialTitle }: Pr
   const [round, setRound] = useState(0);
   const [answers, setAnswers] = useState<AnswerEntry[]>([]);
   const [state, setState] = useState<WizardState>({ kind: "intro" });
+  // Cosmetic only — the server decides behavior from the (empty) notes each round.
+  const [deepMode, setDeepMode] = useState(false);
 
   function run(nextAnswers: AnswerEntry[], nextRound: number, label: string) {
     setState({ kind: "loading", label });
@@ -87,6 +89,7 @@ export function PrdWizard({ projectId, projectName, backHref, initialTitle }: Pr
       toast.error("Give the PRD a title first.");
       return;
     }
+    setDeepMode(!notes.trim());
     setAnswers([]);
     setRound(0);
     run([], 0, notes.trim() ? "Reading your notes…" : "Preparing questions…");
@@ -197,9 +200,13 @@ export function PrdWizard({ projectId, projectName, backHref, initialTitle }: Pr
       {state.kind === "questions" && (
         <div className="space-y-6">
           <div className="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3">
-            <p className="text-sm font-medium text-neutral-800">A few questions to sharpen the PRD</p>
+            <p className="text-sm font-medium text-neutral-800">
+              {deepMode ? "Building the context" : "A few questions to sharpen the PRD"}
+            </p>
             <p className="text-xs text-neutral-500 mt-0.5">
-              Round {round + 1} — answering these fills the PRD so nothing is left open. Pick the closest option or type your own.
+              {deepMode
+                ? `Round ${round + 1} — starting broad, then getting specific so your PRD is accurate. Pick the closest option or type your own.`
+                : `Round ${round + 1} — answering these fills the PRD so nothing is left open. Pick the closest option or type your own.`}
             </p>
           </div>
 

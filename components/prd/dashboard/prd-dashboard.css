@@ -594,6 +594,31 @@
 .prd-dashboard .prio .inline-tag {
   font: inherit;
 }
+/* In edit mode the priority dropdown should read as part of the pill,
+   not a nested input box — drop its own border/background and inherit
+   the pill's color & text styling, keeping only a compact caret. */
+.prd-dashboard .prio .inline-select {
+  font: inherit;
+  font-weight: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  border: none;
+  background: transparent;
+  padding: 0 12px 0 0;
+  border-radius: 0;
+  line-height: 1;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23737373' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: 8px 5px;
+}
+.prd-dashboard .prio .inline-select:focus-visible {
+  outline: none;
+}
 .prd-dashboard .stack-meta {
   font-size: 12px;
   color: var(--muted-foreground);
@@ -615,6 +640,36 @@
   color: var(--warning);
   font-family: var(--font-sans);
 }
+/* Free-Tier cards: keep the tier pill grouped left with the title rather than
+   pushed to the far right. */
+.prd-dashboard .prd-card--freetier .cost-pill {
+  margin-left: 0;
+}
+/* brand logo shown to the LEFT of a §8/§9 item's name */
+.prd-dashboard .brand-logo {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--border);
+  padding: 2px;
+  box-sizing: border-box;
+}
+.prd-dashboard .brand-logo--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted-foreground);
+  background: var(--surface-subtle);
+}
+
 /* auto-lookup "finding…" tag shown on a tech-stack / integration card */
 .prd-dashboard .lookup-pill {
   display: inline-flex;

@@ -128,6 +128,8 @@ const PrdIntegrationSchema = z.object({
   purpose: z.string().max(300).nullish(),
   monthlyCost: z.string().max(80).nullish(),
   estimated: z.boolean().optional(),
+  // Official site host (e.g. "stripe.com") used to fetch the brand logo.
+  domain: z.string().max(120).nullish(),
 });
 
 const PrdStackItemSchema = z.object({
@@ -140,6 +142,8 @@ const PrdStackItemSchema = z.object({
   includes: z.array(z.string().min(1).max(200)).max(12).default([]),
   monthlyCost: z.string().max(80).nullish(),
   estimated: z.boolean().optional(),
+  // Official site host (e.g. "vercel.com") used to fetch the brand logo.
+  domain: z.string().max(120).nullish(),
 });
 
 const PrdPageSchema = z.object({
@@ -251,13 +255,20 @@ export const PrdContentSchema = z.object({
 // While the wizard may still ask more questions: questions OR a finished PRD.
 export const PrdGenerationResult = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("questions"), items: z.array(Question).min(2).max(5) }),
-  z.object({ kind: z.literal("prd"), content: PrdContentSchema }),
+  z.object({
+    kind: z.literal("prd"),
+    content: PrdContentSchema,
+    // Deep "no-context" flow only: a synthesized business-context narrative the
+    // server writes back to projects.context for reuse. Absent in standard flows.
+    contextSummary: z.string().max(2000).optional(),
+  }),
 ]);
 
 // Forced on the final round: the model must return a PRD, not more questions.
 export const PrdFinalResult = z.object({
   kind: z.literal("prd"),
   content: PrdContentSchema,
+  contextSummary: z.string().max(2000).optional(),
 });
 
 // ── PRD section refine ───────────────────────────────────────────────────────
