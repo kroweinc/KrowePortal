@@ -6,6 +6,7 @@
 
 import type { ReactNode } from "react";
 import type { PrdContent, PrdPriority, PrdStackItem } from "@/lib/types";
+import { flowSteps } from "@/lib/prd/flow-steps";
 import "./prd-document.css";
 
 const PRIORITY_LABEL: Record<PrdPriority, string> = { must: "Must", should: "Should", could: "Could" };
@@ -302,14 +303,36 @@ export function PrdDocument({ content: c }: { content: PrdContent }) {
 
       {(c.uxFlows ?? []).length > 0 && (
         <DocSection title="UX Flows">
-          <ul className="doc-objlist">
-            {c.uxFlows!.map((f, i) => (
-              <li key={i}>
-                <div className="doc-obj__name">{f.role}</div>
-                <p className="doc-obj__desc">{f.flow}</p>
-              </li>
-            ))}
-          </ul>
+          <div className="flow-stack">
+            {c.uxFlows!.map((f, i) => {
+              const steps = flowSteps(f);
+              return (
+                <div className="flow-card" key={i}>
+                  <div className="flow-card__head">
+                    <span className="flow-role">{f.role}</span>
+                    {steps.length > 0 && (
+                      <span className="flow-count">
+                        {steps.length} step{steps.length === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </div>
+                  <ol className="flow-steps">
+                    {steps.map((s, j) => (
+                      <li className="flow-step" key={j}>
+                        <div className="flow-step__rail" aria-hidden="true">
+                          <span className="flow-step__node">{j + 1}</span>
+                          <span className="flow-step__line" />
+                        </div>
+                        <div className="flow-step__body">
+                          <span className="flow-step__text">{s}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              );
+            })}
+          </div>
         </DocSection>
       )}
 

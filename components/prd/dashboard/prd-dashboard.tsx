@@ -15,6 +15,8 @@ import { Send, Sparkles, Check } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updatePrdContent, sendPrd, deletePrd, regeneratePrd } from "@/lib/actions/prds";
 import type { Prd, PrdContent } from "@/lib/types";
+import { PrdDocument } from "@/components/prd/prd-document";
+import { PrdDownloadButton } from "@/components/prd/prd-download-button";
 import { EditContext, InlineText } from "./inline-edit";
 import { PrdStatStrip } from "./prd-stat-strip";
 import { PrdRail } from "./prd-rail";
@@ -192,6 +194,7 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
   const editing = mode === "edit";
 
   return (
+    <>
     <div className="prd-dashboard">
       <div className="dash">
         <a
@@ -236,6 +239,7 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
                   Edit
                 </button>
               </div>
+              <PrdDownloadButton title={title} className="prd-btn prd-btn--outline" />
               {editing && (
                 <div className="dash-actions">
                   <SaveStatus state={saveState} onRetry={saveNow} />
@@ -317,6 +321,27 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
         onApply={(p) => patch(p)}
       />
     </div>
+
+    {/* Print-only canonical document — hidden on screen, surfaced when the
+        builder hits Download PDF so the PDF matches the public client view
+        exactly (not the editable rail). Renders the live, edited content. */}
+    <div className="prd-doc-stage prd-print-only" aria-hidden="true">
+      <div className="preview-stage">
+        <div className="preview-doc">
+          <header className="preview-head">
+            <div className="preview-head__text">
+              <p className="preview-eyebrow">Product Requirements Document</p>
+              <h1 className="preview-title">{title}</h1>
+            </div>
+          </header>
+          <div className="preview-card">
+            <PrdDocument content={content} />
+          </div>
+          <p className="preview-footer">Powered by Krowe Portal</p>
+        </div>
+      </div>
+    </div>
+    </>
   );
 }
 

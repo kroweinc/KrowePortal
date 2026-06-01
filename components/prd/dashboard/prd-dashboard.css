@@ -835,6 +835,30 @@
   display: flex;
   flex-direction: column;
 }
+.prd-dashboard .milestone-deadline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-subtle);
+}
+.prd-dashboard .milestone-deadline-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.prd-dashboard .milestone-deadline-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
 .prd-dashboard .milestone-row {
   display: flex;
   align-items: center;
@@ -867,6 +891,19 @@
   padding: 3px 10px;
   border-radius: var(--radius-full);
 }
+/* native date picker, styled to sit inline like the surrounding text */
+.prd-dashboard .milestone-date-input {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--foreground);
+  padding: 2px 6px;
+  width: auto;
+}
+.prd-dashboard .milestone-deadline-value .milestone-date-input {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
 
 @media (max-width: 1080px) {
   .prd-dashboard .rail-layout {
@@ -880,5 +917,166 @@
   }
   .prd-dashboard .constraint-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- UX flow timelines (compact density baked in) ---------- */
+.prd-dashboard .flow-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.prd-dashboard .flow-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 14px;
+  box-shadow: var(--shadow-1);
+}
+.prd-dashboard .flow-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.prd-dashboard .flow-role {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.prd-dashboard .flow-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+}
+.prd-dashboard .flow-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.prd-dashboard .flow-step {
+  display: flex;
+  gap: 14px;
+}
+.prd-dashboard .flow-step__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+.prd-dashboard .flow-step__node {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, white);
+}
+.prd-dashboard .flow-step__line {
+  flex: 1;
+  width: 2px;
+  background: var(--border);
+  margin: 3px 0;
+  min-height: 6px;
+}
+.prd-dashboard .flow-step:last-child .flow-step__line {
+  display: none;
+}
+.prd-dashboard .flow-step__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0 12px;
+}
+.prd-dashboard .flow-step:last-child .flow-step__body {
+  padding-bottom: 1px;
+}
+.prd-dashboard .flow-step__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+.prd-dashboard .flow-step__remove {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  border-radius: 5px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--duration-fast);
+}
+.prd-dashboard .flow-step:hover .flow-step__remove {
+  opacity: 1;
+}
+.prd-dashboard .flow-step__remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.prd-dashboard .flow-add {
+  margin-left: 40px;
+  margin-top: 2px;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ===========================================================
+   Print / Save-as-PDF (builder dashboard)
+   The dashboard renders an editable rail wrapped in the app
+   shell (sidebar + nav), none of which should print. Instead we
+   keep a hidden, print-only copy of the canonical document
+   (.prd-print-only) and, on print, hide everything else and
+   surface just that — so the PDF matches the public client view.
+   The document's own print styling lives in prd-document.css.
+   =========================================================== */
+.prd-print-only {
+  display: none;
+}
+
+@media print {
+  /* Remove the app shell (sidebar + top bar) and the editable rail from layout
+     entirely. Hiding them with visibility kept them in flow, so the body still
+     spanned their full height and emitted trailing blank pages. display:none
+     gives them zero height, so the page count tracks the document itself. */
+  .krowe-sidebar,
+  .krowe-topbar,
+  .prd-dashboard {
+    display: none !important;
+  }
+  /* Collapse the viewport-tall shells for the same reason — a 100vh min-height
+     would otherwise pad the run out to an extra blank page. */
+  .krowe-app,
+  .krowe-main {
+    min-height: 0 !important;
+  }
+  .krowe-page {
+    min-height: 0 !important;
+    padding: 0 !important;
+    background: none !important;
+  }
+  /* Surface the canonical print-only document. */
+  .prd-print-only {
+    display: block !important;
   }
 }

@@ -369,10 +369,11 @@ export interface PrdPage {
   displays?: string[];
 }
 
-// §10 — UX flows: one journey per user type.
+// §10 — UX flows: one journey per user type, as ordered steps.
 export interface PrdUxFlow {
   role: string;
-  flow: string;
+  steps?: string[]; // structured, ordered steps (new canonical shape)
+  flow?: string; // legacy single-paragraph journey (auto-split into steps on render)
 }
 
 // §12 — constraints (structured).
@@ -444,6 +445,7 @@ export interface PrdContent {
   constraints?: string[]; //    legacy fallback
   risks?: string[]; // §13
   openQuestions?: string[]; // §13
+  milestoneDueDate?: string | null; // §14 — overall deadline the milestones build toward
   milestoneList?: PrdMilestone[]; // §14
   milestones?: string; //    legacy fallback
   scaleAssumptions?: string; // Free-Tier Fit — optional builder usage hint

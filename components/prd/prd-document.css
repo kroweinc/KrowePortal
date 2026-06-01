@@ -20,6 +20,40 @@
 }
 .prd-doc-stage .preview-head {
   margin-bottom: 22px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.prd-doc-stage .preview-head__text {
+  min-width: 0;
+}
+
+/* Screen-only "Download PDF" action (hidden in print via @media print below). */
+.prd-doc-stage .prd-download-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  padding: 9px 16px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.prd-doc-stage .prd-download-btn:hover {
+  background: var(--primary-hover, var(--accent));
+  transform: translateY(-1px);
+}
+.prd-doc-stage .prd-download-btn:active {
+  transform: translateY(0);
 }
 .prd-doc-stage .preview-eyebrow {
   font-size: 11px;
@@ -331,5 +365,165 @@
   }
   .prd-doc-stage .preview-title {
     font-size: 32px;
+  }
+  .prd-doc-stage .preview-head {
+    flex-direction: column;
+    gap: 14px;
+  }
+  .prd-doc-stage .prd-download-btn {
+    margin-top: 0;
+  }
+}
+
+/* ---------- UX flow timelines ---------- */
+.prd-doc-stage .flow-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.prd-doc-stage .flow-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px 18px;
+  box-shadow: var(--shadow-1);
+}
+.prd-doc-stage .flow-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.prd-doc-stage .flow-role {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.prd-doc-stage .flow-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
+}
+.prd-doc-stage .flow-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.prd-doc-stage .flow-step {
+  display: flex;
+  gap: 14px;
+}
+.prd-doc-stage .flow-step__rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  align-self: stretch;
+}
+.prd-doc-stage .flow-step__node {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, white);
+}
+.prd-doc-stage .flow-step__line {
+  flex: 1;
+  width: 2px;
+  background: var(--border);
+  margin: 3px 0;
+  min-height: 6px;
+}
+.prd-doc-stage .flow-step:last-child .flow-step__line {
+  display: none;
+}
+.prd-doc-stage .flow-step__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0 16px;
+}
+.prd-doc-stage .flow-step:last-child .flow-step__body {
+  padding-bottom: 1px;
+}
+.prd-doc-stage .flow-step__text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+/* ===========================================================
+   Print / Save-as-PDF
+   The document IS the PDF: we print the rendered DOM so fonts,
+   colors, chips, cost badges and layout come out identical to
+   the on-screen view (and text stays vector/selectable). We only
+   strip screen-only chrome — the gray backdrop and the download
+   button — and tune page breaks so sections don't split badly.
+   =========================================================== */
+@media print {
+  /* Anything explicitly marked screen-only (the Download button). */
+  .prd-print-hide {
+    display: none !important;
+  }
+
+  /* Preserve accent text, chips, cost badges, flow nodes and the
+     estimate callout — browsers drop backgrounds in print otherwise. */
+  .prd-doc-stage,
+  .prd-doc-stage * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  @page {
+    margin: 16mm 14mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* Drop the gray stage padding and width cap — the @page margin frames it. */
+  .prd-doc-stage .preview-stage {
+    background: #fff !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+  .prd-doc-stage .preview-doc {
+    max-width: none !important;
+  }
+
+  /* Flatten the card: its border/shadow/rounding are screen framing and
+     would tile awkwardly across pages. The content inside is untouched. */
+  .prd-doc-stage .preview-card {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  /* Keep logical blocks intact across page breaks where they fit. */
+  .prd-doc-stage .doc-section,
+  .prd-doc-stage .doc-objlist > li,
+  .prd-doc-stage .flow-card,
+  .prd-doc-stage .doc-estimate {
+    break-inside: avoid;
+  }
+  .prd-doc-stage .doc-section__title {
+    break-after: avoid;
   }
 }

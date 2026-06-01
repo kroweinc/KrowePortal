@@ -5,9 +5,9 @@
    SECTIONS registry drives the rail TOC and the content order. Ported from the
    Claude Design prototype's prd-sections.jsx. */
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useState, useEffect, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { PrdContent, PrdPriority, PrdStackItem, PrdIntegration, FreeTierAssumption } from "@/lib/types";
+import type { PrdContent, PrdPriority, PrdStackItem, PrdIntegration, FreeTierAssumption, PrdMilestone } from "@/lib/types";
 import type { StackLookup, IntegrationLookup } from "@/lib/ai/lookup-stack-item";
 import {
   lookupStackItemAction,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/actions/lookup-tech";
 import { analyzeFreeTierFitAction } from "@/lib/actions/free-tier";
 import { renameTechAcrossPrd } from "@/lib/prd/rename-tech";
+import { flowSteps } from "@/lib/prd/flow-steps";
 import { InlineText, InlineList, InlineSelect, AddButton, RemoveCard, useEditing } from "./inline-edit";
 
 /** Patch the PRD content. Accepts a partial (merged onto the current content) or
@@ -720,26 +721,65 @@ function UxFlowsBody({ content, patch }: SectionBodyProps) {
   const editing = useEditing();
   if (!editing && flows.length === 0) return <p className="empty-note">No UX flows yet.</p>;
   return (
-    <div className="card-stack">
-      {flows.map((f, i) => (
-        <div className="prd-card" key={i}>
-          <RemoveCard onClick={() => h.remove(i)} />
-          <InlineText
-            value={f.role}
-            onChange={(v) => h.update(i, { role: v })}
-            placeholder="User type"
-            className="prd-card__title"
-          />
-          <InlineText
-            value={f.flow}
-            onChange={(v) => h.update(i, { flow: v })}
-            placeholder="Their journey through the product"
-            className="prd-card__desc"
-            multiline
-          />
-        </div>
-      ))}
-      <AddButton label="Add flow" onClick={() => h.add({ role: "", flow: "" })} />
+    <div className="flow-stack">
+      {flows.map((f, i) => {
+        const steps = flowSteps(f);
+        // Writing back always promotes the flow to the structured steps[] model.
+        const setSteps = (next: string[]) => h.update(i, { steps: next, flow: undefined });
+        return (
+          <div className="flow-card" key={i}>
+            <RemoveCard onClick={() => h.remove(i)} />
+            <div className="flow-card__head">
+              <InlineText
+                value={f.role}
+                onChange={(v) => h.update(i, { role: v })}
+                placeholder="User type"
+                className="flow-role"
+              />
+              {steps.length > 0 && (
+                <span className="flow-count">
+                  {steps.length} step{steps.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+            <ol className="flow-steps">
+              {steps.map((s, j) => (
+                <li className="flow-step" key={j}>
+                  <div className="flow-step__rail" aria-hidden="true">
+                    <span className="flow-step__node">{j + 1}</span>
+                    <span className="flow-step__line" />
+                  </div>
+                  <div className="flow-step__body">
+                    <InlineText
+                      value={s}
+                      onChange={(v) => setSteps(steps.map((x, xi) => (xi === j ? v : x)))}
+                      placeholder="Describe this step"
+                      className="flow-step__text"
+                      multiline
+                    />
+                    {editing && (
+                      <button
+                        type="button"
+                        className="inline-remove flow-step__remove"
+                        onClick={() => setSteps(steps.filter((_, xi) => xi !== j))}
+                        aria-label="Remove step"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {editing && (
+              <button type="button" className="flow-add" onClick={() => setSteps([...steps, ""])}>
+                + step
+              </button>
+            )}
+          </div>
+        );
+      })}
+      <AddButton label="Add flow" onClick={() => h.add({ role: "", steps: [] })} />
     </div>
   );
 }
@@ -774,11 +814,174 @@ function ConstraintsBody({ content, patch }: SectionBodyProps) {
   );
 }
 
+const MONTHS: Record<string, number> = {
+  january: 0, jan: 0, february: 1, feb: 1, march: 2, mar: 2, april: 3, apr: 3,
+  may: 4, june: 5, jun: 5, july: 6, jul: 6, august: 7, aug: 7,
+  september: 8, sept: 8, sep: 8, october: 9, oct: 9, november: 10, nov: 10, december: 11, dec: 11,
+};
+
+// Build a local-midnight Date, rejecting calendar overflow (e.g. Feb 31).
+function buildDate(y: number, mo: number, d: number): Date | null {
+  const dt = new Date(y, mo, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo || dt.getDate() !== d) return null;
+  return dt;
+}
+
+// Parse a forgiving range of human date inputs into a local-midnight Date.
+// Accepts "june 3", "jun 3rd", "3 june", "June 3, 2027", "6/3", "6-3-27",
+// "06/03/2026", "2026-06-03". Year defaults to the current year unless given.
+function parseFlexibleDate(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  let t = s.trim().toLowerCase();
+  if (!t) return null;
+  t = t.replace(/(\d+)(st|nd|rd|th)\b/g, "$1").replace(/,/g, " ").replace(/\s+/g, " ").trim();
+  const curYear = new Date().getFullYear();
+  const yr = (raw?: string) => (raw == null ? curYear : raw.length === 2 ? 2000 + +raw : +raw);
+
+  let m: RegExpExecArray | null;
+  // ISO: 2026-06-03
+  if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(t))) return buildDate(+m[1], +m[2] - 1, +m[3]);
+  // Numeric: 6/3, 6-3, 6/3/26, 06/03/2026
+  if ((m = /^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/.exec(t))) return buildDate(yr(m[3]), +m[1] - 1, +m[2]);
+  // Month name first: "june 3", "jun 3 2027"
+  if ((m = /^([a-z]+)\s+(\d{1,2})(?:\s+(\d{2,4}))?$/.exec(t)) && m[1] in MONTHS)
+    return buildDate(yr(m[3]), MONTHS[m[1]], +m[2]);
+  // Day first: "3 june", "3 june 2027"
+  if ((m = /^(\d{1,2})\s+([a-z]+)(?:\s+(\d{2,4}))?$/.exec(t)) && m[2] in MONTHS)
+    return buildDate(yr(m[3]), MONTHS[m[2]], +m[1]);
+  return null;
+}
+
+// Format a Date as mm/dd/yyyy.
+function fmtUS(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${d.getFullYear()}`;
+}
+
+/* DateField — a forgiving free-text date input in edit mode (type "June 3", "6/3",
+   etc.), formatted mm/dd/yyyy text otherwise. On commit the input is parsed and
+   onChange receives a normalized mm/dd/yyyy string (or "" when cleared); unparseable
+   text reverts to the previous value. */
+function DateField({
+  value,
+  onChange,
+  className = "",
+  placeholder = "e.g. June 3",
+}: {
+  value?: string | null;
+  onChange: (v: string) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  const editing = useEditing();
+  const [draft, setDraft] = useState(value ?? "");
+  const [focused, setFocused] = useState(false);
+
+  // Sync the draft from props only while not actively editing.
+  useEffect(() => {
+    if (!focused) setDraft(value ?? "");
+  }, [value, focused]);
+
+  if (!editing) {
+    if (!value) return null;
+    return <span className={className}>{value}</span>;
+  }
+
+  const commit = () => {
+    setFocused(false);
+    const t = draft.trim();
+    if (t === "") {
+      if (value) onChange("");
+      return;
+    }
+    const d = parseFlexibleDate(t);
+    if (d) onChange(fmtUS(d));
+    else setDraft(value ?? ""); // unparseable — revert
+  };
+
+  return (
+    <input
+      type="text"
+      className={"inline-input milestone-date-input " + className}
+      value={draft}
+      placeholder={placeholder}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+        if (e.key === "Escape") {
+          setDraft(value ?? "");
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+// Spread milestones evenly from the project START (the system's current date) up to
+// the deadline: the first milestone lands on today, the last (launch) on the deadline,
+// and the rest at equal steps in between. If the deadline is today or earlier there's
+// no forward window, so every milestone collapses onto the deadline.
+function distributeMilestones(ms: PrdMilestone[], deadline: Date): PrdMilestone[] {
+  const n = ms.length;
+  if (n === 0) return ms;
+  if (n === 1) return [{ ...ms[0], dueDate: fmtUS(deadline) }];
+
+  const start = new Date(); // system current date = project start
+  start.setHours(0, 0, 0, 0);
+  const span = deadline.getTime() - start.getTime();
+  if (span <= 0) return ms.map((m) => ({ ...m, dueDate: fmtUS(deadline) }));
+
+  return ms.map((m, i) => {
+    if (i === n - 1) return { ...m, dueDate: fmtUS(deadline) };
+    const dt = new Date(start.getTime() + (span * i) / (n - 1));
+    dt.setHours(0, 0, 0, 0);
+    return { ...m, dueDate: fmtUS(dt) };
+  });
+}
+
 function MilestonesBody({ content, patch }: SectionBodyProps) {
   const ms = content.milestoneList ?? [];
   const h = listPatch(ms, patch, "milestoneList");
+  const editing = useEditing();
+  const deadline = parseFlexibleDate(content.milestoneDueDate);
+
+  // Setting / changing the overall deadline re-plans every milestone date to fit:
+  // the last milestone (launch) lands on the deadline, the rest spread before it.
+  const onDeadlineChange = (v: string) => {
+    const d = parseFlexibleDate(v);
+    if (!d) {
+      patch({ milestoneDueDate: "", milestoneList: ms });
+      return;
+    }
+    patch({ milestoneDueDate: fmtUS(d), milestoneList: distributeMilestones(ms, d) });
+  };
+
+  // Adding / removing a milestone re-fits the whole set when a deadline is set.
+  const onAdd = () => {
+    const next = [...ms, { label: "", dueDate: "" }];
+    patch({ milestoneList: deadline ? distributeMilestones(next, deadline) : next });
+  };
+  const onRemove = (i: number) => {
+    const next = ms.filter((_, idx) => idx !== i);
+    patch({ milestoneList: deadline ? distributeMilestones(next, deadline) : next });
+  };
+
   return (
     <div className="milestone-list">
+      {(editing || content.milestoneDueDate) && (
+        <div className="milestone-deadline">
+          <span className="milestone-deadline-label">Due by</span>
+          <span className="milestone-deadline-value">
+            <DateField value={content.milestoneDueDate} onChange={onDeadlineChange} placeholder="mm/dd/yyyy" />
+          </span>
+        </div>
+      )}
       {ms.map((m, i) => (
         <div className="milestone-row" key={i}>
           <span className="milestone-dot" aria-hidden="true"></span>
@@ -789,12 +992,12 @@ function MilestonesBody({ content, patch }: SectionBodyProps) {
             className="milestone-label"
           />
           <span className="milestone-due">
-            <InlineText value={m.dueDate} onChange={(v) => h.update(i, { dueDate: v })} placeholder="When" />
+            <DateField value={m.dueDate} onChange={(v) => h.update(i, { dueDate: v })} placeholder="mm/dd/yyyy" />
           </span>
-          <RemoveCard onClick={() => h.remove(i)} />
+          <RemoveCard onClick={() => onRemove(i)} />
         </div>
       ))}
-      <AddButton label="Add milestone" onClick={() => h.add({ label: "", dueDate: "" })} />
+      <AddButton label="Add milestone" onClick={onAdd} />
     </div>
   );
 }

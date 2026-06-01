@@ -50,13 +50,13 @@ const SECTIONS = `The PRD uses these JSON keys. Write for a small-business owner
 
 14. techStack (array of { name, category, provider, layer, includes[], monthlyCost, estimated }) — the concrete named stack, BROKEN DOWN BY LAYER. Set "layer" to one of "frontend" | "backend" | "database" | "email" | "hosting" | "other". Use "includes" to list what that layer covers (e.g. Frontend → "Public referral form", "Thank-you page", "Admin dashboard UI"; Database → "Stores referral submissions", "Stores generated codes", "Stores status"). Right-size to the product — see the stack-scoping rules below.
 
-15. uxFlows (array of { role, flow }) — per-role journeys that SUPPLEMENT (do not replace) the single coreUserFlow above. Optional when coreUserFlow already covers the journey.
+15. uxFlows (array of { role, steps }) — per-role journeys as an ordered list of short single-action "steps" (about 5–8 each) that SUPPLEMENT (do not replace) the single coreUserFlow above. Each step is one concise sentence; do NOT number them yourself. Optional when coreUserFlow already covers the journey.
 
 16. assumptions (string[]) — what the client must provide within a reasonable timeframe for the build to proceed.
 
 17. constraintsDetail (object { deadline, budget, branding, security }) — hard constraints. The "deadline" MUST be the client's exact target launch / go-live DATE as an ISO calendar date (YYYY-MM-DD) whenever it is known — capture the precise date during the interview, never a vague phrase like "before Q3" or "8 weeks out". Other fields may be omitted if truly unknown. NOTE: a project PRICE and PAYMENT TERMS belong to the separate quote, NOT the PRD — never put a build price or payment schedule anywhere in the PRD.
 
-18. risks (string[]) AND openQuestions (string[]) AND milestoneList (array of { label, dueDate }) — risks are things that could cause delay. openQuestions MUST be EMPTY in a finished PRD (ask during the interview instead). milestoneList is the delivery TIMELINE: the ordered phases of work, each with a dueDate. When the client's exact deadline date is known, BACK-PLAN the schedule across the window from today's date (given in the notes) up to that deadline — distribute the milestones so the FINAL milestone's dueDate equals the exact deadline date and earlier milestones land on sensible intermediate calendar dates in between. Every dueDate must then be a real ISO calendar date (YYYY-MM-DD), in chronological order. Only fall back to a rough phase label ("Week 2") when no exact deadline date is known.`;
+18. risks (string[]) AND openQuestions (string[]) AND milestoneList (array of { label, dueDate }) — risks are things that could cause delay. openQuestions MUST be EMPTY in a finished PRD (ask during the interview instead). milestoneList is the delivery TIMELINE: the ordered phases of work, each with a dueDate. When the client's exact deadline date is known, BACK-PLAN the schedule across the window from today's date (given in the notes) up to that deadline — distribute the milestones so the FINAL milestone's dueDate equals the exact deadline date and earlier milestones land on sensible intermediate calendar dates in between. Every dueDate must then be a real US calendar date in mm/dd/yyyy format, in chronological order. Only fall back to a rough phase label ("Week 2") when no exact deadline date is known. ALSO set milestoneDueDate to the single overall deadline the whole timeline builds toward, in mm/dd/yyyy format — it MUST equal the final milestone's dueDate.`;
 
 const COST_RULES = `Cost rules for sections 8 and 9:
 - monthlyCost is the third party's / provider's own published subscription rate per month, phrased like "~$25/mo" or "$0/mo + 2.9% per txn". It is NEVER the developer's fee or setup time.
@@ -99,7 +99,7 @@ Output ONLY valid JSON.`;
 
 You have reached the question limit. Return a finished PRD now:
 { "kind": "prd", "content": { ...the full section object... } }
-Fill every section from the notes + answers, with rich, concrete content. Do NOT ask any more questions, and do NOT leave any open questions — for anything still unknown, state a sensible assumption under "assumptions" and keep openQuestions empty. If an exact deadline date was provided, set constraintsDetail.deadline to that ISO date and back-plan milestoneList so the final milestone's dueDate equals it and every dueDate is a real ISO calendar date.`;
+Fill every section from the notes + answers, with rich, concrete content. Do NOT ask any more questions, and do NOT leave any open questions — for anything still unknown, state a sensible assumption under "assumptions" and keep openQuestions empty. If an exact deadline date was provided, set constraintsDetail.deadline to that ISO date, set milestoneDueDate to that date in mm/dd/yyyy format, and back-plan milestoneList so the final milestone's dueDate equals it and every dueDate is a real calendar date in mm/dd/yyyy format.`;
   }
 
   return `${base}

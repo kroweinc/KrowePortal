@@ -151,7 +151,8 @@ const PrdPageSchema = z.object({
 
 const PrdUxFlowSchema = z.object({
   role: z.string().min(1).max(120),
-  flow: z.string().min(1).max(1200),
+  flow: z.string().min(1).max(1200).optional(),
+  steps: z.array(z.string().min(1).max(400)).max(15).optional(),
 });
 
 const PrdConstraintsSchema = z.object({
@@ -238,6 +239,7 @@ export const PrdContentSchema = z.object({
   constraints: z.array(z.string().min(1).max(300)).max(30).default([]),
   risks: z.array(z.string().min(1).max(400)).max(30).default([]),
   openQuestions: z.array(z.string().min(1).max(400)).max(30).default([]),
+  milestoneDueDate: z.string().max(80).nullish(),
   milestoneList: z.array(PrdMilestoneSchema).max(30).default([]),
   milestones: z.string().max(2000).optional(),
   // Builder's optional usage hint to sharpen the free-tier analysis.
