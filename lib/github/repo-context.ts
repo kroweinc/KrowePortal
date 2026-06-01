@@ -83,7 +83,11 @@ export async function fetchRepoContext(
       token
     ),
     githubFetch<Record<string, number>>(`/repos/${owner}/${repo}/languages`, token),
-    githubFetch<{ sha: string; commit: { message: string; author: { date: string } } }[]>(
+    githubFetch<{
+      sha: string;
+      commit: { message: string; author: { name?: string; date: string } | null };
+      author: { login: string } | null;
+    }[]>(
       `/repos/${owner}/${repo}/commits?per_page=8`,
       token
     ),
@@ -165,12 +169,15 @@ export async function fetchRepoContext(
     degraded.push("languages");
   }
 
-  let recentCommits: { sha: string; message: string; date: string }[] = [];
+  let recentCommits: RepoContext["recentCommits"] = [];
   if (results[4].status === "fulfilled") {
     recentCommits = results[4].value.map((c) => ({
       sha: c.sha.slice(0, 7),
       message: c.commit.message.split("\n")[0].slice(0, 120),
-      date: c.commit.author.date,
+      date: c.commit.author?.date ?? "",
+      author: c.commit.author?.name
+        ? { name: c.commit.author.name, login: c.author?.login ?? null }
+        : null,
     }));
   } else {
     degraded.push("commits");
@@ -194,6 +201,6 @@ export async function fetchRepoContext(
 
 export const buildRepoContext = unstable_cache(
   fetchRepoContext,
-  ["repo-context"],
+  ["repo-context-v2"],
   { revalidate: 600 }
 );

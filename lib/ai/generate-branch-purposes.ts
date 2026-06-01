@@ -47,7 +47,7 @@ async function callOnce(
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_tokens: 900,
+    max_completion_tokens: 900,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },

@@ -244,13 +244,15 @@ function TaskDetailBody({
         >
           Overview
         </button>
-        <button
-          type="button"
-          className={`krowe-task-tab ${tab === "build" ? "active" : ""}`}
-          onClick={() => setTab("build")}
-        >
-          Build
-        </button>
+        {role !== "operator" && (
+          <button
+            type="button"
+            className={`krowe-task-tab ${tab === "build" ? "active" : ""}`}
+            onClick={() => setTab("build")}
+          >
+            Build
+          </button>
+        )}
         <button
           type="button"
           className={`krowe-task-tab ${tab === "audit" ? "active" : ""}`}
@@ -264,7 +266,7 @@ function TaskDetailBody({
       <div className="krowe-task-sheet-body">
         {tab === "audit" ? (
           <TaskAuditLog taskId={task.id} />
-        ) : tab === "build" ? (
+        ) : tab === "build" && role !== "operator" ? (
           <TaskBuildPrompt task={task} />
         ) : (
         <>

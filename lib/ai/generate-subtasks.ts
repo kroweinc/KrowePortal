@@ -21,7 +21,7 @@ async function callOpenAIOneShot(
 ): Promise<string> {
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_tokens: maxTokens,
+    max_completion_tokens: maxTokens,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: systemPrompt },

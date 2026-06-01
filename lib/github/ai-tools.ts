@@ -167,7 +167,7 @@ export async function runWithTools(
 
     const response = await client.chat.completions.create({
       model: opts.model,
-      max_tokens: opts.maxTokens ?? 1500,
+      max_completion_tokens: opts.maxTokens ?? 1500,
       response_format: opts.responseFormat,
       tools: REPO_TOOLS,
       tool_choice: "auto",
@@ -246,7 +246,7 @@ export async function runWithTools(
 
   const finalResponse = await client.chat.completions.create({
     model: opts.model,
-    max_tokens: opts.maxTokens ?? 1500,
+    max_completion_tokens: opts.maxTokens ?? 1500,
     response_format: opts.responseFormat,
     messages,
   });

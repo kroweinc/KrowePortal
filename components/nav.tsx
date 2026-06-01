@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { DEV_TOGGLE_ENABLED } from "@/lib/auth";
 import type { Profile } from "@/lib/types";
 
@@ -12,17 +11,6 @@ export function Nav({ profile }: NavProps) {
 
   return (
     <header className="krowe-topbar">
-      <div className="krowe-brand">
-        <Image
-          src="/images/KroweLogo.png"
-          alt="Krowe"
-          width={96}
-          height={26}
-          style={{ objectFit: "contain" }}
-          priority
-        />
-        <span className="krowe-brand-portal">Portal</span>
-      </div>
       <div className="krowe-topbar-right">
         <span className={`krowe-role-pill ${role}`}>
           <span className="dot" />

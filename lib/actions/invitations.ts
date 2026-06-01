@@ -15,7 +15,7 @@ async function getClient(profileId: string) {
 
 // Creates an engagement for this builder (with backfill of existing personal tasks) if none exists.
 // Uses admin client unconditionally — we've already verified the caller's identity via getCurrentProfile().
-async function getOrCreateEngagement(profileId: string): Promise<Engagement> {
+export async function getOrCreateEngagement(profileId: string): Promise<Engagement> {
   const admin = createAdminClient();
 
   const { data: existing } = await admin

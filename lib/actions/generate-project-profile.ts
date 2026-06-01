@@ -31,22 +31,26 @@ function rowToProfile(row: ProjectProfileRow): ProjectProfile {
   };
 }
 
+// Return the most recently generated profile for this repo, regardless of
+// which commit it was generated at. Once a repo has a stored profile we reuse
+// it on every visit — new commits no longer trigger an expensive AI rerun.
+// Refreshing against the latest commit is an explicit action (forceRefresh,
+// wired to the Refresh button). Uses the project_profiles_repo_idx index.
 async function readCachedProfile(
-  repoFullName: string,
-  commitSha: string
+  repoFullName: string
 ): Promise<ProjectProfile | null> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("project_profiles")
     .select("summary, audience, features, current_state, state_rationale, services")
     .eq("repo_full_name", repoFullName)
-    .eq("commit_sha", commitSha)
+    .order("generated_at", { ascending: false })
+    .limit(1)
     .maybeSingle<ProjectProfileRow>();
 
   if (error) {
     console.error("[getProjectProfile] read failed", {
       repo: repoFullName,
-      sha: commitSha,
       error: error.message,
     });
     return null;
@@ -104,7 +108,7 @@ export async function getProjectProfile(
   const commitSha = ctx.recentCommits[0]?.sha ?? "no-commits";
 
   if (!options.forceRefresh) {
-    const cached = await readCachedProfile(repoFullName, commitSha);
+    const cached = await readCachedProfile(repoFullName);
     if (cached) return cached;
   }
 

@@ -1,0 +1,155 @@
+import { openai, AI_MODEL } from "./client";
+import type { ContractContent, BriefContent, PrdContent } from "@/lib/types";
+
+export type ContractDraftInput = {
+  title: string;
+  notes: string;
+  providerName?: string;
+  clientName?: string;
+  quoteContent?: BriefContent;
+  /**
+   * The project's approved PRD, when one exists. Drives scope of services and
+   * deliverables so the contract reflects what was agreed in the PRD.
+   */
+  prdContent?: PrdContent;
+};
+
+type AIResponse = {
+  parties?: { provider?: string; client?: string };
+  effectiveDate?: string | null;
+  scopeOfServices?: string;
+  deliverables?: string[];
+  fees?: string;
+  paymentTerms?: string;
+  timeline?: string;
+  ipOwnership?: string;
+  confidentiality?: string;
+  warranties?: string;
+  liability?: string;
+  termination?: string;
+  changeManagement?: string;
+  governingLaw?: string;
+  additionalTerms?: string[];
+};
+
+const SYSTEM_PROMPT = `You are drafting a plain-English software services agreement (a freelance/agency contract) from a solo software builder's raw notes about a client engagement.
+
+This is an OUTBOUND document the builder will refine and send to the client to e-sign. Write fair, standard, readable terms — the kind a reasonable solo builder serving a small business would use. Plain English over legalese. Do NOT include "this is not legal advice" disclaimers in the body.
+
+Output ONLY valid JSON in this exact shape (omit fields the notes don't support):
+
+{
+  "parties": { "provider": "the builder/agency name", "client": "the client business name" },
+  "effectiveDate": "ISO date or null if unknown",
+  "scopeOfServices": "What the provider will do, in 2–6 sentences.",
+  "deliverables": [ "A concrete deliverable." ],
+  "fees": "The pricing model and amounts (fixed fee, hourly rate, retainer).",
+  "paymentTerms": "Payment schedule, deposit, invoicing cadence, late-payment terms.",
+  "timeline": "Expected duration / key dates.",
+  "ipOwnership": "Who owns the work product and when (e.g. IP transfers to client upon full payment; provider retains pre-existing tools).",
+  "confidentiality": "Mutual confidentiality terms.",
+  "warranties": "Warranty period and what's covered; disclaimers of implied warranties.",
+  "liability": "Limitation of liability (e.g. capped at total fees paid).",
+  "termination": "How either party may terminate, notice period, kill-fee / payment for work done.",
+  "changeManagement": "How out-of-scope changes are handled (written change orders, re-quoting).",
+  "governingLaw": "Governing jurisdiction if mentioned.",
+  "additionalTerms": [ "Any other clause the notes call for." ]
+}
+
+Sensible DEFAULTS to apply UNLESS the notes contradict them:
+- IP assigns to the client upon receipt of full payment; the provider retains rights to pre-existing/general-purpose tools and know-how.
+- 30-day warranty on delivered work for defects against the agreed spec.
+- Mutual confidentiality.
+- Liability capped at the total fees paid under the agreement.
+- Either party may terminate with written notice; client pays for work completed to date (kill-fee = work done + any non-refundable deposit).
+- Out-of-scope changes require a written change order before work proceeds.
+
+Rules:
+- Use the provided provider/client names in "parties" when given.
+- If a quote is provided, make "fees", "paymentTerms", and "deliverables" CONSISTENT with it — do not contradict the quoted amounts or scope.
+- If a PRD is provided, base "scopeOfServices" and "deliverables" on its features and requirements; keep them consistent with both the PRD and the quote.
+- Do NOT invent jurisdiction, dates, or amounts not present in the notes, quote, or PRD. Leave them out / null.`;
+
+function buildUserPrompt(input: ContractDraftInput): string {
+  const lines: string[] = [];
+  lines.push(`Contract title: ${input.title}`);
+  if (input.providerName) lines.push(`Provider (builder): ${input.providerName}`);
+  if (input.clientName) lines.push(`Client: ${input.clientName}`);
+  lines.push("");
+  lines.push("Raw notes:");
+  lines.push(input.notes || "(none)");
+
+  const q = input.quoteContent;
+  if (q) {
+    lines.push("");
+    lines.push("Associated quote (keep fees/scope consistent with this):");
+    if (q.summary) lines.push(`- Summary: ${q.summary}`);
+    if (typeof q.totals?.grand === "number") lines.push(`- Quoted total: $${q.totals.grand}`);
+    if (q.paymentTerms) lines.push(`- Payment terms: ${q.paymentTerms}`);
+    const deliverables = (q.deliverables ?? []).map((d) => d.title).filter(Boolean);
+    if (deliverables.length) lines.push(`- Deliverables: ${deliverables.join("; ")}`);
+  }
+
+  const prd = input.prdContent;
+  if (prd) {
+    lines.push("");
+    lines.push("Approved PRD (base scope of services and deliverables on this):");
+    if (prd.overview) lines.push(`- Overview: ${prd.overview}`);
+    const features = (prd.features ?? []).map((f) => f.title).filter(Boolean);
+    if (features.length) lines.push(`- Features: ${features.join("; ")}`);
+    if (prd.requirements?.length) lines.push(`- Requirements: ${prd.requirements.join("; ")}`);
+  }
+  return lines.join("\n");
+}
+
+function strList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((s): s is string => typeof s === "string" && s.trim().length > 0).map((s) => s.trim());
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
+}
+
+export async function generateContractDraft(input: ContractDraftInput): Promise<ContractContent> {
+  let ai: AIResponse = {};
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: AI_MODEL,
+      max_completion_tokens: 2400,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: buildUserPrompt(input) },
+      ],
+    });
+
+    const raw = response.choices[0]?.message?.content ?? "{}";
+    ai = JSON.parse(raw) as AIResponse;
+  } catch (err) {
+    console.error("[generateContractDraft] AI call failed", err);
+    ai = {};
+  }
+
+  const provider = str(ai.parties?.provider) ?? input.providerName;
+  const client = str(ai.parties?.client) ?? input.clientName;
+
+  return {
+    parties: provider || client ? { provider, client } : undefined,
+    effectiveDate: str(ai.effectiveDate) ?? null,
+    scopeOfServices: str(ai.scopeOfServices),
+    deliverables: strList(ai.deliverables),
+    fees: str(ai.fees),
+    paymentTerms: str(ai.paymentTerms),
+    timeline: str(ai.timeline),
+    ipOwnership: str(ai.ipOwnership),
+    confidentiality: str(ai.confidentiality),
+    warranties: str(ai.warranties),
+    liability: str(ai.liability),
+    termination: str(ai.termination),
+    changeManagement: str(ai.changeManagement),
+    governingLaw: str(ai.governingLaw),
+    additionalTerms: strList(ai.additionalTerms),
+  };
+}

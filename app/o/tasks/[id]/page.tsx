@@ -1,7 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
-import { Nav } from "@/components/nav";
 import { Badge } from "@/components/ui/badge";
 import { DeleteTaskButton } from "@/components/delete-task-button";
 import { OperatorTaskActions } from "@/app/o/tasks/[id]/operator-task-actions";
@@ -57,7 +56,6 @@ export default async function OperatorTaskDetail({
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      <Nav profile={profile} />
       <main className="mx-auto max-w-2xl px-6 py-10">
         <div className="mb-6">
           <Link href="/o" className="text-xs text-neutral-400 hover:text-neutral-700">

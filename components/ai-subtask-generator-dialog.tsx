@@ -21,6 +21,14 @@ import { formatEstimate } from "@/lib/format-estimate";
 
 const OTHER = "__other__";
 
+// Drop any AI-supplied option that is itself a generic "Other"/"please specify"
+// catch-all, since the UI always renders its own canonical OTHER choice. Without
+// this, such an option renders twice.
+const isRealOption = (opt: string) => {
+  const o = opt.trim().toLowerCase();
+  return o !== "other" && !o.includes("specify");
+};
+
 type DialogState =
   | { kind: "idle" }
   | { kind: "loading" }
@@ -214,7 +222,7 @@ export function AiSubtaskGeneratorDialog({ taskId, onAccept, triggerClassName }:
                     <div key={q.id} className="space-y-2">
                       <p className="text-sm font-medium text-neutral-800">{q.text}</p>
                       <div className="space-y-1.5">
-                        {q.options.map((opt) => (
+                        {q.options.filter(isRealOption).map((opt) => (
                           <label
                             key={opt}
                             className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition ${

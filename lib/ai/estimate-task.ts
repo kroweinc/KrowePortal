@@ -17,7 +17,7 @@ export async function estimateTask(input: EstimateInput): Promise<TaskEstimateRe
 
   const response = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_tokens: 120,
+    max_completion_tokens: 800,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: systemPrompt },

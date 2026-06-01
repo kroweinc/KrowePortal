@@ -1,0 +1,335 @@
+/* ===========================================================
+   PRD client document — the polished editorial view a client
+   receives. Shared by the in-builder Preview and the public
+   page. Namespaced under .prd-doc-stage; builds on Krowe tokens
+   already defined in app/globals.css.
+   =========================================================== */
+.prd-doc-stage {
+  --accent: var(--primary);
+  --accent-soft: var(--primary-soft);
+}
+
+.prd-doc-stage .preview-stage {
+  background: var(--surface-subtle);
+  min-height: 100%;
+  padding: 40px 16px 64px;
+}
+.prd-doc-stage .preview-doc {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.prd-doc-stage .preview-head {
+  margin-bottom: 22px;
+}
+.prd-doc-stage .preview-eyebrow {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+  font-weight: 600;
+}
+.prd-doc-stage .preview-title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 40px;
+  letter-spacing: -0.015em;
+  margin-top: 8px;
+  color: var(--foreground);
+  line-height: 1.1;
+}
+.prd-doc-stage .preview-prepared {
+  font-size: 14px;
+  color: var(--muted-foreground);
+  margin-top: 8px;
+}
+.prd-doc-stage .preview-prepared span {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.prd-doc-stage .preview-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 38px 40px;
+  box-shadow: var(--shadow-2);
+}
+
+.prd-doc-stage .doc-body {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.prd-doc-stage .doc-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.prd-doc-stage .doc-section__title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent);
+  font-weight: 600;
+}
+.prd-doc-stage .doc-prose {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--foreground);
+  white-space: pre-wrap;
+}
+.prd-doc-stage .doc-bullets,
+.prd-doc-stage .doc-subbullets,
+.prd-doc-stage .doc-ordered,
+.prd-doc-stage .doc-checks,
+.prd-doc-stage .doc-flat,
+.prd-doc-stage .doc-objlist,
+.prd-doc-stage .doc-stories {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.prd-doc-stage .doc-bullets li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+.prd-doc-stage .doc-bullets li::before {
+  content: "•";
+  position: absolute;
+  left: 4px;
+  color: var(--muted-foreground);
+}
+.prd-doc-stage .doc-bullets li + li,
+.prd-doc-stage .doc-checks li + li,
+.prd-doc-stage .doc-flat li + li {
+  margin-top: 6px;
+}
+.prd-doc-stage .doc-ordered {
+  counter-reset: d;
+}
+.prd-doc-stage .doc-ordered li {
+  position: relative;
+  padding-left: 26px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+.prd-doc-stage .doc-ordered li + li {
+  margin-top: 6px;
+}
+.prd-doc-stage .doc-ordered li::before {
+  counter-increment: d;
+  content: counter(d) ".";
+  position: absolute;
+  left: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  top: 2px;
+}
+.prd-doc-stage .doc-objlist {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.prd-doc-stage .doc-obj__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prd-doc-stage .doc-obj__name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.prd-doc-stage .doc-obj__desc {
+  font-size: 13.5px;
+  color: var(--muted-foreground);
+  margin-top: 3px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.prd-doc-stage .doc-chip {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+}
+.prd-doc-stage .doc-subbullets {
+  margin-top: 6px;
+}
+.prd-doc-stage .doc-subbullets li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  line-height: 1.55;
+}
+.prd-doc-stage .doc-subbullets li::before {
+  content: "–";
+  position: absolute;
+  left: 4px;
+}
+.prd-doc-stage .doc-eg {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  margin-top: 6px;
+}
+.prd-doc-stage .doc-eg__lead {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.prd-doc-stage .doc-checks li {
+  display: flex;
+  gap: 9px;
+  font-size: 14.5px;
+  color: var(--foreground);
+  line-height: 1.55;
+}
+.prd-doc-stage .doc-check__mark {
+  color: var(--success);
+  flex-shrink: 0;
+}
+.prd-doc-stage .doc-stories li {
+  font-size: 14.5px;
+  color: var(--foreground);
+  line-height: 1.6;
+}
+.prd-doc-stage .doc-stories li + li {
+  margin-top: 8px;
+}
+.prd-doc-stage .doc-story__lead {
+  color: var(--muted-foreground);
+}
+.prd-doc-stage .doc-flat li {
+  font-size: 14.5px;
+  color: var(--foreground);
+}
+.prd-doc-stage .doc-flat--cost li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.prd-doc-stage .doc-muted {
+  color: var(--muted-foreground);
+}
+.prd-doc-stage .doc-cost {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--foreground);
+  background: var(--surface-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+.prd-doc-stage .doc-cost__est {
+  color: var(--warning);
+}
+.prd-doc-stage .doc-estimate {
+  font-size: 12.5px;
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 26%, white);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+}
+.prd-doc-stage .doc-stackgroups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.prd-doc-stage .doc-stack__head {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+/* Sign panel — editorial, used by the in-builder Preview (disabled mirror). */
+.prd-doc-stage .sign-panel {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 28px 32px;
+  margin-top: 18px;
+  box-shadow: var(--shadow-1);
+}
+.prd-doc-stage .sign-panel__title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 24px;
+  color: var(--foreground);
+}
+.prd-doc-stage .sign-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 18px;
+}
+.prd-doc-stage .sign-field span {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.prd-doc-stage .sign-field input {
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+}
+.prd-doc-stage .sign-consent {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+}
+.prd-doc-stage .sign-consent input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.prd-doc-stage .sign-btn {
+  margin-top: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 11px 22px;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--radius-full);
+}
+.prd-doc-stage .sign-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.prd-doc-stage .preview-footer {
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 26px;
+}
+
+@media (max-width: 720px) {
+  .prd-doc-stage .preview-card {
+    padding: 26px 22px;
+  }
+  .prd-doc-stage .preview-title {
+    font-size: 32px;
+  }
+}

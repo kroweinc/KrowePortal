@@ -81,7 +81,7 @@ export async function generateBuildPrompt(
 
   const retry = await openai.chat.completions.create({
     model: AI_MODEL,
-    max_tokens: 2500,
+    max_completion_tokens: 2500,
     response_format: { type: "json_object" },
     messages: retryMessages,
   });

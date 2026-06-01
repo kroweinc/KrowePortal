@@ -56,6 +56,63 @@ function defaultRepoFrom(conn: ConnectionRow): {
   };
 }
 
+type EngagementRow = {
+  id: string;
+  builder_id: string;
+  github_repo_owner: string | null;
+  github_repo_name: string | null;
+  github_repo_full_name: string | null;
+  github_default_branch: string | null;
+};
+
+async function resolveFromEngagement(
+  engagement: EngagementRow | null,
+  currentProfileId: string
+): Promise<EngagementRepo | null> {
+  const supabase = createAdminClient();
+
+  const currentConn = await loadConnection(supabase, currentProfileId);
+  const builderConn =
+    engagement?.builder_id && engagement.builder_id !== currentProfileId
+      ? await loadConnection(supabase, engagement.builder_id)
+      : null;
+
+  const conn = currentConn ?? builderConn;
+  if (!conn) return null;
+
+  const engagementRepo =
+    engagement &&
+    engagement.github_repo_owner &&
+    engagement.github_repo_name &&
+    engagement.github_default_branch
+      ? {
+          owner: engagement.github_repo_owner,
+          name: engagement.github_repo_name,
+          fullName:
+            engagement.github_repo_full_name ??
+            `${engagement.github_repo_owner}/${engagement.github_repo_name}`,
+          defaultBranch: engagement.github_default_branch,
+        }
+      : null;
+
+  const repo =
+    engagementRepo ??
+    (currentConn ? defaultRepoFrom(currentConn) : null) ??
+    (builderConn ? defaultRepoFrom(builderConn) : null);
+
+  if (!repo) return null;
+
+  return {
+    token: conn.access_token,
+    owner: repo.owner,
+    name: repo.name,
+    fullName: repo.fullName,
+    defaultBranch: repo.defaultBranch,
+    engagementId: engagement?.id ?? null,
+    builderId: engagement?.builder_id ?? null,
+  };
+}
+
 /**
  * Resolves a usable (token, repo) pair for a task.
  *
@@ -89,47 +146,30 @@ export async function getEngagementRepoForTask(
           "id, builder_id, github_repo_owner, github_repo_name, github_repo_full_name, github_default_branch"
         )
         .eq("id", task.engagement_id)
-        .maybeSingle()
+        .maybeSingle<EngagementRow>()
     : { data: null };
 
-  const currentConn = await loadConnection(supabase, currentProfileId);
-  const builderConn =
-    engagement?.builder_id && engagement.builder_id !== currentProfileId
-      ? await loadConnection(supabase, engagement.builder_id)
-      : null;
+  return resolveFromEngagement(engagement ?? null, currentProfileId);
+}
 
-  const conn = currentConn ?? builderConn;
-  if (!conn) return null;
+/**
+ * Same as getEngagementRepoForTask but starts from an engagement id directly.
+ * Used by views (like the operator project profile) that already know which
+ * engagement they're rendering.
+ */
+export async function getEngagementRepoById(
+  engagementId: string,
+  currentProfileId: string
+): Promise<EngagementRepo | null> {
+  const supabase = createAdminClient();
 
-  const engagementRepo =
-    engagement &&
-    engagement.github_repo_owner &&
-    engagement.github_repo_name &&
-    engagement.github_default_branch
-      ? {
-          owner: engagement.github_repo_owner as string,
-          name: engagement.github_repo_name as string,
-          fullName:
-            (engagement.github_repo_full_name as string | null) ??
-            `${engagement.github_repo_owner}/${engagement.github_repo_name}`,
-          defaultBranch: engagement.github_default_branch as string,
-        }
-      : null;
+  const { data: engagement } = await supabase
+    .from("engagements")
+    .select(
+      "id, builder_id, github_repo_owner, github_repo_name, github_repo_full_name, github_default_branch"
+    )
+    .eq("id", engagementId)
+    .maybeSingle<EngagementRow>();
 
-  const repo =
-    engagementRepo ??
-    (currentConn ? defaultRepoFrom(currentConn) : null) ??
-    (builderConn ? defaultRepoFrom(builderConn) : null);
-
-  if (!repo) return null;
-
-  return {
-    token: conn.access_token,
-    owner: repo.owner,
-    name: repo.name,
-    fullName: repo.fullName,
-    defaultBranch: repo.defaultBranch,
-    engagementId: engagement?.id ?? null,
-    builderId: engagement?.builder_id ?? null,
-  };
+  return resolveFromEngagement(engagement ?? null, currentProfileId);
 }

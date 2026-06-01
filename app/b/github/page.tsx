@@ -1,44 +1,37 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { getUserGithubConnection } from "@/lib/github/token";
 import { buildRepoContext } from "@/lib/github/repo-context";
-import { buildBranchGraph, type BranchGraph, type BranchNode } from "@/lib/github/branches";
-import { getProjectProfile } from "@/lib/actions/generate-project-profile";
-import { getBranchPurposes } from "@/lib/actions/get-branch-purposes";
+import { buildBranchGraph, type BranchGraph } from "@/lib/github/branches";
 import {
-  AiOverviewCard,
-  AiOverviewSkeleton,
-  BranchesTreeWithPurposes,
-  BranchesTreeSkeleton,
-  BranchesUnavailable,
-  FileTreeSnapshot,
-  LanguagesBar,
+  getProjectProfile,
+  type ProjectProfile,
+} from "@/lib/actions/generate-project-profile";
+import { getMyEngagement } from "@/lib/actions/invitations";
+import {
+  BranchesCard,
+  BranchesCardSkeleton,
+  CommitsCard,
+  CommitsCardSkeleton,
+  OverviewCard,
+  OverviewCardSkeleton,
+  ProjectHeader,
+  ReadmeCard,
+  StructureCard,
+  TechStackCard,
+  TechStackCardSkeleton,
+  type OverviewStats,
+} from "@/components/operator-project-profile";
+import { Icon } from "@/components/operator-project-profile/icon";
+import {
   NotConnected,
   NoRepoSelected,
-  ProfileHeader,
-  ReadmePreview,
-  RecentCommitsList,
   RepoFetchError,
 } from "@/components/project-profile";
-
-function flattenBranches(graph: BranchGraph) {
-  const out: {
-    name: string;
-    tipShaFull: string;
-    latestCommit: { message: string; date: string } | null;
-  }[] = [];
-  function walk(node: BranchNode) {
-    out.push({
-      name: node.name,
-      tipShaFull: node.tipShaFull,
-      latestCommit: node.latestCommit,
-    });
-    for (const child of node.children) walk(child);
-  }
-  walk(graph.root);
-  return out;
-}
+import { deriveArchLayers } from "@/lib/operator-project/derive-arch-layers";
+import type { RepoContext } from "@/lib/github/types";
 
 export default async function ProjectProfilePage() {
   const profile = await getCurrentProfile();
@@ -49,31 +42,38 @@ export default async function ProjectProfilePage() {
 
   if (!connection) {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-10">
-        <NotConnected />
+      <main className="krowe-page krowe-blueprint-canvas">
+        <div className="krowe-page-inner anim-fade-up" style={{ maxWidth: 1180 }}>
+          <NotConnected />
+        </div>
       </main>
     );
   }
 
   if (!connection.selectedRepo) {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-10">
-        <NoRepoSelected />
+      <main className="krowe-page krowe-blueprint-canvas">
+        <div className="krowe-page-inner anim-fade-up" style={{ maxWidth: 1180 }}>
+          <NoRepoSelected />
+        </div>
       </main>
     );
   }
 
   const { owner, name, defaultBranch, fullName } = connection.selectedRepo;
 
-  const [context, branchGraph] = await Promise.all([
+  const [repoContext, branchGraph, engagement] = await Promise.all([
     buildRepoContext(connection.token, owner, name, defaultBranch),
     buildBranchGraph(connection.token, owner, name, defaultBranch),
+    getMyEngagement(),
   ]);
 
-  if (!context) {
+  if (!repoContext) {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-10">
-        <RepoFetchError repoFullName={fullName} />
+      <main className="krowe-page krowe-blueprint-canvas">
+        <div className="krowe-page-inner anim-fade-up" style={{ maxWidth: 1180 }}>
+          <RepoFetchError repoFullName={fullName} />
+        </div>
       </main>
     );
   }
@@ -85,40 +85,135 @@ export default async function ProjectProfilePage() {
     ref: defaultBranch,
   };
 
-  const profilePromise = getProjectProfile(context, toolContext);
-  const purposesPromise = branchGraph
-    ? getBranchPurposes(fullName, flattenBranches(branchGraph))
-    : Promise.resolve({});
+  const profilePromise: Promise<ProjectProfile | null> = getProjectProfile(
+    repoContext,
+    toolContext
+  );
+
+  const repoUrl = `https://github.com/${owner}/${name}`;
+  const readmeUrl = `${repoUrl}/blob/${defaultBranch}/README.md`;
+
+  const commits14d = repoContext.recentCommits.filter((c) => {
+    const t = new Date(c.date).getTime();
+    return !Number.isNaN(t) && Date.now() - t < 14 * 86_400_000;
+  }).length;
+  const contributors = new Set(
+    repoContext.recentCommits
+      .map((c) => c.author?.login ?? c.author?.name ?? null)
+      .filter((v): v is string => Boolean(v))
+  ).size;
+
+  const branchGraphPromise: Promise<BranchGraph | null> = Promise.resolve(branchGraph);
+  const statsPromise: Promise<OverviewStats> = branchGraphPromise.then((graph) => ({
+    commits14d,
+    contributors,
+    branchCount: graph ? graph.root.children.length + 1 : 0,
+    lastSyncIso: new Date().toISOString(),
+  }));
+
+  const archLayersPromise = profilePromise.then((p) => deriveArchLayers(repoContext, p));
+
+  // Title: prefer engagement title (the operator's chosen name) when paired,
+  // otherwise fall back to the repo name.
+  const title = engagement?.title ?? name;
+  const operatorName = engagement?.operator?.display_name ?? null;
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-6 py-10">
-      <ProfileHeader context={context} />
+    <main className="krowe-page krowe-blueprint-canvas">
+      <div
+        className="krowe-page-inner anim-fade-up"
+        style={{ maxWidth: 1180, display: "flex", flexDirection: "column", gap: 20 }}
+      >
+        <ProjectHeader
+          title={title}
+          org={owner}
+          repoName={name}
+          tagline={repoContext.description}
+          branch={defaultBranch}
+          repoUrl={repoUrl}
+          builderName={operatorName ? `for ${operatorName}` : profile.display_name}
+          startedAt={engagement?.created_at ?? new Date().toISOString()}
+        />
 
-      <Suspense fallback={<AiOverviewSkeleton />}>
-        <AiOverviewCard profilePromise={profilePromise} />
-      </Suspense>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <RecentCommitsList context={context} />
-        <LanguagesBar context={context} profilePromise={profilePromise} />
-      </div>
-
-      {branchGraph ? (
-        <Suspense fallback={<BranchesTreeSkeleton />}>
-          <BranchesTreeWithPurposes
-            graph={branchGraph}
-            purposesPromise={purposesPromise}
-            owner={owner}
-            repo={name}
-          />
+        <Suspense fallback={<OverviewCardSkeleton />}>
+          <OverviewCard profilePromise={profilePromise} statsPromise={statsPromise} />
         </Suspense>
-      ) : (
-        <BranchesUnavailable />
-      )}
 
-      <FileTreeSnapshot context={context} />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr)",
+            gap: 20,
+          }}
+        >
+          <Suspense fallback={<CommitsCardSkeleton />}>
+            <CommitsCard commits={repoContext.recentCommits} />
+          </Suspense>
+          <Suspense fallback={<TechStackCardSkeleton />}>
+            <AsyncTechStackCard
+              languages={repoContext.languages}
+              layersPromise={archLayersPromise}
+            />
+          </Suspense>
+        </div>
 
-      <ReadmePreview context={context} />
+        <Suspense fallback={<BranchesCardSkeleton />}>
+          <BranchesCard graphPromise={branchGraphPromise} />
+        </Suspense>
+
+        <StructureCard entries={repoContext.topLevelTree} />
+
+        <ReadmeCard markdown={repoContext.readmeExcerpt} readmeUrl={readmeUrl} />
+
+        <div
+          style={{
+            paddingTop: 4,
+            display: "flex",
+            gap: 18,
+            flexWrap: "wrap",
+          }}
+        >
+          <Link
+            href="/b"
+            className="dashed-link"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13.5,
+              fontWeight: 500,
+            }}
+          >
+            See your build board
+            <Icon name="arrow" size={13} color="currentColor" />
+          </Link>
+          <Link
+            href="/b/github/settings"
+            className="dashed-link"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13.5,
+              fontWeight: 500,
+            }}
+          >
+            GitHub settings
+            <Icon name="settings" size={13} color="currentColor" />
+          </Link>
+        </div>
+      </div>
     </main>
   );
+}
+
+async function AsyncTechStackCard({
+  languages,
+  layersPromise,
+}: {
+  languages: RepoContext["languages"];
+  layersPromise: Promise<ReturnType<typeof deriveArchLayers>>;
+}) {
+  const layers = await layersPromise;
+  return <TechStackCard languages={languages} layers={layers} />;
 }

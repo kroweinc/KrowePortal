@@ -9,7 +9,12 @@ export type RepoContext = {
   fileManifest: string[];
   manifestTruncated: boolean;
   languages: { name: string; pct: number }[];
-  recentCommits: { sha: string; message: string; date: string }[];
+  recentCommits: {
+    sha: string;
+    message: string;
+    date: string;
+    author: { name: string; login: string | null } | null;
+  }[];
   degraded: string[];
 };
 
