@@ -30,6 +30,11 @@ const isRealOption = (opt: string) => {
   return o !== "other" && !o.includes("specify");
 };
 
+// Tolerant match between an option string and the AI's `recommended` value
+// (handles whitespace/case). A non-matching value yields no badge, never an error.
+const matchesRecommended = (opt: string, rec?: string) =>
+  !!rec && opt.trim().toLowerCase() === rec.trim().toLowerCase();
+
 const FIELD_LABELS: Record<string, string> = {
   overview: "Overview",
   goals: "Goals",
@@ -147,7 +152,16 @@ export function RefineSectionDialog({
           kind: "questions",
           sectionId,
           items: result.items,
-          selections: Object.fromEntries(result.items.map((q) => [q.id, []])),
+          // Pre-select the AI's recommended option (when it matches a real
+          // option) so the builder just confirms; fully overridable.
+          selections: Object.fromEntries(
+            result.items.map((q) => [
+              q.id,
+              q.recommended && q.options.some((o) => matchesRecommended(o, q.recommended))
+                ? [q.recommended]
+                : [],
+            ])
+          ),
           otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
         });
       } else {
@@ -271,6 +285,7 @@ export function RefineSectionDialog({
                       {[...q.options.filter(isRealOption), OTHER].map((opt) => {
                         const checked = selected.includes(opt);
                         const label = opt === OTHER ? "Other (specify)" : opt;
+                        const isRecommended = matchesRecommended(opt, q.recommended);
                         return (
                           <label
                             key={opt}
@@ -287,7 +302,21 @@ export function RefineSectionDialog({
                               onChange={() => toggleOption(q, opt)}
                               className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700"
                             />
-                            <span className="leading-snug">{label}</span>
+                            <span className="flex-1 leading-snug">
+                              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span>{label}</span>
+                                {isRecommended && (
+                                  <span className="rounded-full border border-neutral-300 bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-600">
+                                    Recommended
+                                  </span>
+                                )}
+                              </span>
+                              {isRecommended && q.recommendation && (
+                                <span className="mt-0.5 block text-xs font-normal text-neutral-500">
+                                  {q.recommendation}
+                                </span>
+                              )}
+                            </span>
                           </label>
                         );
                       })}

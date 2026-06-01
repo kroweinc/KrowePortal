@@ -115,9 +115,10 @@ Fill every section from the notes + answers, with rich, concrete content. Do NOT
   return `${base}
 
 Your goal is to interview the builder until you can fill EVERY section richly with NO open questions remaining.
-- If ANY section still has an unknown, ask about it. Return 2–5 concrete multiple-choice questions per round that close the remaining gaps (each offers 3–5 options; the builder can also type their own):
-  { "kind": "questions", "items": [ { "id": "q1", "text": "…", "options": ["…","…","…"], "multiSelect": false } ] }
+- If ANY section still has an unknown, ask about it. Return 2–5 concrete multiple-choice questions per round that close the remaining gaps (each offers 3–5 options, ranked most→least likely; the builder can also type their own):
+  { "kind": "questions", "items": [ { "id": "q1", "text": "…", "options": ["…","…","…"], "multiSelect": false, "recommended": "…", "recommendation": "Best for you because …" } ] }
 - For EACH question, set "multiSelect": true when the builder could legitimately choose more than one option (e.g. which integrations are needed, which data sources feed the product, which user roles exist, which platforms to support). Set "multiSelect": false for single-answer questions (e.g. the primary deadline, the main budget tier, the single most important goal). Always include the multiSelect field.
+- For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the strings in "options"), and set "recommendation" to one short, plain-language sentence telling a non-technical builder WHY it is the best default for THIS product (tie it to their notes/answers — not generic advice). Choose the option you genuinely judge best, not always the first. For technical/implementation questions (e.g. how to connect an AI phone assistant to a phone line, which auth method, which hosting), reason about the best real-world method and recommend a concrete, proven default. For multi-select questions, set "recommended" to the single option most worth including. Omit both fields only if no option is meaningfully better than the others.
 - You MUST capture the client's EXACT target launch / go-live DATE before finalizing — it drives the entire delivery timeline. Ask a single-select ("multiSelect": false) question for it (e.g. "What is the client's exact target go-live date?") and tell the builder to enter the precise calendar date. You may offer example timeframe options, but make clear they should type the exact date (YYYY-MM-DD) in their own answer. Do not finalize the PRD with only a vague deadline if you have not yet asked for the exact date.
 - Only return the finished PRD once every section can be filled from the notes + answers and you have NO questions left to ask:
   { "kind": "prd", "content": { ...the full section object, openQuestions empty... } }
@@ -157,6 +158,34 @@ async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: n
   return response.choices[0]?.message?.content ?? "";
 }
 
+/** Same contract as callOpenAI, but routes through the Responses API with the
+    hosted web_search tool so the model can ground its recommendations in current
+    real-world info (e.g. how to connect an AI phone assistant to a phone line).
+    Gated by OPENAI_ENABLE_WEB_SEARCH. Degrades gracefully: if the call errors
+    (model/endpoint doesn't support the tool) or returns nothing, it falls back
+    to the plain chat-completions path so reasoning-based recommendations still
+    ship. Still emits a JSON object validated by the same Zod schema downstream. */
+async function callOpenAIWithResearch(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string> {
+  try {
+    const response = await openai.responses.create({
+      model: AI_MODEL,
+      input: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      tools: [{ type: "web_search" }],
+      text: { format: { type: "json_object" } },
+      max_output_tokens: maxTokens,
+    });
+    const out = response.output_text ?? "";
+    if (out.trim()) return out;
+    return await callOpenAI(systemPrompt, userPrompt, maxTokens);
+  } catch (err) {
+    console.warn("[generatePrd] web_search research call failed; falling back to chat completions", err);
+    return await callOpenAI(systemPrompt, userPrompt, maxTokens);
+  }
+}
+
 export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
   const schema = input.forceFinal ? PrdFinalResult : PrdGenerationResult;
   const systemPrompt = buildSystemPrompt(input.forceFinal, input.deepContext);
@@ -168,7 +197,11 @@ export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
   // not the cap, so a high ceiling on question rounds costs nothing extra.
   const maxTokens = 16000;
 
-  let raw = await callOpenAI(systemPrompt, userPrompt, maxTokens);
+  // When OPENAI_ENABLE_WEB_SEARCH is on, ground recommendations in live web
+  // research (with graceful fallback); otherwise use the plain chat call.
+  const call = process.env.OPENAI_ENABLE_WEB_SEARCH === "true" ? callOpenAIWithResearch : callOpenAI;
+
+  let raw = await call(systemPrompt, userPrompt, maxTokens);
 
   let parsed: unknown;
   try {
@@ -180,7 +213,7 @@ export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
   let result = schema.safeParse(parsed);
   if (!result.success) {
     const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    raw = await callOpenAI(
+    raw = await call(
       systemPrompt,
       `${userPrompt}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`,
       maxTokens

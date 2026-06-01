@@ -19,6 +19,12 @@ const isRealOption = (opt: string) => {
   return o !== "other" && !o.includes("specify");
 };
 
+// Tolerant match between an option string and the AI's `recommended` value
+// (handles whitespace/case). A `recommended` that matches no option yields no
+// badge — never an error — so a stray value can't break the round.
+const matchesRecommended = (opt: string, rec?: string) =>
+  !!rec && opt.trim().toLowerCase() === rec.trim().toLowerCase();
+
 type AnswerEntry = { questionId: string; question: string; answer: string };
 
 type WizardState =
@@ -73,7 +79,16 @@ export function PrdWizard({ projectId, projectName, backHref, initialTitle }: Pr
         setState({
           kind: "questions",
           items: result.items,
-          selections: Object.fromEntries(result.items.map((q) => [q.id, [] as string[]])),
+          // Pre-select the AI's recommended option (when it matches a real
+          // option) so the builder just confirms; fully overridable.
+          selections: Object.fromEntries(
+            result.items.map((q) => [
+              q.id,
+              q.recommended && q.options.some((o) => matchesRecommended(o, q.recommended))
+                ? [q.recommended]
+                : ([] as string[]),
+            ])
+          ),
           otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
         });
         return;
@@ -224,6 +239,7 @@ export function PrdWizard({ projectId, projectName, backHref, initialTitle }: Pr
                   <div className="space-y-1.5">
                     {[...q.options.filter(isRealOption), OTHER].map((opt) => {
                       const on = isOn(opt);
+                      const isRecommended = matchesRecommended(opt, q.recommended);
                       return (
                         <label
                           key={opt}
@@ -241,7 +257,21 @@ export function PrdWizard({ projectId, projectName, backHref, initialTitle }: Pr
                             onChange={() => toggleOption(q.id, opt, multi)}
                             className={`mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700 ${multi ? "rounded" : ""}`}
                           />
-                          <span className="leading-snug">{opt === OTHER ? "Other (specify)" : opt}</span>
+                          <span className="flex-1 leading-snug">
+                            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span>{opt === OTHER ? "Other (specify)" : opt}</span>
+                              {isRecommended && (
+                                <span className="rounded-full border border-neutral-300 bg-white px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-neutral-600">
+                                  Recommended
+                                </span>
+                              )}
+                            </span>
+                            {isRecommended && q.recommendation && (
+                              <span className="mt-0.5 block text-xs font-normal text-neutral-500">
+                                {q.recommendation}
+                              </span>
+                            )}
+                          </span>
                         </label>
                       );
                     })}

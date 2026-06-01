@@ -55,9 +55,10 @@ Do NOT ask any more questions. For anything still unknown, make a sensible, clea
 
   return `${base}
 
-If a focused clarifying answer would materially improve this section, ask first. Return 1–3 concrete multiple-choice questions (each offers 3–5 options; the builder can also type their own), all targeted at THIS section:
-{ "kind": "questions", "items": [ { "id": "q1", "text": "…", "options": ["…","…","…"], "multiSelect": false } ] }
+If a focused clarifying answer would materially improve this section, ask first. Return 1–3 concrete multiple-choice questions (each offers 3–5 options ranked most→least likely; the builder can also type their own), all targeted at THIS section:
+{ "kind": "questions", "items": [ { "id": "q1", "text": "…", "options": ["…","…","…"], "multiSelect": false, "recommended": "…", "recommendation": "Best for you because …" } ] }
 Set "multiSelect": true when more than one option could legitimately apply; otherwise false. Always include the multiSelect field.
+For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the "options" strings) and "recommendation" to one short, plain-language sentence on why it's the best default for THIS product. For technical questions, reason about the best real-world method first. For multi-select, recommend the single option most worth including. Omit both only if no option is meaningfully better.
 Otherwise, if you already have enough to improve the section well, return the refined section directly:
 { "kind": "section", "patch": { ...only the allowed keys... } }`;
 }

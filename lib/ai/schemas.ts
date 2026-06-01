@@ -6,6 +6,12 @@ const Question = z.object({
   options: z.array(z.string().min(1).max(80)).min(3).max(5),
   // When true, the builder may select more than one option. Defaults to single-select.
   multiSelect: z.boolean().default(false),
+  // The exact text of the option the AI judges best — MUST equal one of `options`.
+  // Surfaced in the UI as a "Recommended" badge and pre-selected for the builder.
+  recommended: z.string().min(1).max(80).optional(),
+  // One short, plain-language sentence on WHY it's the best default, for a
+  // non-technical builder. Interview-time guidance only; not persisted.
+  recommendation: z.string().min(1).max(280).optional(),
 });
 
 export const SubtaskDraft = z

@@ -128,11 +128,12 @@ Rules for clarifying questions:
 - Keep questions short (under 60 words each).
 - Each question MUST include an "options" array of 3–5 mutually distinct, concrete candidate answers (each ≤80 chars), ranked from most likely to least likely given the task and repo context. Do NOT include an "Other" option — the UI adds that automatically.
 - Options must be concrete answers a user can pick directly, not open-ended prompts.
+- For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the "options" strings) and "recommendation" to one short, plain-language sentence on why it's the best default. For technical/implementation questions, reason about the best real-world method first. Omit both only if no option is meaningfully better.
 - Return 2–4 questions. If after investigating you have no genuine product gaps, return subtasks instead.
 
 Output format — respond ONLY with valid JSON in one of these two shapes:
 {"kind":"subtasks","items":[{"title":"...","rationale":"...","estLowMin":30,"estHighMin":60},...]}
-{"kind":"questions","items":[{"id":"q1","text":"...","options":["...","...","..."]},...]}
+{"kind":"questions","items":[{"id":"q1","text":"...","options":["...","...","..."],"recommended":"...","recommendation":"Best because ..."},...]}
 No markdown, no explanation, no wrapper — raw JSON only.`;
 
   return `${instructions}\n\n${formatRepoContext(repoContext, { withTools: repoContext !== null })}`;
@@ -208,11 +209,12 @@ Rules for clarifying questions:
 - Only ask when a reasonable engineer could not infer scope, surface area, or output from the description, repo context, and what your tools showed you. Good questions are about product intent (default behavior, edge cases the user wants, scope boundaries), not about facts that live in the code.
 - Keep questions short (under 60 words each).
 - Each question MUST include an "options" array of 3–5 mutually distinct, concrete candidate answers (each ≤80 chars), ranked from most likely to least likely. Do NOT include an "Other" option — the UI adds that automatically.
+- For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the "options" strings) and "recommendation" to one short, plain-language sentence on why it's the best default. For technical/implementation questions, reason about the best real-world method first. Omit both only if no option is meaningfully better.
 - Return 2–4 questions. If after investigating you have no genuine product gaps, return the task instead.
 
 Output format — respond ONLY with valid JSON in one of these two shapes:
 {"kind":"task","item":${taskShape}}
-{"kind":"questions","items":[{"id":"q1","text":"...","options":["...","...","..."]},...]}
+{"kind":"questions","items":[{"id":"q1","text":"...","options":["...","...","..."],"recommended":"...","recommendation":"Best because ..."},...]}
 No markdown, no explanation, no wrapper — raw JSON only.`;
 
   return `${instructions}\n\n${formatRepoContext(repoContext, { withTools: repoContext !== null })}`;
