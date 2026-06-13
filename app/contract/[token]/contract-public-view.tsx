@@ -1,44 +1,79 @@
-import { ContractView } from "@/components/contract/contract-view";
-import { DocSignPanel, DocSignedBanner } from "@/components/doc/doc-sign-panel";
-import { signContract, type PublicContract } from "@/lib/actions/contracts-public";
+"use client";
 
-export function ContractPublicView({ data }: { data: PublicContract }) {
+/* Public client view for a shared contract link. Renders the polished services
+   agreement (the same one the PDF prints) — including the snapshotted Scope of
+   Work + Payment Schedule exhibits — plus a download button and the accept/sign
+   panel. Mirrors quote-public-view.tsx, reusing the generic DocSignPanel. */
+
+import { ContractDocument } from "@/components/contract/contract-document";
+import { PrdDownloadButton } from "@/components/prd/prd-download-button";
+import { DocSignPanel, DocSignedBanner } from "@/components/doc/doc-sign-panel";
+import { PreparedBy } from "@/components/doc/prepared-by";
+import { type PublicContract } from "@/lib/actions/contracts-public";
+import { acceptAndSignContract, rejectContract } from "@/lib/actions/accept-doc";
+import type { ContractContent } from "@/lib/types";
+
+export function ContractPublicView({
+  data,
+  viewer,
+}: {
+  data: PublicContract;
+  viewer: { isAuthenticated: boolean; viewerName: string };
+}) {
   const { contract, builderName } = data;
+  const content: ContractContent = contract.content ?? {};
   const isSigned = contract.status === "signed";
+  // Legal party name from the contract itself; shown alongside the builder's
+  // profile identity only when it names someone else (e.g. a company).
+  const providerName = content.parties?.provider;
 
   return (
-    <main className="min-h-screen bg-neutral-50 py-10 px-4">
-      <div className="mx-auto w-full max-w-3xl">
-        <header className="mb-6">
-          <p className="text-xs uppercase tracking-wide text-neutral-400">Services Agreement</p>
-          <h1 className="mt-1 text-2xl font-semibold text-neutral-900">{contract.title}</h1>
-          <p className="mt-1 text-sm text-neutral-500">
-            Prepared by <span className="font-medium text-neutral-700">{builderName}</span>
-          </p>
-        </header>
+    <main className="prd-doc-stage">
+      <div className="preview-stage">
+        <div className="preview-doc">
+          <header className="preview-head">
+            <div className="preview-head__text">
+              <p className="preview-eyebrow">Services Agreement</p>
+              <h1 className="preview-title">{contract.title}</h1>
+              <PreparedBy builder={data.builder} className="preview-prepared" />
+              {providerName && providerName !== data.builder.name && (
+                <p className="preview-prepared">
+                  On behalf of <span>{providerName}</span>
+                </p>
+              )}
+            </div>
+            <PrdDownloadButton title={contract.title} />
+          </header>
 
-        <div className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
-          <ContractView content={contract.content} />
+          <div className="preview-card">
+            <ContractDocument content={content} />
+          </div>
+
+          <div className="prd-print-hide">
+            {isSigned ? (
+              <DocSignedBanner
+                message="This contract has been signed."
+                signerName={contract.signed_by_name}
+                signedAt={contract.signed_at}
+              />
+            ) : (
+              <DocSignPanel
+                token={contract.token}
+                builderName={builderName}
+                action={acceptAndSignContract}
+                onReject={rejectContract}
+                heading="Accept &amp; sign this contract"
+                consentText="I agree to the terms in this agreement, and consent to sign electronically. This signature executes the agreement with"
+                buttonLabel="Sign contract"
+                isAuthenticated={viewer.isAuthenticated}
+                viewerName={viewer.viewerName}
+                loginHref={`/login?next=${encodeURIComponent(`/contract/${contract.token}`)}`}
+              />
+            )}
+          </div>
+
+          <p className="preview-footer">Powered by Krowe Portal</p>
         </div>
-
-        {isSigned ? (
-          <DocSignedBanner
-            message="This contract has been signed."
-            signerName={contract.signed_by_name}
-            signedAt={contract.signed_at}
-          />
-        ) : (
-          <DocSignPanel
-            token={contract.token}
-            builderName={builderName}
-            action={signContract}
-            heading="Accept &amp; sign this contract"
-            consentText="I agree to the terms in this agreement, and consent to sign electronically. This signature executes the agreement with"
-            buttonLabel="Sign contract"
-          />
-        )}
-
-        <p className="mt-6 text-center text-xs text-neutral-400">Powered by Krowe Portal</p>
       </div>
     </main>
   );

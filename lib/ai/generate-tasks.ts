@@ -1,4 +1,5 @@
-import { openai, AI_MODEL } from "./client";
+import { openai, runChat, AI_MODEL } from "./client";
+import type { AiCallMeta } from "./usage";
 import { TaskGenerationResult, TaskOnlyResult } from "./schemas";
 import { buildTaskSystemPrompt, buildTaskUserPrompt } from "./prompts";
 import type { RepoContext } from "@/lib/github/types";
@@ -15,9 +16,10 @@ interface GenerateInput {
 async function callOpenAIOneShot(
   systemPrompt: string,
   userPrompt: string,
-  maxTokens: number
+  maxTokens: number,
+  meta?: AiCallMeta
 ): Promise<string> {
-  const response = await openai.chat.completions.create({
+  const response = await runChat({
     model: AI_MODEL,
     max_completion_tokens: maxTokens,
     response_format: { type: "json_object" },
@@ -25,7 +27,7 @@ async function callOpenAIOneShot(
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-  });
+  }, meta);
   return response.choices[0]?.message?.content ?? "";
 }
 
@@ -33,10 +35,11 @@ async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
-  toolContext: RepoToolContext | undefined
+  toolContext: RepoToolContext | undefined,
+  meta?: AiCallMeta
 ): Promise<string> {
   if (!toolContext) {
-    return callOpenAIOneShot(systemPrompt, userPrompt, maxTokens);
+    return callOpenAIOneShot(systemPrompt, userPrompt, maxTokens, meta);
   }
 
   const messages: ChatCompletionMessageParam[] = [
@@ -58,14 +61,14 @@ async function callOpenAI(
   return result.content;
 }
 
-export async function generateTask(input: GenerateInput): Promise<TaskGenerationResult> {
+export async function generateTask(input: GenerateInput, meta?: AiCallMeta): Promise<TaskGenerationResult> {
   const { rawDescription, repoContext, answers, toolContext } = input;
   const forceTask = (answers?.length ?? 0) > 0;
   const schema = forceTask ? TaskOnlyResult : TaskGenerationResult;
   const systemPrompt = buildTaskSystemPrompt(repoContext, { forceTask });
   const userPrompt = buildTaskUserPrompt(rawDescription, answers);
 
-  let raw = await callOpenAI(systemPrompt, userPrompt, 1500, toolContext);
+  let raw = await callOpenAI(systemPrompt, userPrompt, 1500, toolContext, meta);
 
   let parsed: unknown;
   try {
@@ -81,7 +84,8 @@ export async function generateTask(input: GenerateInput): Promise<TaskGeneration
   raw = await callOpenAIOneShot(
     systemPrompt,
     `${userPrompt}\n\nYour previous response did not match the required schema. Errors: ${errorDesc}\nPlease try again.`,
-    1500
+    1500,
+    meta
   );
 
   try {

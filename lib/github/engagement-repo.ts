@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/server";
+import { decryptSecret } from "@/lib/crypto";
 
 export type EngagementRepo = {
   token: string;
@@ -103,7 +104,7 @@ async function resolveFromEngagement(
   if (!repo) return null;
 
   return {
-    token: conn.access_token,
+    token: decryptSecret(conn.access_token),
     owner: repo.owner,
     name: repo.name,
     fullName: repo.fullName,

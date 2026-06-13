@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,7 +22,12 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        {/* Sonner toast portal — without this, every toast.success/error across
+            the app (save confirmations, AI errors, etc.) is a silent no-op. */}
+        <Toaster richColors closeButton position="top-center" />
+      </body>
     </html>
   );
 }

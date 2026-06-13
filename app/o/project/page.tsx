@@ -30,29 +30,15 @@ import { deriveArchLayers } from "@/lib/operator-project/derive-arch-layers";
 import type { RepoContext } from "@/lib/github/types";
 import type { Engagement } from "@/lib/types";
 import { Icon } from "@/components/operator-project-profile/icon";
-import {
-  getMilestonesForEngagement,
-  getSignedQuoteForEngagement,
-  getEngagementTaskStream,
-} from "@/lib/actions/milestones";
+import { getMilestonesForEngagement } from "@/lib/actions/milestones";
+import { getSignedDocsForEngagement } from "@/lib/actions/operator-docs";
 import { SignedQuoteCard } from "@/components/dashboard/signed-quote-card";
 import { MilestoneProgressCard } from "@/components/dashboard/milestone-progress-card";
-import { TaskStreamCard } from "@/components/dashboard/task-stream-card";
 import {
-  getAvailability,
-  getAgreement,
-  getContextMaterials,
-  getBusinessContext,
   getInfraRecommendations,
   getDeliverables,
 } from "@/lib/actions/engagement";
 import { getChangeOrders } from "@/lib/actions/change-orders";
-import { AvailabilityCard } from "@/components/dashboard/availability-card";
-import { PriorityProfileCard } from "@/components/dashboard/priority-profile-card";
-import { BusinessContextCard } from "@/components/dashboard/business-context-card";
-import { MaterialsCard } from "@/components/dashboard/materials-card";
-import { OperatingAgreementCard } from "@/components/dashboard/operating-agreement-card";
-import { FinancialsCard } from "@/components/dashboard/financials-card";
 import { InfraCard } from "@/components/dashboard/infra-card";
 import { DeliverablesCard } from "@/components/dashboard/deliverables-card";
 import { ChangeOrdersCard } from "@/components/dashboard/change-orders-card";
@@ -113,24 +99,19 @@ export default async function OperatorProjectPage() {
     .maybeSingle();
   const builderName = builderRow?.display_name ?? null;
 
-  // Engagement spine — provisioned from the signed quote.
-  const [signedQuote, milestones, taskStream] = await Promise.all([
-    getSignedQuoteForEngagement(engagement.id),
+  // Engagement spine — provisioned from the signed quote (new project model).
+  const [signedDocs, milestones] = await Promise.all([
+    getSignedDocsForEngagement(engagement),
     getMilestonesForEngagement(engagement.id),
-    getEngagementTaskStream(engagement.id),
   ]);
+  const signedQuote = signedDocs.quote;
 
   // Engagement detail cards (Phases 7–10).
-  const [availability, agreement, materials, businessContext, infra, deliverables, changeOrders] =
-    await Promise.all([
-      getAvailability(engagement.id),
-      getAgreement(engagement.id),
-      getContextMaterials(engagement.id),
-      getBusinessContext(engagement.id),
-      getInfraRecommendations(engagement.id),
-      getDeliverables(engagement.id),
-      getChangeOrders(engagement.id),
-    ]);
+  const [infra, deliverables, changeOrders] = await Promise.all([
+    getInfraRecommendations(engagement.id),
+    getDeliverables(engagement.id),
+    getChangeOrders(engagement.id),
+  ]);
 
   let profilePromise: Promise<ProjectProfile | null> = Promise.resolve(null);
   let branchGraphPromise: Promise<BranchGraph | null> = Promise.resolve(null);
@@ -210,7 +191,7 @@ export default async function OperatorProjectPage() {
           startedAt={engagement.created_at}
         />
 
-        {(signedQuote || milestones.length > 0 || taskStream.length > 0) && (
+        {(signedQuote || milestones.length > 0) && (
           <div
             style={{
               display: "grid",
@@ -219,13 +200,14 @@ export default async function OperatorProjectPage() {
               alignItems: "start",
             }}
           >
-            {signedQuote && <SignedQuoteCard brief={signedQuote} />}
-            {milestones.length > 0 && <MilestoneProgressCard milestones={milestones} />}
-            {taskStream.length > 0 && (
-              <div style={{ gridColumn: "1 / -1" }}>
-                <TaskStreamCard milestones={milestones} tasks={taskStream} />
-              </div>
+            {signedQuote && (
+              <SignedQuoteCard
+                quote={signedQuote}
+                contractToken={signedDocs.contract?.token ?? null}
+                prdToken={signedDocs.prd?.token ?? null}
+              />
             )}
+            {milestones.length > 0 && <MilestoneProgressCard milestones={milestones} />}
           </div>
         )}
 
@@ -238,24 +220,7 @@ export default async function OperatorProjectPage() {
             alignItems: "start",
           }}
         >
-          <AvailabilityCard availability={availability} builderName={builderName} />
-          <FinancialsCard
-            signedQuote={signedQuote}
-            milestones={milestones}
-            agreement={agreement}
-            infra={infra}
-          />
-          <PriorityProfileCard
-            engagementId={engagement.id}
-            priorityProfile={agreement?.priority_profile ?? []}
-            canEdit
-          />
           <InfraCard recommendations={infra} canOverride />
-          <BusinessContextCard engagementId={engagement.id} cards={businessContext} canEdit />
-          <MaterialsCard engagementId={engagement.id} materials={materials} canEdit />
-          <div style={{ gridColumn: "1 / -1" }}>
-            <OperatingAgreementCard agreement={agreement} signedAt={signedQuote?.signed_at ?? null} />
-          </div>
           <DeliverablesCard deliverables={deliverables} />
           <ChangeOrdersCard changeOrders={changeOrders} canSign />
         </div>

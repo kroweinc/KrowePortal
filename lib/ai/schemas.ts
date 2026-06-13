@@ -218,6 +218,10 @@ export const FreeTierAnalysisResult = z.object({
   services: z.array(FreeTierServiceVerdict).max(30).default([]),
   // ISO stamp set by the server action (not the model).
   analyzedAt: z.string().max(40).nullish(),
+  // Normalized stack+integration names present when this ran (set by the action,
+  // not the model). Used to detect a genuinely changed stack — never the concrete
+  // providers the model inferred (e.g. "Managed hosting" → Vercel). Absent on legacy rows.
+  analyzedStack: z.array(z.string().max(120)).max(60).nullish(),
 });
 
 export const PrdContentSchema = z.object({
@@ -294,6 +298,110 @@ export const RefineSectionFinalResult = z.object({
   patch: PrdSectionPatchSchema,
 });
 
+// ── Quote ──────────────────────────────────────────────────────────────────
+// A priced quote breakdown (the Sherwood structure). Reuses the Question schema
+// above for the wizard/refine interview. Money fields are plain numbers (dollars).
+const QuoteLineItemSchema = z.object({
+  label: z.string().min(1).max(200),
+  // Effort-based pricing: the model returns hours; the runtime computes the
+  // amount as hours × hourlyRate. Amount defaults to 0 so the model may omit it.
+  hours: z.number().nonnegative().max(100000).nullish(),
+  amount: z.number().nonnegative().default(0),
+  notes: z.string().max(400).nullish(),
+});
+
+const QuoteModuleSchema = z.object({
+  title: z.string().min(1).max(160),
+  // One-line "Purpose" for the §1 product table.
+  purpose: z.string().max(400).default(""),
+  // The §2..N description paragraph.
+  description: z.string().max(2000).nullish(),
+  cost: z.number().nonnegative().default(0),
+  lineItems: z.array(QuoteLineItemSchema).max(40).default([]),
+  subtotal: z.number().nonnegative().default(0),
+});
+
+const QuoteDesignComponentSchema = z.object({
+  component: z.string().min(1).max(160),
+  included: z.boolean().default(true),
+  notes: z.string().max(200).nullish(),
+});
+
+const QuotePaymentMilestoneSchema = z.object({
+  label: z.string().min(1).max(160),
+  amount: z.number().nonnegative().default(0),
+  percent: z.number().min(0).max(100).nullish(),
+});
+
+// "Cost Overview" extra charges: a flat or percent-of-build add-on / design /
+// fee, or a discount (which subtracts). amount is the resolved dollar magnitude.
+const QuoteExtraCostSchema = z.object({
+  label: z.string().min(1).max(160),
+  kind: z.enum(["design", "addon", "fee", "discount"]).default("addon"),
+  amount: z.number().nonnegative().default(0),
+  percent: z.number().min(0).max(100).nullish(),
+  notes: z.string().max(300).nullish(),
+});
+
+const QuoteTotalsSchema = z.object({
+  grand: z.number().nonnegative().default(0),
+  modulesTotal: z.number().nonnegative().nullish(),
+  extrasTotal: z.number().nullish(),
+  paymentTotal: z.number().nonnegative().nullish(),
+});
+
+export const QuoteContentSchema = z.object({
+  companyName: z.string().max(200).optional(),
+  clientName: z.string().max(200).optional(),
+  productSubtitle: z.string().max(300).optional(),
+  scopeSummary: z.string().max(3000).optional(),
+  modules: z.array(QuoteModuleSchema).max(40).default([]),
+  extraCosts: z.array(QuoteExtraCostSchema).max(20).default([]),
+  designSystem: z.array(QuoteDesignComponentSchema).max(40).default([]),
+  paymentMilestones: z.array(QuotePaymentMilestoneSchema).max(12).default([]),
+  justification: z.array(z.string().min(1).max(400)).max(30).default([]),
+  scopeProtection: z.array(z.string().min(1).max(400)).max(40).default([]),
+  totals: QuoteTotalsSchema.optional(),
+  hourlyRate: z.number().min(0).max(100000).nullish(),
+  showHours: z.boolean().nullish(),
+  validityDays: z.number().int().min(0).max(365).optional(),
+  footerNote: z.string().max(1000).optional(),
+});
+
+// While the wizard may still ask more questions: questions OR a finished quote.
+export const QuoteGenerationResult = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("questions"), items: z.array(Question).min(2).max(5) }),
+  z.object({
+    kind: z.literal("quote"),
+    content: QuoteContentSchema,
+    // Deep "no-context" flow only: a synthesized business-context narrative the
+    // server writes back to projects.context for reuse. Absent in standard flows.
+    contextSummary: z.string().max(2000).optional(),
+  }),
+]);
+
+// Forced on the final round: the model must return a quote, not more questions.
+export const QuoteFinalResult = z.object({
+  kind: z.literal("quote"),
+  content: QuoteContentSchema,
+  contextSummary: z.string().max(2000).optional(),
+});
+
+// ── Quote section refine ─────────────────────────────────────────────────────
+// A partial quote: the refine flow only ever touches one section's keys (the
+// server whitelists to those keys), so every field is optional here.
+export const QuoteSectionPatchSchema = QuoteContentSchema.partial();
+
+export const RefineQuoteSectionResult = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("questions"), items: z.array(Question).min(1).max(4) }),
+  z.object({ kind: z.literal("section"), patch: QuoteSectionPatchSchema }),
+]);
+
+export const RefineQuoteSectionFinalResult = z.object({
+  kind: z.literal("section"),
+  patch: QuoteSectionPatchSchema,
+});
+
 export type GenerationResult = z.infer<typeof GenerationResult>;
 export type SubtasksOnlyResult = z.infer<typeof SubtasksOnlyResult>;
 export type Question = z.infer<typeof Question>;
@@ -308,6 +416,9 @@ export type SimplifyTasksResult = z.infer<typeof SimplifyTasksResult>;
 export type PrdGenerationResult = z.infer<typeof PrdGenerationResult>;
 export type PrdFinalResult = z.infer<typeof PrdFinalResult>;
 export type RefineSectionResult = z.infer<typeof RefineSectionResult>;
+export type QuoteGenerationResult = z.infer<typeof QuoteGenerationResult>;
+export type QuoteFinalResult = z.infer<typeof QuoteFinalResult>;
+export type RefineQuoteSectionResult = z.infer<typeof RefineQuoteSectionResult>;
 export type FreeTierServiceVerdict = z.infer<typeof FreeTierServiceVerdict>;
 export type FreeTierAssumption = z.infer<typeof FreeTierAssumption>;
 export type FreeTierAnalysis = z.infer<typeof FreeTierAnalysisResult>;

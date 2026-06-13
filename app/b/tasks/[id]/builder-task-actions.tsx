@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import { updateTask, updateTaskStatus, toggleVisibility } from "@/lib/actions/tasks";
+import { updateTask, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { DeleteTaskButton } from "@/components/delete-task-button";
 import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
@@ -66,42 +66,19 @@ export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps)
     });
   }
 
-  function handleVisibilityToggle() {
-    startTransition(async () => {
-      await toggleVisibility(task.id, !task.operator_visible);
-      router.refresh();
-    });
-  }
-
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm space-y-5">
       <h2 className="text-sm font-semibold text-neutral-900">Edit Task</h2>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-neutral-700 mb-1">Status</label>
-          <Select value={task.status} onChange={handleStatusChange} disabled={isPending}>
-            {STATUSES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-neutral-700 mb-1">
-            Operator visibility
-          </label>
-          <Button
-            type="button"
-            variant={task.operator_visible ? "outline" : "secondary"}
-            className="w-full"
-            onClick={handleVisibilityToggle}
-            disabled={isPending}
-          >
-            {task.operator_visible ? "Visible" : "Hidden"}
-          </Button>
-        </div>
+      <div>
+        <label className="block text-xs font-medium text-neutral-700 mb-1">Status</label>
+        <Select value={task.status} onChange={handleStatusChange} disabled={isPending}>
+          {STATUSES.map((s) => (
+            <option key={s.value} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </Select>
       </div>
 
       <form action={handleSave} className="space-y-4">

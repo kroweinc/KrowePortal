@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { DeliveryChips } from "@/components/design-atoms";
+import { ApprovalPill } from "@/components/approval-pill";
 import { PlainEnglishProvider } from "@/components/plain-english-context";
 import { deleteTask } from "@/lib/actions/tasks";
 import { sortByPriority } from "@/lib/utils";
@@ -52,7 +53,6 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
   }, {} as Record<string, Task[]>);
 
   const sourceLabel = (t: Task) => t.source === "operator_request" ? "operator" : "builder";
-  const showApproval = (t: Task) => t.status === "blocked" || t.status === "done";
 
   return (
     <PlainEnglishProvider>
@@ -77,10 +77,8 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
                     <div className="krowe-rail" />
                     <div className="krowe-op-card-row">
                       <div className="krowe-op-card-title">{task.title}</div>
-                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                        {showApproval(task) && (
-                          <span className="krowe-chip krowe-chip-approval">Approved</span>
-                        )}
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+                        <ApprovalPill task={task} role="operator" />
                         <span className={`krowe-chip krowe-chip-priority ${task.priority}`}>
                           {PRIORITY_LABEL[task.priority]}
                         </span>

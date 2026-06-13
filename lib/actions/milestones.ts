@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
-import type { Milestone, Brief, Task, MilestoneStatus } from "@/lib/types";
+import type { Milestone, Task, MilestoneStatus } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
@@ -51,25 +51,8 @@ export async function getMilestonesForEngagement(
   }));
 }
 
-export async function getSignedQuoteForEngagement(engagementId: string): Promise<Brief | null> {
-  const profile = await getCurrentProfile();
-  if (!profile) return null;
-  const supabase = await getClient(profile.id);
-
-  const { data } = await supabase
-    .from("briefs")
-    .select("*")
-    .eq("engagement_id", engagementId)
-    .eq("status", "signed")
-    .order("signed_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  return (data ?? null) as Brief | null;
-}
-
-// Operator-visible task stream. RLS already filters to operator_visible
-// rows for operators; builders see all. Ordered for milestone grouping.
+// Task stream for an engagement — every member sees all tasks.
+// Ordered for milestone grouping.
 export async function getEngagementTaskStream(engagementId: string): Promise<Task[]> {
   const profile = await getCurrentProfile();
   if (!profile) return [];

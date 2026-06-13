@@ -15,5 +15,11 @@ export default async function RootPage() {
     redirect("/o");
   }
 
+  // Builders mid-wizard resume where they left off. Only this root router
+  // nudges them back — /b itself stays reachable so nobody gets trapped.
+  if (profile.onboarding_status === "in_progress") {
+    redirect("/onboarding");
+  }
+
   redirect("/b");
 }

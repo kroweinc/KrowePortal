@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getPrdByToken } from "@/lib/actions/prds-public";
+import { getAuthViewer } from "@/lib/auth";
 import { PrdPublicView } from "./prd-public-view";
 
 interface Props {
@@ -14,12 +15,12 @@ export default async function PublicPrdPage({ params }: Props) {
   }
 
   // getPrdByToken already hides draft/rejected PRDs (returns null).
-  const data = await getPrdByToken(token);
+  const [data, viewer] = await Promise.all([getPrdByToken(token), getAuthViewer()]);
   if (!data) {
     return <ErrorCard message="This PRD isn't available." />;
   }
 
-  return <PrdPublicView data={data} />;
+  return <PrdPublicView data={data} viewer={viewer} />;
 }
 
 function ErrorCard({ message }: { message: string }) {

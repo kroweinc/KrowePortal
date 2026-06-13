@@ -31,8 +31,18 @@ function classify(token: string): ArchLayerRole | null {
   return null;
 }
 
+// Tech identities that can surface both as a service name and as a config file
+// (e.g. "amplify" and "amplify.yml"). Both forms collapse to one display name
+// so the same technology is never listed twice within a layer.
+const CANONICAL: { match: RegExp; name: string }[] = [
+  { match: /amplify/i, name: "AWS Amplify" },
+];
+
 function pretty(token: string): string {
   const cleaned = token.replace(/\/$/, "").trim();
+  for (const { match, name } of CANONICAL) {
+    if (match.test(cleaned)) return name;
+  }
   // Capitalize known tech names
   const map: Record<string, string> = {
     "next.js": "Next.js",
@@ -46,7 +56,6 @@ function pretty(token: string): string {
     plpgsql: "PLpgSQL",
     "row-level": "Row-level security",
     cognito: "Cognito",
-    amplify: "AWS Amplify",
     clerk: "Clerk",
     auth0: "Auth0",
     "next-auth": "NextAuth",

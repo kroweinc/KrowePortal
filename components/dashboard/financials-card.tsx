@@ -1,5 +1,5 @@
 import { Wallet } from "lucide-react";
-import type { Brief, EngagementAgreement, InfraRecommendation } from "@/lib/types";
+import type { Quote, EngagementAgreement, InfraRecommendation } from "@/lib/types";
 import type { MilestoneWithProgress } from "@/lib/actions/milestones";
 
 function fmt(n: number): string {
@@ -17,14 +17,16 @@ export function FinancialsCard({
   agreement,
   infra,
 }: {
-  signedQuote: Brief | null;
+  signedQuote: Quote | null;
   milestones: MilestoneWithProgress[];
   agreement: EngagementAgreement | null;
   infra: InfraRecommendation[];
 }) {
-  const grand = signedQuote?.content.totals?.grand ?? 0;
-  const preWork = signedQuote?.content.totals?.preWork ?? 0;
-  const project = signedQuote?.content.totals?.project ?? 0;
+  const totals = signedQuote?.content.totals;
+  const grand = totals?.grand ?? 0;
+  // Quotes price the build via modules + extras (no separate pre-work line).
+  const buildLabor = totals?.modulesTotal ?? grand;
+  const extras = totals?.extrasTotal ?? 0;
   const rate = signedQuote?.content.hourlyRate ?? 175;
 
   // "Delivered value" = sum of source_amount on done milestones (proxy for spend).
@@ -63,14 +65,10 @@ export function FinancialsCard({
       {/* Breakdown */}
       <div className="mb-4 space-y-1 border-t border-neutral-100 pt-3 text-sm">
         <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">Breakdown</div>
-        <Row label="Onboarding / pre-work" value={fmt(preWork)} />
-        <Row label="Build labor" value={fmt(project)} />
+        <Row label="Build labor" value={fmt(buildLabor)} />
+        {extras !== 0 && <Row label="Add-ons / design / fees" value={fmt(extras)} />}
         {monthly > 0 && <Row label="Projected monthly (hosting + tools)" value={`${fmt(monthly)}/mo`} />}
       </div>
-
-      {signedQuote?.content.paymentTerms && (
-        <p className="mb-3 text-xs text-neutral-500">{signedQuote.content.paymentTerms}</p>
-      )}
 
       <div className="flex items-center justify-between border-t border-neutral-100 pt-3 text-xs text-neutral-500">
         <span>Billing: {agreement?.billing_mode === "hourly" ? "Hourly" : "Fixed contract"}</span>

@@ -7,15 +7,19 @@ interface EstimateTaskInput {
   title: string;
   description: string | null;
   priority: string;
+  userId?: string | null;
 }
 
 export async function estimateAndSaveTaskHours(input: EstimateTaskInput): Promise<void> {
   try {
-    const { hoursLow, hoursHigh } = await estimateTask({
-      title: input.title,
-      description: input.description,
-      priority: input.priority,
-    });
+    const { hoursLow, hoursHigh } = await estimateTask(
+      {
+        title: input.title,
+        description: input.description,
+        priority: input.priority,
+      },
+      { userId: input.userId ?? null, operation: "estimate_task" }
+    );
 
     const roundHours = (n: number) =>
       n < 1 ? Math.round(n * 10) / 10 : Math.round(n * 4) / 4;

@@ -22,6 +22,7 @@ const KNOWN_DOMAINS: Record<string, string> = {
   vue: "vuejs.org", "vue.js": "vuejs.org", angular: "angular.dev", svelte: "svelte.dev", sveltekit: "svelte.dev",
   astro: "astro.build", remix: "remix.run", nuxt: "nuxt.com", solidjs: "solidjs.com", gatsby: "gatsbyjs.com",
   tailwind: "tailwindcss.com", "tailwind css": "tailwindcss.com", tailwindcss: "tailwindcss.com",
+  "tailwind.config.ts": "tailwindcss.com", "tailwind.config.js": "tailwindcss.com",
   bootstrap: "getbootstrap.com", shadcn: "ui.shadcn.com", "shadcn/ui": "ui.shadcn.com", "material ui": "mui.com",
   mui: "mui.com", "chakra ui": "chakra-ui.com", "radix ui": "radix-ui.com", "framer motion": "framer.com",
   framer: "framer.com", redux: "redux.js.org", typescript: "typescriptlang.org", javascript: "developer.mozilla.org",
@@ -43,11 +44,12 @@ const KNOWN_DOMAINS: Record<string, string> = {
   // hosting / infra / cloud
   vercel: "vercel.com", netlify: "netlify.com", aws: "aws.amazon.com", "amazon web services": "aws.amazon.com",
   "amazon s3": "aws.amazon.com", s3: "aws.amazon.com", ec2: "aws.amazon.com", lambda: "aws.amazon.com",
-  "aws lambda": "aws.amazon.com", cloudflare: "cloudflare.com", "cloudflare workers": "cloudflare.com",
+  "aws lambda": "aws.amazon.com", amplify: "amplify.aws", "aws amplify": "amplify.aws", "amplify.yml": "amplify.aws",
+  cloudflare: "cloudflare.com", "cloudflare workers": "cloudflare.com",
   "google cloud": "cloud.google.com", gcp: "cloud.google.com", "google cloud platform": "cloud.google.com",
   azure: "azure.microsoft.com", "microsoft azure": "azure.microsoft.com", digitalocean: "digitalocean.com",
   heroku: "heroku.com", render: "render.com", railway: "railway.app", "fly.io": "fly.io", fly: "fly.io",
-  docker: "docker.com", kubernetes: "kubernetes.io", nginx: "nginx.org",
+  docker: "docker.com", dockerfile: "docker.com", kubernetes: "kubernetes.io", nginx: "nginx.org",
   // email
   resend: "resend.com", sendgrid: "sendgrid.com", postmark: "postmarkapp.com", mailgun: "mailgun.com",
   mailchimp: "mailchimp.com", "amazon ses": "aws.amazon.com", ses: "aws.amazon.com", loops: "loops.so",
@@ -104,39 +106,94 @@ function bareHost(raw: string): string {
     .replace(/\s/g, "");
 }
 
-/** Build a logo URL for a host. */
-function logoSrc(host: string, displaySize: number): string {
+/** Curated, self-hosted logos that beat the generic favicon — official product
+    icons we want pixel-perfect. Keyed by resolved host (see KNOWN_DOMAINS). */
+const LOCAL_LOGOS: Record<string, string> = {
+  "amplify.aws": "/images/brand/amplify.png",
+};
+
+/** Bundled logos for languages/standards that have a recognizable logo but no
+    canonical website favicon to resolve (CSS, plain SQL). Keyed by lowercase
+    name; matched only when domain resolution finds nothing. */
+const LOCAL_LOGOS_BY_NAME: Record<string, string> = {
+  css: "/images/brand/css.svg",
+  css3: "/images/brand/css.svg",
+  sql: "/images/brand/sql.svg",
+  plpgsql: "/images/brand/sql.svg",
+  "pl/pgsql": "/images/brand/sql.svg",
+};
+
+function localLogoForName(name: string): string | null {
+  return LOCAL_LOGOS_BY_NAME[name.trim().toLowerCase()] ?? null;
+}
+
+/** Logo URLs to try for a host, best source first. Each that fails to load
+    advances to the next (see the cascade in BrandLogo); the monogram shows only
+    after every real source misses. */
+function logoSources(host: string, displaySize: number): string[] {
+  const out: string[] = [];
+  // Curated, pixel-perfect override wins outright when we have one.
+  if (LOCAL_LOGOS[host]) out.push(LOCAL_LOGOS[host]);
+  const px = Math.max(64, displaySize * 2);
   const clientId = process.env.NEXT_PUBLIC_BRANDFETCH_CLIENT_ID;
   if (clientId) {
-    const px = Math.max(64, displaySize * 2);
-    return `https://cdn.brandfetch.io/${host}/w/${px}/h/${px}?c=${clientId}`;
+    // `/fallback/404` is essential: without it Brandfetch answers a miss with
+    // its OWN placeholder image at HTTP 200, so onError never fires and we'd be
+    // stuck on that placeholder. With it, a miss returns a real 404 → onError →
+    // we drop to Google's faviconV2 below.
+    out.push(`https://cdn.brandfetch.io/${host}/w/${px}/h/${px}/fallback/404?c=${clientId}`);
   }
-  return `https://www.google.com/s2/favicons?domain=${host}&sz=64`;
+  // faviconV2 (not the legacy s2 endpoint): picks the best source icon the site
+  // offers — including high-res touch icons — instead of upscaling a 16px
+  // favicon, which looks stretched/blurry above ~20px. This is the primary when
+  // no Brandfetch client id is set, and the backstop when Brandfetch misses.
+  // fallback_opts deliberately excludes URL: with it, unknown domains return a
+  // generic placeholder with HTTP 200, so onError never fires and the monogram
+  // never shows. Without it, a miss 404s → monogram.
+  out.push(`https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE&url=https://${host}&size=${px}`);
+  return out;
 }
 
 export function BrandLogo({
   domain,
   name,
   size = 22,
+  plain = false,
+  fallback,
 }: {
   domain?: string | null;
   name?: string | null;
   size?: number;
+  /** No white box / border / padding — for full-bleed icons (e.g. university
+      crests) that look pinched inside the boxed chrome at larger sizes. */
+  plain?: boolean;
+  /** Text for the neutral fallback tile when no logo resolves or the image
+      fails to load. Defaults to the first letter of `name`; pass a company's
+      initials (e.g. "PG") to show those instead. */
+  fallback?: string;
 }) {
   // Prefer the saved domain; otherwise resolve a common tool by name.
   const host = (domain ? bareHost(domain) : "") || guessDomainFromName(name ?? "") || "";
-  const [failed, setFailed] = useState(false);
+  // No website host? Fall back to a bundled logo for known languages/standards.
+  const localLogo = host ? null : localLogoForName(name ?? "");
 
-  // A new host (e.g. the builder renamed the item) gets a fresh load attempt.
-  useEffect(() => setFailed(false), [host]);
+  // Ordered sources tried in turn; onError advances the cursor. The monogram
+  // shows only once every real source (Brandfetch → Google) has missed.
+  const sources = host ? logoSources(host, size) : localLogo ? [localLogo] : [];
+  const [idx, setIdx] = useState(0);
 
-  const monogram = (name ?? "").trim().charAt(0).toUpperCase() || "•";
+  // A new host/logo (e.g. the builder renamed the item) restarts the cascade.
+  useEffect(() => setIdx(0), [host, localLogo]);
 
-  if (!host || failed) {
+  const monogram =
+    (fallback ?? "").trim() || (name ?? "").trim().charAt(0).toUpperCase() || "•";
+  const src = sources[idx];
+
+  if (!src) {
     return (
       <span
         className="brand-logo brand-logo--fallback"
-        style={{ width: size, height: size }}
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.5) }}
         aria-hidden="true"
       >
         {monogram}
@@ -146,17 +203,19 @@ export function BrandLogo({
 
   return (
     // Plain <img> (not next/image): tiny third-party favicons that don't benefit
-    // from the optimizer and shouldn't require remotePatterns config.
+    // from the optimizer and shouldn't require remotePatterns config. `key={src}`
+    // remounts the element per source so each gets a clean load + onError.
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      className="brand-logo"
-      src={logoSrc(host, size)}
+      key={src}
+      className={plain ? "brand-logo brand-logo--plain" : "brand-logo"}
+      src={src}
       alt=""
       width={size}
       height={size}
       style={{ width: size, height: size }}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => setIdx((i) => i + 1)}
       aria-hidden="true"
     />
   );

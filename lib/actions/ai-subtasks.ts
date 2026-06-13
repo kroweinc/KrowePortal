@@ -4,6 +4,7 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { generateSubtasks } from "@/lib/ai/generate-subtasks";
+import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
 import type { Subtask } from "@/lib/types";
@@ -30,6 +31,9 @@ export async function generateSubtaskDrafts(input: {
 
   if (taskError || !task) return { error: "Task not found" };
 
+  const budget = await assertAiBudget(profile.id);
+  if (!budget.ok) return { error: budget.error };
+
   const { data: attachments } = await supabase
     .from("task_attachments")
     .select("text_content")
@@ -51,7 +55,7 @@ export async function generateSubtaskDrafts(input: {
       attachments: attachments ?? [],
       answers: input.answers,
       toolContext,
-    });
+    }, { userId: profile.id, operation: "generate_subtasks" });
     return result;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI generation failed";

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getContractByToken } from "@/lib/actions/contracts-public";
+import { getAuthViewer } from "@/lib/auth";
 import { ContractPublicView } from "./contract-public-view";
 
 interface Props {
@@ -14,12 +15,12 @@ export default async function PublicContractPage({ params }: Props) {
   }
 
   // getContractByToken already hides draft/rejected contracts (returns null).
-  const data = await getContractByToken(token);
+  const [data, viewer] = await Promise.all([getContractByToken(token), getAuthViewer()]);
   if (!data) {
     return <ErrorCard message="This contract isn't available." />;
   }
 
-  return <ContractPublicView data={data} />;
+  return <ContractPublicView data={data} viewer={viewer} />;
 }
 
 function ErrorCard({ message }: { message: string }) {

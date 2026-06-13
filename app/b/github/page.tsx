@@ -9,7 +9,7 @@ import {
   getProjectProfile,
   type ProjectProfile,
 } from "@/lib/actions/generate-project-profile";
-import { getMyEngagement } from "@/lib/actions/invitations";
+import { getMyEngagements } from "@/lib/actions/invitations";
 import {
   BranchesCard,
   BranchesCardSkeleton,
@@ -30,15 +30,38 @@ import {
   NoRepoSelected,
   RepoFetchError,
 } from "@/components/project-profile";
+import { RepoSelector } from "@/components/github/repo-selector";
+import { fetchGithubRepos } from "@/lib/github/list-repos";
 import { deriveArchLayers } from "@/lib/operator-project/derive-arch-layers";
 import type { RepoContext } from "@/lib/github/types";
+import type { Engagement } from "@/lib/types";
 
-export default async function ProjectProfilePage() {
+type RepoOption = {
+  key: string; // engagement id, or "personal" for the user's own selected repo
+  label: string;
+  engagement: Engagement | null;
+  repo: {
+    owner: string;
+    name: string;
+    fullName: string;
+    defaultBranch: string;
+  } | null; // null = engagement exists but has no repo linked yet
+};
+
+export default async function ProjectProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ engagement?: string }>;
+}) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") redirect("/o");
 
-  const connection = await getUserGithubConnection(profile.id);
+  const [connection, engagements, { engagement: engagementParam }] = await Promise.all([
+    getUserGithubConnection(profile.id),
+    getMyEngagements(),
+    searchParams,
+  ]);
 
   if (!connection) {
     return (
@@ -50,7 +73,43 @@ export default async function ProjectProfilePage() {
     );
   }
 
-  if (!connection.selectedRepo) {
+  // Every engagement gets a chip, even before a repo is linked.
+  const engagementOptions: RepoOption[] = engagements.map((e) => ({
+    key: e.id,
+    label: e.title,
+    engagement: e,
+    repo:
+      e.github_repo_owner && e.github_repo_name && e.github_default_branch
+        ? {
+            owner: e.github_repo_owner,
+            name: e.github_repo_name,
+            fullName:
+              e.github_repo_full_name ?? `${e.github_repo_owner}/${e.github_repo_name}`,
+            defaultBranch: e.github_default_branch,
+          }
+        : null,
+  }));
+
+  // The user's own selected repo, unless an engagement already covers it.
+  const personalOption: RepoOption | null =
+    connection.selectedRepo &&
+    !engagementOptions.some((o) => o.repo?.fullName === connection.selectedRepo!.fullName)
+      ? {
+          key: "personal",
+          label: "Personal",
+          engagement: null,
+          repo: connection.selectedRepo,
+        }
+      : null;
+
+  // Linked repos first; engagements still waiting on a repo sort to the right.
+  const repoOptions = [
+    ...engagementOptions.filter((o) => o.repo),
+    ...(personalOption ? [personalOption] : []),
+    ...engagementOptions.filter((o) => !o.repo),
+  ];
+
+  if (repoOptions.length === 0) {
     return (
       <main className="krowe-page krowe-blueprint-canvas">
         <div className="krowe-page-inner anim-fade-up" style={{ maxWidth: 1180 }}>
@@ -60,18 +119,61 @@ export default async function ProjectProfilePage() {
     );
   }
 
-  const { owner, name, defaultBranch, fullName } = connection.selectedRepo;
+  // Honor ?engagement=, else default to the user's selected repo (matching
+  // prior behavior), else the first option that actually has a repo.
+  const activeOption =
+    repoOptions.find((o) => o.key === engagementParam) ??
+    repoOptions.find((o) => o.repo && o.repo.fullName === connection.selectedRepo?.fullName) ??
+    repoOptions.find((o) => o.repo) ??
+    repoOptions[0];
 
-  const [repoContext, branchGraph, engagement] = await Promise.all([
+  if (!activeOption.repo) {
+    const repos = await fetchGithubRepos(connection.token);
+    return (
+      <main className="krowe-page krowe-blueprint-canvas">
+        <div
+          className="krowe-page-inner anim-fade-up"
+          style={{ maxWidth: 1180, display: "flex", flexDirection: "column", gap: 20 }}
+        >
+          <RepoChips options={repoOptions} activeKey={activeOption.key} />
+          <div className="rounded-lg border border-neutral-200 bg-white p-6" style={{ maxWidth: 560 }}>
+            <h2 className="text-sm font-semibold text-neutral-900">Link a repository</h2>
+            <p className="mt-1 text-sm text-neutral-500">
+              {activeOption.label} doesn&apos;t have a repo yet. Link one to power its
+              project view, commits, and branches.
+            </p>
+            <div className="mt-4">
+              <RepoSelector engagementId={activeOption.key} initialRepos={repos} />
+            </div>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const activeRepo = activeOption;
+  const { owner, name, defaultBranch, fullName } = activeOption.repo;
+
+  const [repoContext, branchGraph] = await Promise.all([
     buildRepoContext(connection.token, owner, name, defaultBranch),
     buildBranchGraph(connection.token, owner, name, defaultBranch),
-    getMyEngagement(),
   ]);
+
+  // Prefer the engagement that owns the active repo; fall back to a full-name
+  // match, then (for single-engagement accounts) the lone engagement.
+  const engagement =
+    activeRepo.engagement ??
+    engagements.find((e) => e.github_repo_full_name === fullName) ??
+    (engagements.length === 1 ? engagements[0] : null);
 
   if (!repoContext) {
     return (
       <main className="krowe-page krowe-blueprint-canvas">
-        <div className="krowe-page-inner anim-fade-up" style={{ maxWidth: 1180 }}>
+        <div
+          className="krowe-page-inner anim-fade-up"
+          style={{ maxWidth: 1180, display: "flex", flexDirection: "column", gap: 20 }}
+        >
+          <RepoChips options={repoOptions} activeKey={activeRepo.key} />
           <RepoFetchError repoFullName={fullName} />
         </div>
       </main>
@@ -124,6 +226,8 @@ export default async function ProjectProfilePage() {
         className="krowe-page-inner anim-fade-up"
         style={{ maxWidth: 1180, display: "flex", flexDirection: "column", gap: 20 }}
       >
+        <RepoChips options={repoOptions} activeKey={activeRepo.key} />
+
         <ProjectHeader
           title={title}
           org={owner}
@@ -204,6 +308,24 @@ export default async function ProjectProfilePage() {
         </div>
       </div>
     </main>
+  );
+}
+
+function RepoChips({ options, activeKey }: { options: RepoOption[]; activeKey: string }) {
+  if (options.length <= 1) return null;
+  return (
+    <div className="krowe-filter-row" style={{ marginBottom: -4 }}>
+      {options.map((o) => (
+        <Link
+          key={o.key}
+          href={`/b/github?engagement=${o.key}`}
+          className={`krowe-filter-chip ${o.key === activeKey ? "active" : ""}`}
+        >
+          {o.label}
+          <span className="count">{o.repo?.name ?? "no repo"}</span>
+        </Link>
+      ))}
+    </div>
   );
 }
 

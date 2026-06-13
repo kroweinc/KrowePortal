@@ -6,10 +6,12 @@ import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
-import { getBriefsByProject } from "@/lib/actions/briefs";
-import { getPrdsByProject } from "@/lib/actions/prds";
+import { getQuotesByProject, getQuoteById } from "@/lib/actions/quote-docs";
+import { getPrdsByProject, getPrdById } from "@/lib/actions/prds";
 import { generateContractDraft } from "@/lib/ai/generate-contract";
-import type { Contract, ContractContent, BriefContent, PrdContent } from "@/lib/types";
+import { assertAiBudget } from "@/lib/ai/usage";
+import { exhibitFromQuote } from "@/lib/contract/exhibit";
+import type { Contract, ContractContent, QuoteContent, PrdContent } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
@@ -21,12 +23,13 @@ function revalidateContract(projectId: string, id: string, token?: string | null
   if (token) revalidatePath(`/contract/${token}`);
 }
 
-// The contract should stay consistent with the project's quote. Prefer a
-// signed quote, then the most recent sent one, then the latest draft.
-async function bestQuoteContent(projectId: string): Promise<BriefContent | undefined> {
-  const quotes = await getBriefsByProject(projectId);
+// The contract should stay consistent with the project's quote breakdown.
+// Prefer an accepted/signed quote, then the most recent sent one, then the
+// latest draft (getQuotesByProject returns newest-first).
+async function bestQuoteContent(projectId: string): Promise<QuoteContent | undefined> {
+  const quotes = await getQuotesByProject(projectId);
   if (quotes.length === 0) return undefined;
-  const signed = quotes.find((q) => q.status === "signed");
+  const signed = quotes.find((q) => q.status === "signed" || q.status === "accepted");
   const sent = quotes.find((q) => q.status === "sent");
   return (signed ?? sent ?? quotes[0]).content;
 }
@@ -42,11 +45,38 @@ async function bestPrdContent(projectId: string): Promise<PrdContent | undefined
   return (signed ?? sent ?? prds[0]).content;
 }
 
+// Explicit picks from the new-contract form: load the chosen quote / PRD by id,
+// scoped to the project (defends against attaching another project's doc). An
+// absent id means the builder chose to draft without that source.
+async function selectedQuoteContent(
+  projectId: string,
+  quoteId?: string
+): Promise<QuoteContent | undefined> {
+  if (!quoteId) return undefined;
+  const quote = await getQuoteById(quoteId);
+  if (!quote || quote.project_id !== projectId) return undefined;
+  return quote.content;
+}
+
+async function selectedPrdContent(
+  projectId: string,
+  prdId?: string
+): Promise<PrdContent | undefined> {
+  if (!prdId) return undefined;
+  const prd = await getPrdById(prdId);
+  if (!prd || prd.project_id !== projectId) return undefined;
+  return prd.content;
+}
+
 const createSchema = z.object({
   projectId: z.string().uuid(),
   title: z.string().min(1, "Give the contract a title.").max(200),
-  notes: z.string().min(1, "Paste some notes to draft from.").max(20000),
+  // Notes are optional — the builder can draft purely from a selected quote/PRD.
+  notes: z.string().max(20000).optional(),
   providerName: z.string().max(200).optional(),
+  // Which quote/PRD to build from (chosen in the form). Empty = none.
+  prdId: z.string().uuid().optional(),
+  quoteId: z.string().uuid().optional(),
 });
 
 export async function createContractDraft(
@@ -59,25 +89,36 @@ export async function createContractDraft(
   const parsed = createSchema.safeParse({
     projectId: formData.get("projectId"),
     title: formData.get("title"),
-    notes: formData.get("notes"),
+    notes: formData.get("notes") || undefined,
     providerName: formData.get("providerName") || undefined,
+    prdId: formData.get("prdId") || undefined,
+    quoteId: formData.get("quoteId") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
   const project = await getProjectById(parsed.data.projectId);
-  if (!project) return { error: "Project not found." };
-  if (project.owner_id !== profile.id) return { error: "Not your project." };
+  if (!project) return { error: "Document not found." };
+  if (project.owner_id !== profile.id) return { error: "Not your document." };
 
-  const quoteContent = await bestQuoteContent(parsed.data.projectId);
-  const prdContent = await bestPrdContent(parsed.data.projectId);
-  const content = await generateContractDraft({
-    title: parsed.data.title,
-    notes: parsed.data.notes,
-    providerName: parsed.data.providerName ?? profile.display_name ?? undefined,
-    clientName: project.prospect_name ?? project.name,
-    quoteContent,
-    prdContent,
-  });
+  const quoteContent = await selectedQuoteContent(parsed.data.projectId, parsed.data.quoteId);
+  const prdContent = await selectedPrdContent(parsed.data.projectId, parsed.data.prdId);
+
+  const budget = await assertAiBudget(profile.id);
+  if (!budget.ok) return { error: budget.error };
+
+  const aiContent = await generateContractDraft(
+    {
+      title: parsed.data.title,
+      notes: parsed.data.notes ?? "",
+      providerName: parsed.data.providerName ?? profile.display_name ?? undefined,
+      clientName: project.prospect_name ?? project.name,
+      quoteContent,
+      prdContent,
+    },
+    { userId: profile.id, operation: "generate_contract" }
+  );
+  // Freeze the quote's payment schedule + scope of work into the contract.
+  const content: ContractContent = { ...aiContent, ...exhibitFromQuote(quoteContent) };
 
   const supabase = await getClient(profile.id);
   const { data, error } = await supabase
@@ -88,7 +129,7 @@ export async function createContractDraft(
       title: parsed.data.title,
       status: "draft",
       content,
-      source_notes: parsed.data.notes,
+      source_notes: parsed.data.notes ?? null,
     })
     .select("id")
     .single();
@@ -125,7 +166,7 @@ export async function regenerateContract(
   const project = await getProjectById(before.project_id as string);
   const quoteContent = await bestQuoteContent(before.project_id as string);
   const prdContent = await bestPrdContent(before.project_id as string);
-  const content = await generateContractDraft({
+  const aiContent = await generateContractDraft({
     title: before.title as string,
     notes: clean,
     providerName: profile.display_name ?? undefined,
@@ -133,6 +174,8 @@ export async function regenerateContract(
     quoteContent,
     prdContent,
   });
+  // Re-snapshot the exhibit so a re-draft picks up the latest quote breakdown.
+  const content: ContractContent = { ...aiContent, ...exhibitFromQuote(quoteContent) };
 
   const { error } = await supabase
     .from("contracts")
@@ -240,10 +283,13 @@ export async function getContractsByProject(projectId: string): Promise<Contract
   if (!profile) return [];
 
   const supabase = await getClient(profile.id);
+  // Owner-scoped (created_by == project owner). RLS enforces this for the normal
+  // client; the dev admin client bypasses RLS, so we replicate the scope here.
   const { data } = await supabase
     .from("contracts")
     .select("*")
     .eq("project_id", projectId)
+    .eq("created_by", profile.id)
     .order("created_at", { ascending: false });
 
   return (data ?? []) as Contract[];
@@ -254,6 +300,12 @@ export async function getContractById(id: string): Promise<Contract | null> {
   if (!profile) return null;
 
   const supabase = await getClient(profile.id);
-  const { data } = await supabase.from("contracts").select("*").eq("id", id).maybeSingle();
+  // Owner-scoped: the dev admin client bypasses RLS, so guard by created_by here.
+  const { data } = await supabase
+    .from("contracts")
+    .select("*")
+    .eq("id", id)
+    .eq("created_by", profile.id)
+    .maybeSingle();
   return (data ?? null) as Contract | null;
 }

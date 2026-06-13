@@ -1,8 +1,17 @@
+import { Search, CircleHelp, Bell } from "lucide-react";
 import { DEV_TOGGLE_ENABLED } from "@/lib/auth";
 import type { Profile } from "@/lib/types";
 
 interface NavProps {
   profile: Profile;
+}
+
+/** First + last word initials, e.g. "Dev Builder" → "DB". */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "—";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 export function Nav({ profile }: NavProps) {
@@ -11,11 +20,17 @@ export function Nav({ profile }: NavProps) {
 
   return (
     <header className="krowe-topbar">
+      <label className="krowe-tb-search">
+        <Search
+          size={15}
+          strokeWidth={2}
+          style={{ color: "var(--faint-foreground)" }}
+        />
+        <input placeholder="Search tasks" />
+      </label>
+
       <div className="krowe-topbar-right">
-        <span className={`krowe-role-pill ${role}`}>
-          <span className="dot" />
-          {role}
-        </span>
+        {/* Dev role switcher — sits immediately left of the help (?) icon. */}
         {DEV_TOGGLE_ENABLED && (
           <form action="/api/dev/role" method="POST">
             <input
@@ -28,10 +43,21 @@ export function Nav({ profile }: NavProps) {
             </button>
           </form>
         )}
-        <span className="krowe-user-name">{displayName}</span>
-        <form action="/api/auth/logout" method="POST">
-          <button type="submit" className="krowe-signout">Sign out</button>
-        </form>
+
+        <button type="button" className="krowe-tb-icon" title="Help">
+          <CircleHelp size={18} />
+        </button>
+        <button type="button" className="krowe-tb-icon" title="Notifications">
+          <Bell size={18} />
+        </button>
+
+        <div className="krowe-tb-profile">
+          <span className="avatar">{initials(displayName)}</span>
+          <div className="who">
+            <div className="nm">{displayName}</div>
+            <div className="rl">{role}</div>
+          </div>
+        </div>
       </div>
     </header>
   );

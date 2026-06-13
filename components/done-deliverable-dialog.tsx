@@ -250,7 +250,6 @@ export function DoneDeliverableDialog({
                 onChange={(e) => {
                   setPushedToMain(e.target.checked);
                   if (!e.target.checked) {
-                    setNote("");
                     setPickedCommits([]);
                     setShowNoteFallback(false);
                   }
@@ -273,7 +272,7 @@ export function DoneDeliverableDialog({
                   disabled={isPending}
                 />
 
-                {!showNoteFallback ? (
+                {!showNoteFallback && (
                   <button
                     type="button"
                     onClick={() => setShowNoteFallback(true)}
@@ -282,18 +281,22 @@ export function DoneDeliverableDialog({
                   >
                     + Or paste a note instead
                   </button>
-                ) : (
-                  <textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="e.g. PR #123, commit abc123"
-                    maxLength={2000}
-                    disabled={isPending}
-                    rows={2}
-                    className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 disabled:opacity-40 resize-none"
-                  />
                 )}
               </>
+            )}
+
+            {/* A completion note is always available — a non-code deliverable
+                (Figma, doc, demo link) shouldn't require faking a push to main. */}
+            {(!pushedToMain || showNoteFallback) && (
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="What did you deliver? e.g. PR #123, a Figma link, or a short note"
+                maxLength={2000}
+                disabled={isPending}
+                rows={2}
+                className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 disabled:opacity-40 resize-none"
+              />
             )}
           </div>
         </div>

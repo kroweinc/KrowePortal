@@ -38,8 +38,11 @@ export const REFINABLE_SECTIONS: RefinableSection[] = [
   { id: "uxFlows", title: "UX Flows", fields: ["uxFlows"] },
   { id: "assumptions", title: "Assumptions", fields: ["assumptions"] },
   { id: "constraints", title: "Constraints", fields: ["constraintsDetail", "constraints"] },
-  { id: "risks", title: "Risks & Open Questions", fields: ["risks", "openQuestions"] },
-  { id: "milestoneList", title: "Milestones", fields: ["milestoneList"] },
+  // ids must match the SECTIONS registry in prd-sections.tsx so the inline
+  // "Refine" button (gated by isRefinable(section.id)) renders on every section.
+  { id: "risks", title: "Risks", fields: ["risks"] },
+  { id: "openQuestions", title: "Open Questions", fields: ["openQuestions"] },
+  { id: "milestones", title: "Milestones", fields: ["milestoneList"] },
 ];
 
 export const SECTION_FIELDS: Record<string, (keyof PrdContent)[]> = Object.fromEntries(

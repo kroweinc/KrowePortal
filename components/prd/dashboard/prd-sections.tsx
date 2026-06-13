@@ -7,7 +7,7 @@
 
 import { useState, useEffect, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
-import type { PrdContent, PrdPriority, PrdStackItem, PrdIntegration, FreeTierAssumption, PrdMilestone } from "@/lib/types";
+import type { PrdContent, PrdPriority, PrdStackItem, PrdIntegration, FreeTierAssumption, FreeTierAnalysis, PrdMilestone } from "@/lib/types";
 import type { StackLookup, IntegrationLookup } from "@/lib/ai/lookup-stack-item";
 import {
   lookupStackItemAction,
@@ -510,18 +510,20 @@ function currentServiceNames(content: PrdContent): Set<string> {
   return new Set(names.map(normName).filter(Boolean));
 }
 
-/** Does an analyzed verdict still correspond to a service in the current stack?
-    Lenient (substring either way) so trivial naming differences don't drop a
-    still-valid row — but a renamed/removed service (e.g. SendGrid → Resend) no
-    longer matches, which is how we detect a stale analysis. */
-function verdictInStack(verdict: { name: string; provider?: string | null }, current: Set<string>): boolean {
-  const candidates = [normName(verdict.name), normName(verdict.provider)].filter(Boolean);
-  for (const c of candidates) {
-    if (current.has(c)) return true;
-    for (const cur of current) {
-      if (cur.includes(c) || c.includes(cur)) return true;
-    }
-  }
+/** Has the stack changed since the analysis ran? Compares the current stack +
+    integration names against the snapshot the server stamped at run time
+    (analyzedStack). This is true staleness — a service added, removed, or renamed
+    (e.g. SendGrid → Resend). It deliberately does NOT compare against the verdict
+    names: the model infers concrete providers ("Vercel", "Supabase") from abstract
+    stack entries ("Managed hosting", "Managed PostgreSQL database"), which never
+    matched lexically and used to flag every fresh analysis as stale. Legacy
+    analyses with no snapshot are never auto-stale (the builder can re-check). */
+function freeTierStale(content: PrdContent, analysis?: FreeTierAnalysis | null): boolean {
+  if (!analysis || analysis.analyzedStack == null) return false;
+  const now = currentServiceNames(content);
+  const then = new Set(analysis.analyzedStack.map(normName).filter(Boolean));
+  if (now.size !== then.size) return true;
+  for (const n of now) if (!then.has(n)) return true;
   return false;
 }
 
@@ -535,7 +537,7 @@ function domainForVerdict(content: PrdContent, v: { name: string; provider?: str
   for (const it of items) {
     if (it.domain && candidates.includes(normName(it.name))) return it.domain;
   }
-  // Lenient substring match either way (mirrors verdictInStack).
+  // Lenient substring match either way for trivial naming differences.
   for (const it of items) {
     const itName = normName(it.name);
     if (!itName || !it.domain) continue;
@@ -629,8 +631,7 @@ function FreeTierFitBody({ content, patch }: SectionBodyProps) {
   // The saved analysis is a cached snapshot. If a service it judged is no longer
   // in the stack (renamed/removed), the result is stale — don't show outdated
   // verdicts; prompt a re-check instead.
-  const current = currentServiceNames(content);
-  const stale = !!analysis && analysis.services.some((s) => !verdictInStack(s, current));
+  const stale = freeTierStale(content, analysis);
   const assumptions = normalizeAssumptions(analysis?.assumptions);
 
   // Persist an edited stat into the cached analysis so it survives Save and is

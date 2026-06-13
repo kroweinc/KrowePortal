@@ -15,12 +15,16 @@ export const DEV_PROFILES: Record<string, Profile> = {
     role: "operator",
     display_name: "Dev Operator",
     created_at: new Date().toISOString(),
+    onboarding_status: "completed",
+    onboarding: {},
   },
   builder: {
     id: "00000000-0000-0000-0000-000000000002",
     role: "builder",
     display_name: "Dev Builder",
     created_at: new Date().toISOString(),
+    onboarding_status: "completed",
+    onboarding: {},
   },
 };
 

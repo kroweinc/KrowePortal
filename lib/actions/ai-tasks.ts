@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { generateTask } from "@/lib/ai/generate-tasks";
+import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
@@ -35,6 +36,9 @@ export async function generateTaskDraft(input: {
   const parsed = generateSchema.safeParse(input);
   if (!parsed.success) return { error: "Please provide at least a few words describing what you want." };
 
+  const budget = await assertAiBudget(profile.id);
+  if (!budget.ok) return { error: budget.error };
+
   const { repoContext, toolContext, source } = await resolveRepoForGeneration({
     profileId: profile.id,
     engagementId: parsed.data.engagementId,
@@ -49,7 +53,7 @@ export async function generateTaskDraft(input: {
       repoContext,
       answers: parsed.data.answers,
       toolContext,
-    });
+    }, { userId: profile.id, operation: "generate_tasks" });
     return result;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI generation failed";
@@ -134,6 +138,7 @@ export async function acceptGeneratedTask(input: {
       title: parsed.data.task.title,
       description: parsed.data.task.description ?? null,
       priority: parsed.data.task.priority,
+      userId: profile.id,
     });
   }
 

@@ -24,25 +24,25 @@ begin
   returning id into eng_id;
 
   -- sample tasks
-  insert into tasks (engagement_id, title, description, source, status, operator_visible, created_by)
+  insert into tasks (engagement_id, title, description, source, status, created_by)
     values
       (eng_id, 'Inventory sheet keeps breaking every quarter',
        'Our Google Sheet formula errors out whenever we add more than 500 rows. We lose an hour fixing it each time.',
-       'operator_request', 'inbox', true, op_id),
+       'operator_request', 'inbox', op_id),
 
       (eng_id, 'Client onboarding is all email and spreadsheets',
        'New clients send a PDF, someone copies it into a spreadsheet, someone else emails a welcome kit. Takes 2 days.',
-       'operator_request', 'inbox', true, op_id),
+       'operator_request', 'inbox', op_id),
 
       (eng_id, 'Approval requests get lost in Slack',
        'Purchase approvals over $500 need manager sign-off but there is no system — just a Slack message that gets buried.',
-       'operator_request', 'in_progress', true, op_id),
+       'operator_request', 'in_progress', op_id),
 
       (eng_id, 'Set up Supabase schema and auth',
        'Create profiles, engagements, tasks tables with RLS. Wire up magic-link auth.',
-       'builder_added', 'done', false, bl_id),
+       'builder_added', 'done', bl_id),
 
       (eng_id, 'Wire frontend to live database',
        'Connect operator and builder dashboards to real Supabase queries. Test RLS isolation.',
-       'builder_added', 'in_progress', true, bl_id);
+       'builder_added', 'in_progress', bl_id);
 end $$;

@@ -62,6 +62,7 @@ export async function createTask(formData: FormData) {
     title: parsed.data.title,
     description: parsed.data.description ?? null,
     priority: parsed.data.priority,
+    userId: profile.id,
   });
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
@@ -246,6 +247,47 @@ export async function markTaskForApproval(
   return { success: true };
 }
 
+// Operator sign-off on a task that the builder sent for approval. Orthogonal to
+// the Done transition — it only stamps approval_approved_at; the builder still
+// advances the task to Done separately.
+export async function approveTask(
+  taskId: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "operator") return { error: "Only operators can approve tasks." };
+
+  const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("approval_sent_at, approval_approved_at")
+    .eq("id", taskId)
+    .single();
+
+  if (!before) return { error: "Task not found." };
+  if (!before.approval_sent_at) return { error: "Task has not been sent for approval." };
+  if (before.approval_approved_at) return { success: true };
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("tasks")
+    .update({ approval_approved_at: now, updated_at: now })
+    .eq("id", taskId);
+
+  if (error) return { error: error.message };
+
+  await writeAuditEntry({
+    taskId,
+    actorId: profile.id,
+    action: "task.approved",
+  });
+
+  revalidatePath("/b");
+  revalidatePath("/o");
+  return { success: true };
+}
+
 export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -273,40 +315,6 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
       field: "status",
       oldValue: before.status,
       newValue: status,
-    });
-  }
-
-  revalidatePath("/b");
-  return { success: true };
-}
-
-export async function toggleVisibility(taskId: string, visible: boolean) {
-  const profile = await getCurrentProfile();
-  if (!profile || profile.role !== "builder") redirect("/login");
-
-  const supabase = await getClient(profile.id);
-
-  const { data: before } = await supabase
-    .from("tasks")
-    .select("operator_visible")
-    .eq("id", taskId)
-    .single();
-
-  const { error } = await supabase
-    .from("tasks")
-    .update({ operator_visible: visible, updated_at: new Date().toISOString() })
-    .eq("id", taskId);
-
-  if (error) return { error: error.message };
-
-  if (before && before.operator_visible !== visible) {
-    await writeAuditEntry({
-      taskId,
-      actorId: profile.id,
-      action: "task.visibility_changed",
-      field: "operator_visible",
-      oldValue: before.operator_visible,
-      newValue: visible,
     });
   }
 

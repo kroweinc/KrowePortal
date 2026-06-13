@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { FileSignature } from "lucide-react";
-import type { Brief } from "@/lib/types";
+import type { Quote } from "@/lib/types";
 
 function formatCurrency(amount: number): string {
   return amount.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -10,8 +10,16 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export function SignedQuoteCard({ brief }: { brief: Brief }) {
-  const grand = brief.content.totals?.grand ?? 0;
+export function SignedQuoteCard({
+  quote,
+  contractToken,
+  prdToken,
+}: {
+  quote: Quote;
+  contractToken?: string | null;
+  prdToken?: string | null;
+}) {
+  const grand = quote.content.totals?.grand ?? 0;
 
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
@@ -21,25 +29,25 @@ export function SignedQuoteCard({ brief }: { brief: Brief }) {
           <h2 className="text-sm font-semibold text-neutral-900">Signed quote</h2>
         </div>
         <Link
-          href={`/quote/${brief.token}`}
+          href={`/quotes/${quote.token}`}
           className="text-xs text-neutral-500 underline hover:text-neutral-900"
         >
           View quote
         </Link>
       </div>
 
-      <p className="text-sm font-medium text-neutral-900">{brief.title}</p>
+      <p className="text-sm font-medium text-neutral-900">{quote.title}</p>
 
       <div className="mt-3 flex items-end justify-between">
         <div className="text-xs text-neutral-500">
-          {brief.signed_by_name && brief.signed_at ? (
+          {quote.signed_by_name && quote.signed_at ? (
             <>
-              Signed by <span className="font-medium text-neutral-700">{brief.signed_by_name}</span>
+              Accepted by <span className="font-medium text-neutral-700">{quote.signed_by_name}</span>
               <br />
-              {formatDate(brief.signed_at)}
+              {formatDate(quote.signed_at)}
             </>
           ) : (
-            "Signed"
+            "Accepted"
           )}
         </div>
         <div className="text-right">
@@ -48,10 +56,19 @@ export function SignedQuoteCard({ brief }: { brief: Brief }) {
         </div>
       </div>
 
-      {brief.content.paymentTerms && (
-        <p className="mt-3 border-t border-neutral-100 pt-3 text-xs text-neutral-500">
-          {brief.content.paymentTerms}
-        </p>
+      {(contractToken || prdToken) && (
+        <div className="mt-3 flex gap-4 border-t border-neutral-100 pt-3 text-xs">
+          {contractToken && (
+            <Link href={`/contract/${contractToken}`} className="text-neutral-500 underline hover:text-neutral-900">
+              View signed contract
+            </Link>
+          )}
+          {prdToken && (
+            <Link href={`/prd/${prdToken}`} className="text-neutral-500 underline hover:text-neutral-900">
+              View PRD
+            </Link>
+          )}
+        </div>
       )}
     </div>
   );

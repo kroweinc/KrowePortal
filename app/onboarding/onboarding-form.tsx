@@ -1,45 +1,45 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { useRouter } from "next/navigation";
 import { completeOnboarding } from "@/lib/actions/profile";
+import { WzPrimary, WzLineField } from "./wizard-shell";
 
 export function OnboardingForm({ defaultName = "" }: { defaultName?: string }) {
+  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
       const result = await completeOnboarding(formData);
-      if (result?.error) setError(result.error);
+      if (result && "error" in result && result.error) {
+        setError(result.error);
+        return;
+      }
+      // Builder profile now exists in_progress — re-render at the path step.
+      router.refresh();
     });
   }
 
   return (
-    <form
-      action={handleSubmit}
-      className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm space-y-5"
-    >
+    <form action={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 22, maxWidth: 380 }}>
       <input type="hidden" name="role" value="builder" />
-      <div>
-        <label className="block text-xs font-medium text-neutral-700 mb-2">
-          Your name
-        </label>
-        <Input
-          name="display_name"
-          defaultValue={defaultName}
-          placeholder="Jane Smith"
-          required
-          autoFocus
-        />
-      </div>
-
-      {error && <p className="text-xs text-red-600">{error}</p>}
-
-      <Button type="submit" className="w-full" disabled={isPending}>
+      <WzLineField
+        label="Your name"
+        name="display_name"
+        defaultValue={defaultName}
+        placeholder="Jane Smith"
+        required
+        autoFocus
+        maxLength={80}
+      />
+      {error && (
+        <p style={{ margin: 0, fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--danger)" }}>{error}</p>
+      )}
+      <WzPrimary type="submit" disabled={isPending}>
         {isPending ? "Setting up…" : "Get started"}
-      </Button>
+      </WzPrimary>
     </form>
   );
 }

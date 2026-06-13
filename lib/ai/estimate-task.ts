@@ -1,4 +1,5 @@
-import { openai, AI_MODEL } from "./client";
+import { runChat, AI_MODEL } from "./client";
+import type { AiCallMeta } from "./usage";
 import { TaskEstimateResult } from "./schemas";
 import {
   buildEstimateTaskSystemPrompt,
@@ -11,11 +12,11 @@ interface EstimateInput {
   priority: string;
 }
 
-export async function estimateTask(input: EstimateInput): Promise<TaskEstimateResult> {
+export async function estimateTask(input: EstimateInput, meta?: AiCallMeta): Promise<TaskEstimateResult> {
   const systemPrompt = buildEstimateTaskSystemPrompt();
   const userPrompt = buildEstimateTaskUserPrompt(input);
 
-  const response = await openai.chat.completions.create({
+  const response = await runChat({
     model: AI_MODEL,
     max_completion_tokens: 800,
     response_format: { type: "json_object" },
@@ -23,7 +24,7 @@ export async function estimateTask(input: EstimateInput): Promise<TaskEstimateRe
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-  });
+  }, meta);
 
   const raw = response.choices[0]?.message?.content ?? "";
   const parsed = JSON.parse(raw);

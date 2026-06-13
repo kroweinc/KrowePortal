@@ -1,0 +1,589 @@
+/* ===========================================================
+   Quote-specific styles. Composes on top of prd-dashboard.css
+   (.prd-dashboard) and prd-document.css (.prd-doc-stage), which
+   the quote components also import. Only the bits unique to a
+   priced quote live here: money fields, the cost tables, the
+   total banner, and a couple of layout helpers.
+   =========================================================== */
+
+/* ---------- dashboard: money fields ---------- */
+.prd-dashboard .money-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+.prd-dashboard .money-input {
+  font-family: var(--font-mono);
+  width: 7.5em;
+  text-align: right;
+}
+.prd-dashboard .module-cost {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+/* ---------- dashboard: toolbar + summary (header removed) ---------- */
+/* The old header bar is gone: its buttons live in this slim, right-aligned
+   toolbar; the quote title folds into the summary strip, with the client
+   identity shown as small pills directly beneath it. */
+.prd-dashboard .quote-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+.prd-dashboard .quote-summary {
+  margin-top: 18px;
+}
+.prd-dashboard .quote-summary__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.prd-dashboard .quote-summary__lead {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* client-identity pills (Company / Prepared for / Product) below the title */
+.prd-dashboard .quote-id-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.prd-dashboard .quote-id-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.prd-dashboard .quote-id-pill__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.prd-dashboard .quote-id-pill__value {
+  min-width: 0;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.prd-dashboard .quote-id-pill .inline-input {
+  width: auto;
+  min-width: 7em;
+  padding: 1px 6px;
+  box-shadow: none;
+}
+
+/* ---------- dashboard: line-item table inside a module card ---------- */
+.prd-dashboard .lineitem-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.prd-dashboard .lineitem-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+.prd-dashboard .lineitem-row:last-of-type {
+  border-bottom: none;
+}
+.prd-dashboard .lineitem-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--foreground);
+}
+.prd-dashboard .lineitem-amount {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13.5px;
+  text-align: right;
+}
+.prd-dashboard .lineitem-spacer {
+  width: 20px;
+  flex-shrink: 0;
+}
+.prd-dashboard .lineitem-row--subtotal {
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  margin-top: 2px;
+  font-weight: 600;
+}
+.prd-dashboard .lineitem-row--subtotal .lineitem-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+
+/* ---------- dashboard: per-item hours input (hours × rate pricing) ---------- */
+.prd-dashboard .lineitem-hours,
+.prd-dashboard .lineitem-hours-spacer {
+  width: 58px;
+  flex-shrink: 0;
+}
+.prd-dashboard .lineitem-hours {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  text-align: right;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background, #fff);
+  color: var(--foreground);
+}
+.prd-dashboard .lineitem-hours:focus {
+  outline: none;
+  border-color: var(--ring, #94a3b8);
+}
+.prd-dashboard .lineitem-hours-read {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ---------- dashboard: rate + show-hours controls atop Cost Breakdown ---------- */
+.prd-dashboard .quote-pricing-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 20px;
+  padding: 12px 14px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--muted, #f8fafc);
+}
+.prd-dashboard .quote-pricing-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.prd-dashboard .quote-pricing-field__label,
+.prd-dashboard .quote-pricing-toggle {
+  font-size: 13px;
+  color: var(--foreground);
+}
+.prd-dashboard .quote-rate-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--foreground);
+}
+.prd-dashboard .quote-rate-input {
+  width: 64px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  text-align: right;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background, #fff);
+  color: var(--foreground);
+}
+.prd-dashboard .quote-rate-input:focus {
+  outline: none;
+  border-color: var(--ring, #94a3b8);
+}
+.prd-dashboard .quote-rate-suffix {
+  color: var(--muted-foreground);
+}
+.prd-dashboard .quote-pricing-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+.prd-dashboard .quote-pricing-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ---------- dashboard: grand-total row under the modules ---------- */
+.prd-dashboard .quote-grand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+}
+.prd-dashboard .quote-grand__label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.prd-dashboard .quote-grand__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ---------- dashboard: total stat card ----------
+   A white card like the other two; the total just reads larger and in the
+   accent color so "Total Project Quote" still anchors the strip (matches the
+   accent treatment on the grand-total row). The higher-specificity selector
+   (.stat-card.stat-card--banner, 0,3,0) keeps the override order-independent. */
+.prd-dashboard .stat-card.stat-card--banner .quote-banner__num {
+  color: var(--accent);
+  font-size: 30px;
+}
+
+/* ---------- dashboard: status stat card ---------- */
+.prd-dashboard .stat-card__value .quote-status-num {
+  font-size: 22px;
+}
+.prd-dashboard .quote-status-dot {
+  align-self: center; /* parent .stat-card__value is baseline-aligned flex */
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+.prd-dashboard .quote-status-dot.is-draft {
+  background: var(--muted-foreground);
+}
+.prd-dashboard .quote-status-dot.is-sent {
+  background: var(--accent);
+}
+.prd-dashboard .quote-status-dot.is-signed,
+.prd-dashboard .quote-status-dot.is-accepted {
+  background: var(--success);
+}
+.prd-dashboard .quote-status-dot.is-rejected {
+  background: var(--danger);
+}
+
+/* ---------- dashboard: design-system checklist ---------- */
+.prd-dashboard .design-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.prd-dashboard .design-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.prd-dashboard .design-row:last-of-type {
+  border-bottom: none;
+}
+.prd-dashboard .design-check {
+  position: relative;
+  top: 2px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+.prd-dashboard .design-flag {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  font-weight: 700;
+}
+.prd-dashboard .design-flag--yes {
+  color: var(--success);
+}
+.prd-dashboard .design-flag--no {
+  color: var(--muted-foreground);
+}
+.prd-dashboard .design-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--foreground);
+}
+
+/* ---------- dashboard: payment structure ---------- */
+.prd-dashboard .payment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.prd-dashboard .payment-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.prd-dashboard .payment-row:last-of-type {
+  border-bottom: none;
+}
+.prd-dashboard .payment-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--foreground);
+}
+.prd-dashboard .payment-amount {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13.5px;
+  text-align: right;
+}
+.prd-dashboard .payment-row--total {
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  margin-top: 2px;
+  font-weight: 600;
+}
+.prd-dashboard .payment-row--total .payment-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+
+/* ---------- dashboard: Cost Overview rail section ---------- */
+.prd-dashboard .quote-overview__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.prd-dashboard .quote-overview__label {
+  margin-top: 12px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+.prd-dashboard .quote-ov-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.prd-dashboard .quote-ov-row:last-of-type {
+  border-bottom: none;
+}
+.prd-dashboard .quote-ov-row__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--foreground);
+}
+.prd-dashboard .quote-ov-row__kind {
+  flex-shrink: 0;
+}
+.prd-dashboard .quote-ov-row__amount {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13.5px;
+  text-align: right;
+}
+.prd-dashboard .quote-ov-row--subtotal {
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  margin-top: 2px;
+  font-weight: 600;
+}
+.prd-dashboard .quote-ov-row--subtotal .quote-ov-row__name {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+}
+
+/* extra-charge value controls: $/% toggle + amount or percent input */
+.prd-dashboard .quote-extra-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.prd-dashboard .quote-extra-mode {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.prd-dashboard .quote-extra-mode__btn {
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  background: var(--background, #fff);
+  cursor: pointer;
+}
+.prd-dashboard .quote-extra-mode__btn + .quote-extra-mode__btn {
+  border-left: 1px solid var(--border);
+}
+.prd-dashboard .quote-extra-mode__btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.prd-dashboard .quote-extra-pct {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.prd-dashboard .quote-extra-pct__input {
+  width: 52px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  text-align: right;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background, #fff);
+  color: var(--foreground);
+}
+.prd-dashboard .quote-extra-pct__input:focus {
+  outline: none;
+  border-color: var(--ring, #94a3b8);
+}
+.prd-dashboard .quote-extra-pct__suffix {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.prd-dashboard .quote-extra-derived {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.prd-dashboard .quote-overview__total {
+  margin-top: 12px;
+}
+
+/* ===========================================================
+   Document (.prd-doc-stage) — the Sherwood-style printed quote.
+   =========================================================== */
+.prd-doc-stage .quote-doc__banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+.prd-doc-stage .quote-doc__banner-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.prd-doc-stage .quote-doc__banner-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--foreground);
+}
+
+.prd-doc-stage .quote-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.prd-doc-stage .quote-table th {
+  text-align: left;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #fff;
+  background: oklch(28% 0.03 250);
+  font-weight: 600;
+  padding: 8px 10px;
+}
+.prd-doc-stage .quote-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+  vertical-align: top;
+}
+.prd-doc-stage .quote-table tbody tr:nth-child(even) td {
+  background: var(--surface-subtle);
+}
+.prd-doc-stage .quote-table__name {
+  font-weight: 500;
+}
+.prd-doc-stage .quote-table__muted {
+  color: var(--muted-foreground);
+}
+.prd-doc-stage .quote-table__notes {
+  color: var(--muted-foreground);
+}
+.prd-doc-stage .quote-table__num {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.prd-doc-stage .quote-table tfoot td {
+  border-top: 2px solid var(--border);
+  border-bottom: none;
+  font-weight: 700;
+  background: var(--surface-subtle);
+}
+.prd-doc-stage .quote-table__sub td {
+  border-top: 1px solid var(--border);
+  font-weight: 600;
+  color: var(--muted-foreground);
+  background: var(--surface-subtle);
+}
+.prd-doc-stage .quote-doc__protect-lead {
+  font-weight: 600;
+}
+.prd-doc-stage .quote-doc__footer {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+@media print {
+  .prd-doc-stage .quote-table,
+  .prd-doc-stage .quote-doc__banner {
+    break-inside: avoid;
+  }
+}

@@ -1,12 +1,13 @@
-import { openai, AI_MODEL } from "./client";
-import type { ContractContent, BriefContent, PrdContent } from "@/lib/types";
+import { runChat, AI_MODEL } from "./client";
+import type { AiCallMeta } from "./usage";
+import type { ContractContent, QuoteContent, PrdContent } from "@/lib/types";
 
 export type ContractDraftInput = {
   title: string;
   notes: string;
   providerName?: string;
   clientName?: string;
-  quoteContent?: BriefContent;
+  quoteContent?: QuoteContent;
   /**
    * The project's approved PRD, when one exists. Drives scope of services and
    * deliverables so the contract reflects what was agreed in the PRD.
@@ -66,7 +67,7 @@ Sensible DEFAULTS to apply UNLESS the notes contradict them:
 
 Rules:
 - Use the provided provider/client names in "parties" when given.
-- If a quote is provided, make "fees", "paymentTerms", and "deliverables" CONSISTENT with it — do not contradict the quoted amounts or scope.
+- If a quote is provided, make "fees", "paymentTerms", and "deliverables" CONSISTENT with it — do not contradict the quoted amounts or scope. The contract attaches the quote's full Payment Schedule and Scope of Work as exhibits, so "fees" should state the total and reference the payment schedule rather than re-listing every milestone, and "paymentTerms" should describe deposit / invoicing / late terms (not restate each milestone amount).
 - If a PRD is provided, base "scopeOfServices" and "deliverables" on its features and requirements; keep them consistent with both the PRD and the quote.
 - Do NOT invent jurisdiction, dates, or amounts not present in the notes, quote, or PRD. Leave them out / null.`;
 
@@ -82,12 +83,18 @@ function buildUserPrompt(input: ContractDraftInput): string {
   const q = input.quoteContent;
   if (q) {
     lines.push("");
-    lines.push("Associated quote (keep fees/scope consistent with this):");
-    if (q.summary) lines.push(`- Summary: ${q.summary}`);
+    lines.push("Associated quote breakdown (keep fees/scope consistent with this):");
+    if (q.scopeSummary) lines.push(`- Scope summary: ${q.scopeSummary}`);
     if (typeof q.totals?.grand === "number") lines.push(`- Quoted total: $${q.totals.grand}`);
-    if (q.paymentTerms) lines.push(`- Payment terms: ${q.paymentTerms}`);
-    const deliverables = (q.deliverables ?? []).map((d) => d.title).filter(Boolean);
-    if (deliverables.length) lines.push(`- Deliverables: ${deliverables.join("; ")}`);
+    const modules = (q.modules ?? [])
+      .map((m) => (m.purpose ? `${m.title} (${m.purpose})` : m.title))
+      .filter(Boolean);
+    if (modules.length) lines.push(`- Build scope: ${modules.join("; ")}`);
+    const milestones = (q.paymentMilestones ?? [])
+      .map((m) => `${m.label}: $${m.amount}${m.percent != null ? ` (${m.percent}%)` : ""}`)
+      .filter(Boolean);
+    if (milestones.length) lines.push(`- Payment schedule: ${milestones.join("; ")}`);
+    if (q.scopeProtection?.length) lines.push(`- Out of scope unless separately quoted: ${q.scopeProtection.join("; ")}`);
   }
 
   const prd = input.prdContent;
@@ -111,19 +118,25 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined;
 }
 
-export async function generateContractDraft(input: ContractDraftInput): Promise<ContractContent> {
+export async function generateContractDraft(
+  input: ContractDraftInput,
+  meta?: AiCallMeta
+): Promise<ContractContent> {
   let ai: AIResponse = {};
 
   try {
-    const response = await openai.chat.completions.create({
-      model: AI_MODEL,
-      max_completion_tokens: 2400,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserPrompt(input) },
-      ],
-    });
+    const response = await runChat(
+      {
+        model: AI_MODEL,
+        max_completion_tokens: 2400,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildUserPrompt(input) },
+        ],
+      },
+      meta
+    );
 
     const raw = response.choices[0]?.message?.content ?? "{}";
     ai = JSON.parse(raw) as AIResponse;

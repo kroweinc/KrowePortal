@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { Plus, X, Paperclip, Maximize2, Minimize2, Sparkles, Loader2, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { generateTaskDraft, acceptGeneratedTask } from "@/lib/actions/ai-tasks";
 import type { Question, SubtaskDraft, TaskDraft } from "@/lib/ai/schemas";
 import type { TaskPriority } from "@/lib/types";
 import { formatEstimate } from "@/lib/format-estimate";
+import { OPEN_NEW_TASK_EVENT } from "@/components/add-task-button";
 
 const MAX_SIZE = 25 * 1024 * 1024;
 const OTHER = "__other__";
@@ -49,9 +50,12 @@ function getExt(fileName: string) {
 
 interface NewTaskFormProps {
   engagementId?: string;
+  engagements?: { id: string; title: string }[];
   placeholder?: string;
   onSuccess?: () => void;
 }
+
+const PERSONAL = "__personal__";
 
 type AiMode =
   | { kind: "idle" }
@@ -66,13 +70,18 @@ type AiMode =
     }
   | { kind: "accepting" };
 
-export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFormProps) {
+export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuccess }: NewTaskFormProps) {
   const [expanded, setExpanded] = useState(false);
   const [modal, setModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // undefined = follow the engagementId prop (the board's active filter / first engagement)
+  const [engagementChoice, setEngagementChoice] = useState<string | undefined>(undefined);
+  const selectedEngagement = engagementChoice ?? engagementId ?? PERSONAL;
+  const effectiveEngagementId = selectedEngagement === PERSONAL ? undefined : selectedEngagement;
 
   // Form fields (controlled so the AI flow can prefill them)
   const [title, setTitle] = useState("");
@@ -87,6 +96,12 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
   const [aiMode, setAiMode] = useState<AiMode>({ kind: "idle" });
   const askedOnceRef = useRef(false);
 
+  useEffect(() => {
+    const open = () => setExpanded(true);
+    window.addEventListener(OPEN_NEW_TASK_EVENT, open);
+    return () => window.removeEventListener(OPEN_NEW_TASK_EVENT, open);
+  }, []);
+
   function resetForm() {
     setTitle("");
     setDescription("");
@@ -97,6 +112,7 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
     setAiMode({ kind: "idle" });
     setFiles([]);
     setError(null);
+    setEngagementChoice(undefined);
     askedOnceRef.current = false;
   }
 
@@ -146,7 +162,7 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
     startTransition(async () => {
       const result = await generateTaskDraft({
         rawDescription: raw,
-        engagementId,
+        engagementId: effectiveEngagementId,
         answers,
       });
 
@@ -236,7 +252,7 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
       setAiMode({ kind: "accepting" });
       startTransition(async () => {
         const result = await acceptGeneratedTask({
-          engagementId,
+          engagementId: effectiveEngagementId,
           task: {
             title: title.trim(),
             description: description.trim() || undefined,
@@ -266,7 +282,7 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
 
     startTransition(async () => {
       const fd = new FormData();
-      if (engagementId) fd.set("engagement_id", engagementId);
+      if (effectiveEngagementId) fd.set("engagement_id", effectiveEngagementId);
       fd.set("title", title.trim());
       if (description.trim()) fd.set("description", description.trim());
       fd.set("priority", priority);
@@ -541,6 +557,24 @@ export function NewTaskForm({ engagementId, placeholder, onSuccess }: NewTaskFor
             </button>
           )}
         </div>
+
+        {engagements.length > 1 && (
+          <div>
+            <label className="block text-xs font-medium text-neutral-700 mb-1">Engagement</label>
+            <Select
+              name="engagement"
+              value={selectedEngagement}
+              onChange={(e) => setEngagementChoice(e.target.value)}
+            >
+              {engagements.map((eng) => (
+                <option key={eng.id} value={eng.id}>
+                  {eng.title}
+                </option>
+              ))}
+              <option value={PERSONAL}>Personal (no engagement)</option>
+            </Select>
+          </div>
+        )}
 
         <div>
           <label className="block text-xs font-medium text-neutral-700 mb-1">Priority</label>

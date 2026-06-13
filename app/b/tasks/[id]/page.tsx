@@ -75,12 +75,6 @@ export default async function BuilderTaskDetail({
               {task.source === "operator_request" ? "Operator request" : "Builder added"}
             </Badge>
           </span>
-          <span>
-            Visibility:{" "}
-            <Badge variant={task.operator_visible ? "outline" : "secondary"}>
-              {task.operator_visible ? "Visible to operator" : "Hidden"}
-            </Badge>
-          </span>
           {(() => {
             const label = formatHoursRange(
               task.builder_estimate_low_hours,

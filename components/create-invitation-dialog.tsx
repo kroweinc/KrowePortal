@@ -16,20 +16,22 @@ import { createInvitation } from "@/lib/actions/invitations";
 interface Props {
   existingToken?: string;
   operatorName?: string;
+  engagementId?: string;
 }
 
-export function CreateInvitationDialog({ existingToken, operatorName }: Props) {
+export function CreateInvitationDialog({ existingToken, operatorName, engagementId }: Props) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState<string | null>(existingToken ?? null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const inviteUrl = token ? `${window.location.origin}/join/${token}` : null;
+  const inviteUrl =
+    token && typeof window !== "undefined" ? `${window.location.origin}/join/${token}` : null;
 
   function handleCreate() {
     setError(null);
     startTransition(async () => {
-      const result = await createInvitation();
+      const result = await createInvitation(engagementId);
       if ("error" in result) {
         setError(result.error);
       } else {

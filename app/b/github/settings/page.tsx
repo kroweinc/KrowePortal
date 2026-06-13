@@ -4,36 +4,24 @@ import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth"
 import { createClient, createAdminClient } from "@/lib/supabase/server"
 import { ConnectGitHubButton } from "@/components/github/connect-github-button"
 import { RepoSelector } from "@/components/github/repo-selector"
-import type { Engagement, GitHubRepo } from "@/lib/types"
+import { decryptSecret } from "@/lib/crypto"
+import { fetchGithubRepos } from "@/lib/github/list-repos"
+import type { Engagement } from "@/lib/types"
 
 interface EngagementWithRepo extends Engagement {
   github_repo_full_name: string | null
 }
 
-async function fetchGithubRepos(token: string): Promise<GitHubRepo[]> {
-  try {
-    const res = await fetch(
-      "https://api.github.com/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator",
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.github+json",
-        },
-        cache: "no-store",
-      }
-    )
-    if (!res.ok) return []
-    const data = (await res.json()) as GitHubRepo[]
-    return Array.isArray(data) ? data : []
-  } catch {
-    return []
-  }
+const GH_ERROR_MESSAGES: Record<string, string> = {
+  github_denied: "GitHub authorization was cancelled or denied. Please try connecting again.",
+  github_token_failed: "Couldn't complete the GitHub handshake. Please try connecting again.",
+  github_save_failed: "We couldn't save your GitHub connection. Please try again.",
 }
 
 export default async function GitHubSettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ github?: string }>
+  searchParams: Promise<{ github?: string; error?: string }>
 }) {
   const params = await searchParams
   const profile = await getCurrentProfile()
@@ -59,7 +47,7 @@ export default async function GitHubSettingsPage({
   const engagementList = (engagements ?? []) as EngagementWithRepo[]
   const connected = !!connection
   const repos = connected && connection?.access_token
-    ? await fetchGithubRepos(connection.access_token)
+    ? await fetchGithubRepos(decryptSecret(connection.access_token))
     : []
 
   return (
@@ -80,6 +68,12 @@ export default async function GitHubSettingsPage({
       {params.github === "connected" && (
         <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
           GitHub connected successfully.
+        </div>
+      )}
+
+      {params.error && (
+        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {GH_ERROR_MESSAGES[params.error] ?? "Something went wrong connecting GitHub. Please try again."}
         </div>
       )}
 

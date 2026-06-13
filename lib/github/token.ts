@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/server";
+import { decryptSecret } from "@/lib/crypto";
 
 export async function getUserGithubToken(profileId: string): Promise<string | null> {
   const supabase = createAdminClient();
@@ -7,7 +8,7 @@ export async function getUserGithubToken(profileId: string): Promise<string | nu
     .select("access_token")
     .eq("user_id", profileId)
     .single();
-  return data?.access_token ?? null;
+  return data?.access_token ? decryptSecret(data.access_token) : null;
 }
 
 export type UserGithubConnection = {
@@ -41,7 +42,7 @@ export async function getUserGithubConnection(
   );
 
   return {
-    token: data.access_token,
+    token: decryptSecret(data.access_token),
     selectedRepo: hasRepo
       ? {
           owner: data.selected_repo_owner,

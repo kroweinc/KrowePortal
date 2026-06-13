@@ -127,12 +127,6 @@ function describe(entry: AuditEntry): React.ReactNode {
       return <>marked task done</>;
     case "task.sent_for_approval":
       return <>sent task for approval</>;
-    case "task.visibility_changed":
-      return entry.new_value ? (
-        <>made task <strong>visible</strong> to operator</>
-      ) : (
-        <>made task <strong>hidden</strong> from operator</>
-      );
     case "subtask.created":
       return <>added sub-task <em className="krowe-audit-em">{String(meta.title ?? "")}</em></>;
     case "subtask.completed":

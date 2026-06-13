@@ -1,0 +1,130 @@
+/* Prefill suggestions for the Education form. Powers the SuggestInput
+   typeahead on the School and Major inputs — picking one autofills the field,
+   but both inputs stay free text so high schools and unlisted schools/majors
+   work. Each university carries its official .edu domain so BrandLogo can
+   show the school's crest/favicon in the dropdown and on the public page. */
+
+export interface UniversityPreset {
+  name: string;
+  domain: string;
+}
+
+export const TOP_UNIVERSITIES: UniversityPreset[] = [
+  { name: "Arizona State University", domain: "asu.edu" },
+  { name: "Boston University", domain: "bu.edu" },
+  { name: "Brown University", domain: "brown.edu" },
+  { name: "California Institute of Technology", domain: "caltech.edu" },
+  { name: "Carnegie Mellon University", domain: "cmu.edu" },
+  { name: "Columbia University", domain: "columbia.edu" },
+  { name: "Cornell University", domain: "cornell.edu" },
+  { name: "Dartmouth College", domain: "dartmouth.edu" },
+  { name: "Duke University", domain: "duke.edu" },
+  { name: "Emory University", domain: "emory.edu" },
+  { name: "Florida State University", domain: "fsu.edu" },
+  { name: "Georgetown University", domain: "georgetown.edu" },
+  { name: "Georgia Institute of Technology", domain: "gatech.edu" },
+  { name: "Harvard University", domain: "harvard.edu" },
+  { name: "Indiana University Bloomington", domain: "iu.edu" },
+  { name: "Johns Hopkins University", domain: "jhu.edu" },
+  { name: "Massachusetts Institute of Technology", domain: "mit.edu" },
+  { name: "Michigan State University", domain: "msu.edu" },
+  { name: "New York University", domain: "nyu.edu" },
+  { name: "Northwestern University", domain: "northwestern.edu" },
+  { name: "Ohio State University", domain: "osu.edu" },
+  { name: "Penn State University", domain: "psu.edu" },
+  { name: "Princeton University", domain: "princeton.edu" },
+  { name: "Purdue University", domain: "purdue.edu" },
+  { name: "Rice University", domain: "rice.edu" },
+  { name: "Rutgers University", domain: "rutgers.edu" },
+  { name: "Stanford University", domain: "stanford.edu" },
+  { name: "Texas A&M University", domain: "tamu.edu" },
+  { name: "Texas State University", domain: "txstate.edu" },
+  { name: "Texas Tech University", domain: "ttu.edu" },
+  { name: "University of Arizona", domain: "arizona.edu" },
+  { name: "University of California, Berkeley", domain: "berkeley.edu" },
+  { name: "University of California, Davis", domain: "ucdavis.edu" },
+  { name: "University of California, Irvine", domain: "uci.edu" },
+  { name: "University of California, Los Angeles", domain: "ucla.edu" },
+  { name: "University of California, San Diego", domain: "ucsd.edu" },
+  { name: "University of California, Santa Barbara", domain: "ucsb.edu" },
+  { name: "University of Chicago", domain: "uchicago.edu" },
+  { name: "University of Colorado Boulder", domain: "colorado.edu" },
+  { name: "University of Florida", domain: "ufl.edu" },
+  { name: "University of Georgia", domain: "uga.edu" },
+  { name: "University of Houston", domain: "uh.edu" },
+  { name: "University of Illinois Urbana-Champaign", domain: "illinois.edu" },
+  { name: "University of Maryland", domain: "umd.edu" },
+  { name: "University of Michigan", domain: "umich.edu" },
+  { name: "University of Minnesota", domain: "umn.edu" },
+  { name: "University of North Carolina at Chapel Hill", domain: "unc.edu" },
+  { name: "University of North Texas", domain: "unt.edu" },
+  { name: "University of Notre Dame", domain: "nd.edu" },
+  { name: "University of Oregon", domain: "uoregon.edu" },
+  { name: "University of Pennsylvania", domain: "upenn.edu" },
+  { name: "University of Pittsburgh", domain: "pitt.edu" },
+  { name: "University of Southern California", domain: "usc.edu" },
+  { name: "University of Texas at Arlington", domain: "uta.edu" },
+  { name: "University of Texas at Austin", domain: "utexas.edu" },
+  { name: "University of Texas at Dallas", domain: "utdallas.edu" },
+  { name: "University of Texas at San Antonio", domain: "utsa.edu" },
+  { name: "University of Virginia", domain: "virginia.edu" },
+  { name: "University of Washington", domain: "washington.edu" },
+  { name: "University of Wisconsin-Madison", domain: "wisc.edu" },
+  { name: "Vanderbilt University", domain: "vanderbilt.edu" },
+  { name: "Virginia Tech", domain: "vt.edu" },
+  { name: "Washington University in St. Louis", domain: "wustl.edu" },
+  { name: "Yale University", domain: "yale.edu" },
+];
+
+export const UNIVERSITY_NAMES = TOP_UNIVERSITIES.map((u) => u.name);
+
+/** Official domain for a known university name (case-insensitive exact
+    match), or null for unlisted schools / high schools. */
+export function findUniversityDomain(name: string): string | null {
+  const n = name.trim().toLowerCase();
+  if (!n) return null;
+  return TOP_UNIVERSITIES.find((u) => u.name.toLowerCase() === n)?.domain ?? null;
+}
+
+export const COMMON_MAJORS = [
+  "Accounting",
+  "Aerospace Engineering",
+  "Applied Mathematics",
+  "Artificial Intelligence",
+  "Biology",
+  "Biomedical Engineering",
+  "Business Administration",
+  "Chemical Engineering",
+  "Chemistry",
+  "Civil Engineering",
+  "Cognitive Science",
+  "Communications",
+  "Computer Engineering",
+  "Computer Science",
+  "Cybersecurity",
+  "Data Science",
+  "Economics",
+  "Electrical Engineering",
+  "English",
+  "Entrepreneurship",
+  "Finance",
+  "Graphic Design",
+  "Human-Computer Interaction",
+  "Industrial Engineering",
+  "Information Systems",
+  "Information Technology",
+  "Kinesiology",
+  "Management",
+  "Marketing",
+  "Mathematics",
+  "Mechanical Engineering",
+  "Neuroscience",
+  "Nursing",
+  "Philosophy",
+  "Physics",
+  "Political Science",
+  "Psychology",
+  "Software Engineering",
+  "Statistics",
+  "Supply Chain Management",
+] as const;

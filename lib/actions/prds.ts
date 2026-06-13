@@ -6,11 +6,15 @@ import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
+import { getProjectMaterials } from "@/lib/actions/project-materials";
+import { composeBusinessContext } from "@/lib/project/business-context";
 import { generatePrd } from "@/lib/ai/generate-prd";
-import { analyzeFreeTierFit } from "@/lib/ai/free-tier-fit";
+import { assertAiBudget } from "@/lib/ai/usage";
+import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
 import { fieldsForSection, refinableSection } from "@/lib/prd/section-fields";
 import type { Question } from "@/lib/ai/schemas";
+import { PrdContentSchema } from "@/lib/ai/schemas";
 import type { Prd, PrdContent } from "@/lib/types";
 
 /** Hard cap on adaptive question rounds before a PRD is forced. */
@@ -48,6 +52,7 @@ async function withFreeTierAnalysis(content: PrdContent): Promise<PrdContent> {
     const analysis = await analyzeFreeTierFit(content, content.scaleAssumptions);
     if (!analysis.services.length) return content;
     analysis.analyzedAt = new Date().toISOString();
+    analysis.analyzedStack = stackServiceNames(content);
     return { ...content, freeTierAnalysis: analysis };
   } catch {
     return content;
@@ -94,25 +99,33 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   const { projectId, title, notes, answers = [], round } = parsed.data;
 
   const project = await getProjectById(projectId);
-  if (!project) return { error: "Project not found." };
-  if (project.owner_id !== profile.id) return { error: "Not your project." };
+  if (!project) return { error: "Document not found." };
+  if (project.owner_id !== profile.id) return { error: "Not your document." };
+
+  const materials = await getProjectMaterials(projectId);
 
   // No written notes ⇒ deep context-gathering mode: more rounds, broad→specific
   // questions, and a synthesized context summary saved back to the project.
   const deepContext = !(notes && notes.trim().length > 0);
   const forceFinal = round >= (deepContext ? MAX_PRD_ROUNDS_DEEP : MAX_PRD_ROUNDS);
 
+  const budget = await assertAiBudget(profile.id);
+  if (!budget.ok) return { error: budget.error };
+
   let result;
   try {
-    result = await generatePrd({
-      title,
-      notes,
-      businessContext: project.context ?? undefined,
-      answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
-      forceFinal,
-      deepContext,
-      currentDate: new Date().toISOString().slice(0, 10),
-    });
+    result = await generatePrd(
+      {
+        title,
+        notes,
+        businessContext: composeBusinessContext(project, materials),
+        answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
+        forceFinal,
+        deepContext,
+        currentDate: new Date().toISOString().slice(0, 10),
+      },
+      { userId: profile.id, operation: "generate_prd" }
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI generation failed";
     return { error: msg };
@@ -189,10 +202,11 @@ export async function regeneratePrd(
   if (before.status !== "draft") return { error: "Only drafts can be regenerated." };
 
   const project = await getProjectById(before.project_id as string);
+  const materials = await getProjectMaterials(before.project_id as string);
   const result = await generatePrd({
     title: before.title as string,
     notes: clean,
-    businessContext: project?.context ?? undefined,
+    businessContext: project ? composeBusinessContext(project, materials) : undefined,
     forceFinal: true,
     currentDate: new Date().toISOString().slice(0, 10),
   });
@@ -245,6 +259,9 @@ export async function refinePrdSection(input: RefinePrdSectionInput): Promise<Re
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only the builder can edit a PRD." };
 
+  const budget = await assertAiBudget(profile.id);
+  if (!budget.ok) return { error: budget.error };
+
   const parsed = refineSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
@@ -275,7 +292,7 @@ export async function refinePrdSection(input: RefinePrdSectionInput): Promise<Re
       answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
       forceFinal: round >= MAX_REFINE_ROUNDS,
       currentDate: new Date().toISOString().slice(0, 10),
-    });
+    }, { userId: profile.id, operation: "refine_prd_section" });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI refine failed";
     return { error: msg };
@@ -287,7 +304,9 @@ export async function refinePrdSection(input: RefinePrdSectionInput): Promise<Re
 
 const updateSchema = z.object({
   title: z.string().min(1).max(200).optional(),
-  content: z.record(z.string(), z.unknown()).optional(),
+  // Validate the content shape (all keys optional) so builder saves get the same
+  // structural guards as AI generation — partial() never strips/injects keys.
+  content: PrdContentSchema.partial().optional(),
 });
 
 export async function updatePrdContent(
@@ -380,10 +399,13 @@ export async function getPrdsByProject(projectId: string): Promise<Prd[]> {
   if (!profile) return [];
 
   const supabase = await getClient(profile.id);
+  // Owner-scoped (created_by == project owner). RLS enforces this for the normal
+  // client; the dev admin client bypasses RLS, so we replicate the scope here.
   const { data } = await supabase
     .from("prds")
     .select("*")
     .eq("project_id", projectId)
+    .eq("created_by", profile.id)
     .order("created_at", { ascending: false });
 
   return (data ?? []) as Prd[];
@@ -394,6 +416,12 @@ export async function getPrdById(id: string): Promise<Prd | null> {
   if (!profile) return null;
 
   const supabase = await getClient(profile.id);
-  const { data } = await supabase.from("prds").select("*").eq("id", id).maybeSingle();
+  // Owner-scoped: the dev admin client bypasses RLS, so guard by created_by here.
+  const { data } = await supabase
+    .from("prds")
+    .select("*")
+    .eq("id", id)
+    .eq("created_by", profile.id)
+    .maybeSingle();
   return (data ?? null) as Prd | null;
 }

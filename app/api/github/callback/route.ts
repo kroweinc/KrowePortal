@@ -1,29 +1,65 @@
 import { NextResponse } from "next/server"
+import { cookies } from "next/headers"
 import { createAdminClient } from "@/lib/supabase/server"
+import { getCurrentProfile } from "@/lib/auth"
+import { encryptSecret } from "@/lib/crypto"
+import { getGithubOAuthConfig } from "@/lib/github/oauth-config"
+import { GH_OAUTH_STATE_COOKIE, GH_OAUTH_RETURN_COOKIE } from "../connect/route"
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get("code")
   const state = searchParams.get("state")
 
-  if (!code || !state) {
-    return NextResponse.redirect(`${origin}/b?error=github_denied`)
+  // CSRF: the returned state must match the nonce we set at connect time.
+  const cookieStore = await cookies()
+  const expectedState = cookieStore.get(GH_OAUTH_STATE_COOKIE)?.value
+  cookieStore.set(GH_OAUTH_STATE_COOKIE, "", { maxAge: 0, path: "/" })
+
+  // Optional caller-provided destination (validated relative path, set by
+  // connect/route.ts) — lets flows like the onboarding wizard get the user
+  // back where they started instead of the GitHub settings page.
+  const rawReturnTo = cookieStore.get(GH_OAUTH_RETURN_COOKIE)?.value
+  cookieStore.set(GH_OAUTH_RETURN_COOKIE, "", { maxAge: 0, path: "/" })
+  const returnTo =
+    rawReturnTo && rawReturnTo.startsWith("/") && !rawReturnTo.startsWith("//")
+      ? rawReturnTo
+      : null
+  // Failures land on the GitHub settings page (which renders an error banner)
+  // unless a caller-provided returnTo handles its own errors (e.g. onboarding).
+  const errorRedirect = (codeName: string) =>
+    NextResponse.redirect(`${origin}${returnTo ?? "/b/github/settings"}?error=${codeName}`)
+
+  if (!code || !state || !expectedState || state !== expectedState) {
+    return errorRedirect("github_denied")
+  }
+
+  // Identity is taken from the authenticated session — never from the URL.
+  const profile = await getCurrentProfile()
+  if (!profile) {
+    return NextResponse.redirect(`${origin}/login`)
+  }
+
+  const { clientId, clientSecret, redirectUri } = getGithubOAuthConfig(origin)
+  if (!clientId || !clientSecret || !redirectUri) {
+    console.error("[github/callback] missing GitHub OAuth env vars")
+    return errorRedirect("github_token_failed")
   }
 
   const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_id: process.env.GITHUB_CLIENT_ID,
-      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      client_id: clientId,
+      client_secret: clientSecret,
       code,
-      redirect_uri: process.env.GITHUB_REDIRECT_URI,
+      redirect_uri: redirectUri,
     }),
   })
 
   const tokenData = await tokenRes.json()
   if (tokenData.error || !tokenData.access_token) {
-    return NextResponse.redirect(`${origin}/b?error=github_token_failed`)
+    return errorRedirect("github_token_failed")
   }
 
   const githubUserRes = await fetch("https://api.github.com/user", {
@@ -39,8 +75,8 @@ export async function GET(request: Request) {
     .from("github_connections")
     .upsert(
       {
-        user_id: state,
-        access_token: tokenData.access_token,
+        user_id: profile.id,
+        access_token: encryptSecret(tokenData.access_token),
         github_username: githubUser.login,
         github_user_id: githubUser.id,
       },
@@ -49,8 +85,10 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error("[github/callback] upsert error:", error)
-    return NextResponse.redirect(`${origin}/b?error=github_save_failed`)
+    return errorRedirect("github_save_failed")
   }
 
-  return NextResponse.redirect(`${origin}/b/github/settings?github=connected`)
+  return NextResponse.redirect(
+    `${origin}${returnTo ?? "/b/github/settings?github=connected"}`
+  )
 }

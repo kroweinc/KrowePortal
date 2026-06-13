@@ -18,12 +18,14 @@ async function getClient(profileId: string) {
 export async function getOrCreateEngagement(profileId: string): Promise<Engagement> {
   const admin = createAdminClient();
 
-  const { data: existing } = await admin
+  const { data: existingRows } = await admin
     .from("engagements")
     .select("*")
     .eq("builder_id", profileId)
-    .maybeSingle();
+    .order("created_at", { ascending: true })
+    .limit(1);
 
+  const existing = existingRows?.[0];
   if (existing) return existing as Engagement;
 
   const { data: engagement, error } = await admin
@@ -44,20 +46,62 @@ export async function getOrCreateEngagement(profileId: string): Promise<Engageme
   return engagement as Engagement;
 }
 
-export async function createInvitation(): Promise<{ token: string } | { error: string }> {
+const createEngagementSchema = z.object({ title: z.string().min(1).max(120) });
+
+// Creates an additional engagement for this builder (no task backfill — that only
+// happens for the very first engagement via getOrCreateEngagement).
+export async function createEngagement(
+  title: string
+): Promise<{ engagement: Engagement } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders can create engagements." };
+
+  const parsed = createEngagementSchema.safeParse({ title });
+  if (!parsed.success) return { error: "Engagement name must be 1–120 characters." };
+
+  const admin = createAdminClient();
+  const { data: engagement, error } = await admin
+    .from("engagements")
+    .insert({ builder_id: profile.id, title: parsed.data.title.trim() })
+    .select()
+    .single();
+
+  if (error || !engagement) return { error: error?.message ?? "Failed to create engagement" };
+
+  revalidatePath("/b/engagements");
+  revalidatePath("/b");
+  return { engagement: engagement as Engagement };
+}
+
+export async function createInvitation(
+  engagementId?: string
+): Promise<{ token: string } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only builders can create invitations." };
 
   let engagement: Engagement;
-  try {
-    engagement = await getOrCreateEngagement(profile.id);
-  } catch (e) {
-    return { error: (e as Error).message };
+  if (engagementId) {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("engagements")
+      .select("*")
+      .eq("id", engagementId)
+      .eq("builder_id", profile.id)
+      .maybeSingle();
+    if (!data) return { error: "Engagement not found." };
+    engagement = data as Engagement;
+  } else {
+    try {
+      engagement = await getOrCreateEngagement(profile.id);
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
   }
 
   if (engagement.operator_id) {
-    return { error: "You're already connected with an operator." };
+    return { error: "This engagement already has an operator." };
   }
 
   const supabase = await getClient(profile.id);
@@ -83,46 +127,186 @@ export async function createInvitation(): Promise<{ token: string } | { error: s
   if (error || !data) return { error: error?.message ?? "Failed to create invitation" };
 
   revalidatePath("/b");
+  revalidatePath("/b/engagements");
   return { token: data.token as string };
 }
 
-export async function getMyEngagement(): Promise<Engagement | null> {
-  const profile = await getCurrentProfile();
-  if (!profile || profile.role !== "builder") return null;
-
-  const supabase = await getClient(profile.id);
-  const { data } = await supabase
+// Fetches an engagement only if it belongs to this builder. Admin client + explicit
+// builder_id filter — engagements has no UPDATE/DELETE RLS policies, so all owner
+// mutations go through this app-level ownership check (same as createInvitation).
+async function getOwnedEngagement(
+  engagementId: string,
+  builderId: string
+): Promise<Engagement | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
     .from("engagements")
-    .select("*, operator:profiles!operator_id(display_name)")
-    .eq("builder_id", profile.id)
+    .select("*")
+    .eq("id", engagementId)
+    .eq("builder_id", builderId)
     .maybeSingle();
-
   return (data ?? null) as Engagement | null;
 }
 
-export async function getMyPendingInvite(): Promise<{ token: string; expires_at: string } | null> {
+export async function renameEngagement(
+  engagementId: string,
+  title: string
+): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
-  if (!profile || profile.role !== "builder") return null;
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders can rename engagements." };
+
+  const parsed = createEngagementSchema.safeParse({ title });
+  if (!parsed.success) return { error: "Engagement name must be 1–120 characters." };
+
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("engagements")
+    .update({ title: parsed.data.title.trim() })
+    .eq("id", engagementId)
+    .eq("builder_id", profile.id)
+    .select()
+    .maybeSingle();
+
+  if (error) return { error: error.message };
+  if (!data) return { error: "Engagement not found." };
+
+  revalidatePath("/b");
+  revalidatePath("/b/engagements");
+  revalidatePath(`/b/engagements/${engagementId}`);
+  return { success: true };
+}
+
+// Detaches the operator from the engagement so a new one can be invited. Their
+// authored rows (tasks, deliverables, materials) reference profiles, not the
+// engagement role, so the data stays — they only lose RLS access.
+export async function removeOperator(
+  engagementId: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders can remove operators." };
+
+  const engagement = await getOwnedEngagement(engagementId, profile.id);
+  if (!engagement) return { error: "Engagement not found." };
+  if (!engagement.operator_id) return { error: "This engagement has no operator." };
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("engagements")
+    .update({ operator_id: null })
+    .eq("id", engagementId)
+    .eq("builder_id", profile.id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/b");
+  revalidatePath("/b/engagements");
+  revalidatePath(`/b/engagements/${engagementId}`);
+  revalidatePath("/o/project");
+  return { success: true };
+}
+
+// Expires any pending invite for the engagement. Status flip (not delete) keeps the
+// audit trail; acceptInvitation rejects expired invites, and createInvitation's
+// reuse query ignores them so the next create mints a fresh token.
+export async function revokeInvitation(
+  engagementId: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders can revoke invitations." };
+
+  const engagement = await getOwnedEngagement(engagementId, profile.id);
+  if (!engagement) return { error: "Engagement not found." };
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("invitations")
+    .update({ status: "expired" })
+    .eq("engagement_id", engagementId)
+    .eq("status", "pending");
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/b");
+  revalidatePath("/b/engagements");
+  revalidatePath(`/b/engagements/${engagementId}`);
+  return { success: true };
+}
+
+export async function deleteEngagement(
+  engagementId: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders can delete engagements." };
+
+  const engagement = await getOwnedEngagement(engagementId, profile.id);
+  if (!engagement) return { error: "Engagement not found." };
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("engagements")
+    .delete()
+    .eq("id", engagementId)
+    .eq("builder_id", profile.id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/b");
+  revalidatePath("/b/engagements");
+  return { success: true };
+}
+
+export async function getMyEngagements(): Promise<Engagement[]> {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "builder") return [];
+
+  const supabase = await getClient(profile.id);
+  const { data } = await supabase
+    .from("engagements")
+    .select(
+      "*, operator:profiles!operator_id(display_name), project:projects(id, name, prospect_name, prospect_email, website_url, linkedin_url, live_url, context)"
+    )
+    .eq("builder_id", profile.id)
+    .order("created_at", { ascending: true });
+
+  return (data ?? []) as Engagement[];
+}
+
+export type PendingInvite = { token: string; expires_at: string };
+
+// Pending (unexpired) invites for all of the builder's engagements, keyed by engagement_id.
+export async function getMyPendingInvites(): Promise<Record<string, PendingInvite>> {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "builder") return {};
 
   const supabase = await getClient(profile.id);
 
-  const { data: engagement } = await supabase
+  const { data: engagements } = await supabase
     .from("engagements")
     .select("id")
-    .eq("builder_id", profile.id)
-    .maybeSingle();
+    .eq("builder_id", profile.id);
 
-  if (!engagement) return null;
+  const ids = (engagements ?? []).map((e) => e.id as string);
+  if (ids.length === 0) return {};
 
   const { data } = await supabase
     .from("invitations")
-    .select("token, expires_at")
-    .eq("engagement_id", engagement.id)
+    .select("engagement_id, token, expires_at")
+    .in("engagement_id", ids)
     .eq("status", "pending")
-    .gt("expires_at", new Date().toISOString())
-    .maybeSingle();
+    .gt("expires_at", new Date().toISOString());
 
-  return data as { token: string; expires_at: string } | null;
+  const map: Record<string, PendingInvite> = {};
+  for (const row of data ?? []) {
+    map[row.engagement_id as string] = {
+      token: row.token as string,
+      expires_at: row.expires_at as string,
+    };
+  }
+  return map;
 }
 
 const acceptSchema = z.object({
@@ -179,13 +363,13 @@ export async function acceptInvitation(
     // Check whether they have a real builder engagement. If so, they're a
     // legitimate builder and we block the accept. If not, they were
     // auto-tagged (this bug) and we allow the promotion to operator.
-    const { data: builderEngagement } = await admin
+    const { data: builderEngagements } = await admin
       .from("engagements")
       .select("id")
       .eq("builder_id", user.id)
-      .maybeSingle();
+      .limit(1);
 
-    if (builderEngagement) {
+    if ((builderEngagements?.length ?? 0) > 0) {
       return { error: "You're already set up as a builder and can't join as an operator." };
     }
     // Fall through: stuck-builder recovery — upsert will overwrite to operator below

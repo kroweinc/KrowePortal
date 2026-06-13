@@ -9,10 +9,9 @@ import { acceptInvitation } from "@/lib/actions/invitations";
 interface Props {
   token: string;
   suggestedName?: string;
-  skipNameField?: boolean;
 }
 
-export function AcceptInvitationForm({ token, suggestedName = "", skipNameField = false }: Props) {
+export function AcceptInvitationForm({ token, suggestedName = "" }: Props) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState(suggestedName);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +21,7 @@ export function AcceptInvitationForm({ token, suggestedName = "", skipNameField 
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const result = await acceptInvitation(token, skipNameField ? undefined : displayName);
+      const result = await acceptInvitation(token, displayName);
       if ("error" in result) {
         setError(result.error);
       } else {
@@ -34,20 +33,18 @@ export function AcceptInvitationForm({ token, suggestedName = "", skipNameField 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {!skipNameField && (
-        <div>
-          <label className="block text-xs font-medium text-neutral-700 mb-2">
-            Your name
-          </label>
-          <Input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Jane Smith"
-            required
-            autoFocus
-          />
-        </div>
-      )}
+      <div>
+        <label className="block text-xs font-medium text-neutral-700 mb-2">
+          Your name
+        </label>
+        <Input
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+          placeholder="Jane Smith"
+          required
+          autoFocus
+        />
+      </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 

@@ -10,8 +10,9 @@
 
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
-import { Send, Sparkles, Check } from "lucide-react";
+import { Send, Sparkles, Check, Link2, Receipt } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updatePrdContent, sendPrd, deletePrd, regeneratePrd } from "@/lib/actions/prds";
 import type { Prd, PrdContent } from "@/lib/types";
@@ -144,21 +145,49 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
     router.push(href);
   }
 
+  /** Flush pending edits, then mark a draft "sent" so its public link resolves
+      (clients get a 404 on a draft token). A non-draft is already shareable.
+      Returns true on success. */
+  async function publish(): Promise<boolean> {
+    const saved = await writePrd();
+    if (saved && "error" in saved) {
+      toast.error(saved.error);
+      return false;
+    }
+    if (!isDraft) return true;
+    const result = await sendPrd(prd.id);
+    if ("error" in result) {
+      toast.error(result.error);
+      return false;
+    }
+    return true;
+  }
+
   function send() {
     if (!confirm("Send this PRD to the client? You can still edit it afterward.")) return;
     startTransition(async () => {
-      const saved = await writePrd();
-      if (saved && "error" in saved) {
-        toast.error(saved.error);
-        return;
-      }
-      const result = await sendPrd(prd.id);
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
+      if (!(await publish())) return;
       toast.success("PRD sent");
       router.refresh();
+    });
+  }
+
+  /** Copy the public share link. Publishing a draft first makes it visible to
+      the client, so confirm before flipping its status. */
+  function copyLink() {
+    if (isDraft && !confirm("Sharing a link makes this PRD visible to the client. Continue?")) return;
+    const wasDraft = isDraft;
+    startTransition(async () => {
+      if (!(await publish())) return;
+      const url = `${window.location.origin}/prd/${prd.token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        toast.success("Share link copied");
+      } catch {
+        // Clipboard can be blocked (insecure context / denied permission) — show the URL so it's still usable.
+        toast.message("Copy this link", { description: url });
+      }
+      if (wasDraft) router.refresh();
     });
   }
 
@@ -240,6 +269,21 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
                 </button>
               </div>
               <PrdDownloadButton title={title} className="prd-btn prd-btn--outline" />
+              <Link
+                href={`${backHref}/quotes/new?fromPrd=${prd.id}`}
+                className="prd-btn prd-btn--outline"
+                title="Generate a priced quote from this PRD"
+              >
+                <Receipt className="h-3.5 w-3.5" /> Generate quote
+              </Link>
+              <button
+                type="button"
+                className="prd-btn prd-btn--outline"
+                onClick={copyLink}
+                disabled={isPending}
+              >
+                <Link2 className="h-3.5 w-3.5" /> Copy link
+              </button>
               {editing && (
                 <div className="dash-actions">
                   <SaveStatus state={saveState} onRetry={saveNow} />

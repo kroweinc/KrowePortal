@@ -2,15 +2,13 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Eye, EyeOff, Trash2 } from "lucide-react";
-import { toggleVisibility, updateTaskStatus } from "@/lib/actions/tasks";
+import { CalendarDays, Check, Trash2 } from "lucide-react";
+import { updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
+import { useRequestApproval } from "@/components/approval-deliverable-provider";
+import { ApprovalPill } from "@/components/approval-pill";
 import { DeliveryChips } from "@/components/design-atoms";
-import type { Task, Role, TaskStatus, TaskPriority } from "@/lib/types";
-
-const PRIORITY_LABEL: Record<TaskPriority, string> = {
-  urgent: "Urgent", high: "High", medium: "Medium", low: "Low",
-};
+import type { Task, Role, TaskStatus } from "@/lib/types";
 
 const NEXT_STATUS: Record<TaskStatus, TaskStatus | null> = {
   inbox: "in_progress", in_progress: "blocked", blocked: "done", done: null,
@@ -32,22 +30,19 @@ interface TaskCardProps {
 export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const requestDone = useRequestDone();
+  const requestApproval = useRequestApproval();
   const nextStatus = NEXT_STATUS[task.status];
   const sourceLabel = task.source === "operator_request" ? "operator" : "builder";
-  const showApproval = task.status === "blocked" || task.status === "done";
 
   async function handleAdvance() {
     if (!nextStatus) return;
     if (nextStatus === "done") {
       requestDone({ task });
+    } else if (nextStatus === "blocked") {
+      requestApproval({ task });
     } else {
       await updateTaskStatus(task.id, nextStatus);
     }
-  }
-
-  async function handleVisibilityToggle(e: React.MouseEvent) {
-    e.stopPropagation();
-    await toggleVisibility(task.id, !task.operator_visible);
   }
 
   return (
@@ -72,6 +67,11 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
       <div className="krowe-rail" />
 
       <div className="krowe-card-row">
+        {task.status === "done" && (
+          <span className="krowe-card-check" aria-hidden="true">
+            <Check width={11} height={11} strokeWidth={3} />
+          </span>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <Link
             href={`/${role === "operator" ? "o" : "b"}/tasks/${task.id}`}
@@ -88,12 +88,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
           </Link>
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
-          {showApproval && (
-            <span className="krowe-chip krowe-chip-approval">Approved</span>
-          )}
-          <span className={`krowe-chip krowe-chip-priority ${task.priority}`}>
-            {PRIORITY_LABEL[task.priority]}
-          </span>
+          <ApprovalPill task={task} role={role} />
         </div>
       </div>
 
@@ -105,18 +100,10 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
 
       <div className="krowe-card-meta">
         <div className="krowe-card-meta-left">
+          <span className={`krowe-prio-dot ${task.priority}`}>
+            <span className="d" />
+          </span>
           <span className={`krowe-chip krowe-chip-source ${sourceLabel}`}>{sourceLabel}</span>
-          {role === "builder" && (
-            <button
-              className="krowe-iconbtn"
-              title={task.operator_visible ? "Visible to operator" : "Hidden from operator"}
-              onClick={handleVisibilityToggle}
-            >
-              {task.operator_visible
-                ? <Eye width={14} height={14} />
-                : <EyeOff width={14} height={14} />}
-            </button>
-          )}
         </div>
         <div className="krowe-card-actions">
           {role === "builder" && nextStatus && (
@@ -134,12 +121,31 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
             onClick={(e) => {
               e.stopPropagation();
               if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
-              import("@/lib/actions/tasks").then(({ deleteTask }) => deleteTask(task.id));
+              import("@/lib/actions/tasks")
+                .then(({ deleteTask }) => deleteTask(task.id))
+                .then((res) => {
+                  if (res && typeof res === "object" && "error" in res && res.error) {
+                    alert(res.error as string);
+                  }
+                })
+                .catch(() => alert("Couldn't delete the task. Please try again."));
             }}
           >
             <Trash2 width={14} height={14} />
           </button>
         </div>
+      </div>
+
+      <div className="krowe-card-foot">
+        <span className="krowe-card-date">
+          <CalendarDays width={12} height={12} strokeWidth={2} />
+          {new Date(task.created_at).toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            timeZone: "UTC",
+          })}
+        </span>
       </div>
     </div>
   );

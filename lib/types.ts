@@ -23,20 +23,55 @@ export type TaskStatus = "inbox" | "in_progress" | "blocked" | "done";
 export type TaskSource = "operator_request" | "builder_added";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
+export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
+export type OnboardingPath = "no_clients" | "has_clients";
+export type OnboardingStep = "path" | "prospect" | "handoff" | "client" | "repo" | "tasks" | "docs";
+
+// Wizard-internal state — only the onboarding flow reads/writes this.
+export interface OnboardingState {
+  path?: OnboardingPath;
+  step?: OnboardingStep;
+  project_id?: string;
+  engagement_id?: string;
+  completed_at?: string;
+}
+
 export interface Profile {
   id: string;
   role: Role;
   display_name: string | null;
   created_at: string;
+  onboarding_status: OnboardingStatus;
+  onboarding: OnboardingState;
 }
 
 export interface Engagement {
   id: string;
-  operator_id: string;
+  operator_id: string | null;
   builder_id: string;
   title: string;
   created_at: string;
+  project_id?: string | null;
+  github_repo_full_name?: string | null;
+  github_repo_owner?: string | null;
+  github_repo_name?: string | null;
+  github_default_branch?: string | null;
   operator?: { display_name: string | null };
+  // The source project, joined on project_id. Carries the business contact so
+  // engagement views can surface it without a separate fetch. Structural subset
+  // of Project — keep field names aligned with the projects table.
+  project?:
+    | {
+        id: string;
+        name: string;
+        prospect_name?: string | null;
+        prospect_email?: string | null;
+        website_url?: string | null;
+        linkedin_url?: string | null;
+        live_url?: string | null;
+        context?: string | null;
+      }
+    | null;
 }
 
 export interface Task {
@@ -47,7 +82,6 @@ export interface Task {
   source: TaskSource;
   status: TaskStatus;
   priority: TaskPriority;
-  operator_visible: boolean;
   builder_estimate_hours: number | null;
   builder_estimate_low_hours: number | null;
   builder_estimate_high_hours: number | null;
@@ -69,7 +103,8 @@ export type MilestoneStatus = "pending" | "in_progress" | "done";
 
 export interface Milestone {
   id: string;
-  brief_id: string;
+  brief_id: string | null;
+  quote_id?: string | null;
   engagement_id: string;
   title: string;
   description: string | null;
@@ -306,9 +341,30 @@ export interface Project {
   status: ProjectStatus;
   prospect_name: string | null;
   prospect_email: string | null;
-  context: string | null;
+  linkedin_url: string | null;
+  website_url: string | null;
+  live_url: string | null; // the deliverable itself — deployed app / live demo
+  context: string | null; // freeform notes (secondary to the structured fields above)
   created_at: string;
   updated_at: string;
+}
+
+// A supporting context material on a project — either a pasted link or an
+// uploaded file. Mirrors TaskAttachment; one row per material.
+export type ProjectMaterialType = "link" | "file";
+
+export interface ProjectMaterial {
+  id: string;
+  project_id: string;
+  uploaded_by: string;
+  material_type: ProjectMaterialType;
+  label: string | null; // link display label
+  file_name: string | null; // original file name (files only)
+  url: string | null; // external URL (links only)
+  storage_path: string | null; // bucket path (files only)
+  mime_type: string | null;
+  size_bytes: number | null;
+  created_at: string;
 }
 
 // ── PRD ────────────────────────────────────────────────────────────────
@@ -420,6 +476,7 @@ export interface FreeTierAnalysis {
   assumptions: FreeTierAssumption[]; // inferred-usage stats — the editable knobs
   services: FreeTierServiceVerdict[];
   analyzedAt?: string | null; // ISO stamp set by the action
+  analyzedStack?: string[] | null; // normalized stack+integration names when it ran — for staleness
 }
 
 export interface PrdContent {
@@ -468,6 +525,98 @@ export interface Prd {
   signed_at: string | null;
   signer_ip: string | null;
   signature_consent: boolean;
+  signed_by_user_id: string | null;
+  rejected_at: string | null;
+  rejection_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ── Quote ────────────────────────────────────────────────────────────────
+// Reuses BriefLineItem ({ label, amount, notes? }) for line-item rows.
+export type QuoteStatus = "draft" | "sent" | "signed" | "accepted" | "rejected";
+
+// §1 product area + §2..N detailed module section. cost mirrors the sum of
+// the module's line-item amounts (kept in sync by recomputeTotals).
+export interface QuoteModule {
+  id?: string; // stable key for inline editing
+  title: string;
+  purpose: string; // §1 "Purpose" column — one line
+  description?: string | null; // §2..N description paragraph
+  cost: number;
+  lineItems?: BriefLineItem[]; // Item | Cost rows
+  subtotal?: number; // Σ lineItems[].amount
+}
+
+// "Design System Included" table: a component + whether it's in scope.
+export interface QuoteDesignComponent {
+  component: string;
+  included: boolean;
+  notes?: string | null;
+}
+
+// "Suggested Payment Structure": a milestone + the amount due.
+export interface QuotePaymentMilestone {
+  label: string;
+  amount: number;
+  percent?: number | null; // e.g. 50 / 25 / 25
+}
+
+// A charge beyond the build modules, shown in the top "Cost Overview": a
+// design-system charge, an add-on, a fee, or a discount (which subtracts).
+export type QuoteExtraCostKind = "design" | "addon" | "fee" | "discount";
+
+export interface QuoteExtraCost {
+  id?: string; // stable key for inline editing
+  label: string;
+  kind: QuoteExtraCostKind;
+  amount: number; // resolved dollar magnitude (nonnegative); discount applies the sign
+  percent?: number | null; // when set, amount = round(percent/100 × modulesTotal)
+  notes?: string | null;
+}
+
+export interface QuoteTotals {
+  grand: number; // "Total Project Quote" banner — modulesTotal + extrasTotal
+  modulesTotal?: number | null; // §1 table build subtotal (Σ module costs)
+  extrasTotal?: number | null; // Σ extra costs (discounts subtract; may be negative)
+  paymentTotal?: number | null; // payment table Total row
+}
+
+export interface QuoteContent {
+  companyName?: string; // header client/company name
+  clientName?: string; // the individual the quote is prepared for
+  productSubtitle?: string; // header product subtitle (e.g. "AI Calls MVP")
+  scopeSummary?: string; // scope summary paragraph
+  modules?: QuoteModule[]; // §1 product table + §2..N module sections
+  extraCosts?: QuoteExtraCost[]; // "Cost Overview" add-ons / design / fees / discounts
+  designSystem?: QuoteDesignComponent[]; // "Design System Included"
+  paymentMilestones?: QuotePaymentMilestone[]; // "Suggested Payment Structure"
+  justification?: string[]; // "Why This Price Is Justified"
+  scopeProtection?: string[]; // "Not included unless separately quoted"
+  totals?: QuoteTotals;
+  hourlyRate?: number; // blended rate line items are priced at (hours × rate)
+  showHours?: boolean; // surface the hours estimate on the client-facing quote
+  validityDays?: number; // how long the quote is valid
+  footerNote?: string; // "Prepared from the … PRD. Pricing is an estimate…"
+}
+
+export interface Quote {
+  id: string;
+  project_id: string;
+  created_by: string;
+  title: string;
+  status: QuoteStatus;
+  content: QuoteContent;
+  source_notes: string | null;
+  source_prd_id: string | null; // PRD this quote was priced from (from-PRD path)
+  token: string;
+  sent_at: string | null;
+  signed_by_name: string | null;
+  signed_at: string | null;
+  signer_ip: string | null;
+  signature_consent: boolean;
+  signed_by_user_id: string | null;
+  accepted_at: string | null;
   rejected_at: string | null;
   rejection_note: string | null;
   created_at: string;
@@ -478,6 +627,22 @@ export interface Prd {
 export interface ContractParties {
   provider?: string;
   client?: string;
+}
+
+// Exhibit B — a row in the snapshotted Payment Schedule (from the quote's
+// payment milestones). Amounts are frozen into the contract at draft time.
+export interface ContractPaymentMilestone {
+  label: string;
+  amount: number;
+  percent?: number | null; // e.g. 50 / 25 / 25
+}
+
+// Exhibit A — a row in the snapshotted Scope of Work (from the quote's build
+// modules: what's being built and its priced cost).
+export interface ContractScopeItem {
+  title: string;
+  purpose?: string | null;
+  cost?: number | null;
 }
 
 export interface ContractContent {
@@ -496,6 +661,11 @@ export interface ContractContent {
   changeManagement?: string;
   governingLaw?: string;
   additionalTerms?: string[];
+  // Exhibits snapshotted from the project's quote at draft/regenerate time.
+  // Frozen here so a signed contract never changes if the quote is later edited.
+  quoteTotal?: number | null;
+  scopeItems?: ContractScopeItem[];
+  paymentSchedule?: ContractPaymentMilestone[];
 }
 
 export interface Contract {
@@ -512,6 +682,7 @@ export interface Contract {
   signed_at: string | null;
   signer_ip: string | null;
   signature_consent: boolean;
+  signed_by_user_id: string | null;
   rejected_at: string | null;
   rejection_note: string | null;
   created_at: string;
@@ -534,4 +705,120 @@ export interface TaskAttachment {
   is_deliverable: boolean;
   created_at: string;
   uploader?: Pick<Profile, "id" | "display_name" | "role">;
+}
+
+// ============================================================
+// Builder Profile — shareable resume (see 0040_builder_profiles.sql)
+// ============================================================
+
+export type ProfileProjectSource = "github" | "manual";
+
+export interface RepoLanguage {
+  name: string;
+  pct: number;
+}
+
+export interface BuilderProfile {
+  id: string;
+  user_id: string;
+  display_name: string | null; // override for the public page; null = account name
+  headline: string | null;
+  bio: string | null;
+  linkedin_url: string | null;
+  github_url: string | null;
+  portfolio_url: string | null;
+  education_school: string | null; // university or high school
+  education_major: string | null;
+  education_year: string | null; // freeform, e.g. "Class of 2027" or "2020 – 2024"
+  resume_storage_path: string | null;
+  resume_file_name: string | null;
+  avatar_storage_path: string | null;
+  is_published: boolean;
+  token: string;
+  github_synced_at: string | null;
+  tags: string[]; // achievement/identity badges, e.g. "Hackathon Winner"
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuilderProfileProject {
+  id: string;
+  builder_profile_id: string;
+  source: ProfileProjectSource;
+  name: string;
+  description: string | null;
+  url: string | null;
+  live_url: string | null; // deployed app / demo; survives GitHub syncs
+  tech: string[];
+  github_repo_id: number | null;
+  github_repo_full_name: string | null;
+  github_is_private: boolean | null;
+  commit_count: number | null;
+  languages: RepoLanguage[] | null;
+  stars: number | null;
+  github_pushed_at: string | null;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BuilderProfileExperience {
+  id: string;
+  builder_profile_id: string;
+  role: string;
+  company: string;
+  /** Verified website host (e.g. "patelgaines.com") captured when the builder
+      picks a company from the autocomplete; null for free-typed names. */
+  company_domain: string | null;
+  start_label: string | null;
+  end_label: string | null;
+  description: string | null;
+  display_order: number;
+  created_at: string;
+}
+
+// Ordered for display: the public profile groups tools into these buckets in
+// this order. Uncategorized tools fall into "Other". Stored as free text;
+// validated app-side so the set can grow without a migration.
+export const CODING_TOOL_CATEGORIES = [
+  "AI Assistant",
+  "Editor / IDE",
+  "CLI / Terminal",
+  "DevOps / Cloud",
+  "Design",
+  "Productivity",
+  "Other",
+] as const;
+
+export type CodingToolCategory = (typeof CODING_TOOL_CATEGORIES)[number];
+
+// Suggested achievement/identity badges for the builder profile. These only
+// seed the editor's suggestions — builders can type any custom tag (e.g.
+// "7x Years Developing"). Stored as free text in builder_profiles.tags.
+export const BUILDER_TAG_PRESETS = [
+  "Hackathon Winner",
+  "Startup Founder",
+  "Open Source Contributor",
+  "Indie Hacker",
+  "Technical Co-Founder",
+  "Full-Stack Developer",
+  "AI / ML Engineer",
+  "Y Combinator Alum",
+  "Published Author",
+  "Conference Speaker",
+  "Self-Taught Developer",
+  "CS Student",
+  "Freelance Developer",
+  "Shipped a Product",
+  "Bootcamp Grad",
+] as const;
+
+export interface BuilderProfileCodingTool {
+  id: string;
+  builder_profile_id: string;
+  name: string;
+  category: CodingToolCategory | null;
+  url: string | null;
+  display_order: number;
+  created_at: string;
 }

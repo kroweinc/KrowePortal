@@ -27,9 +27,8 @@ import {
   InlineText,
   InlineTextarea,
   InlineSelect,
-  InlineToggle,
 } from "@/components/inline-edit";
-import { updateTask, updateTaskStatus, toggleVisibility } from "@/lib/actions/tasks";
+import { updateTask, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
 import { TaskSubtasks } from "@/components/task-subtasks";
@@ -171,10 +170,6 @@ function TaskDetailBody({
     router.refresh();
   }
 
-  async function saveVisibility(newVisible: boolean) {
-    await toggleVisibility(task.id, newVisible);
-  }
-
   async function handleCopyLink() {
     if (typeof window === "undefined") return;
     try {
@@ -253,18 +248,20 @@ function TaskDetailBody({
             Build
           </button>
         )}
-        <button
-          type="button"
-          className={`krowe-task-tab ${tab === "audit" ? "active" : ""}`}
-          onClick={() => setTab("audit")}
-        >
-          Audit Log
-        </button>
+        {role === "operator" && (
+          <button
+            type="button"
+            className={`krowe-task-tab ${tab === "audit" ? "active" : ""}`}
+            onClick={() => setTab("audit")}
+          >
+            Audit Log
+          </button>
+        )}
       </div>
 
       {/* ── Scrollable body ── */}
       <div className="krowe-task-sheet-body">
-        {tab === "audit" ? (
+        {tab === "audit" && role === "operator" ? (
           <TaskAuditLog taskId={task.id} />
         ) : tab === "build" && role !== "operator" ? (
           <TaskBuildPrompt task={task} />
@@ -386,7 +383,6 @@ function TaskDetailBody({
             task={task}
             role={role}
             onPriority={(v) => saveField("priority", v)}
-            onVisibility={saveVisibility}
           />
         </section>
 
@@ -478,12 +474,10 @@ function MetaCard({
   task,
   role,
   onPriority,
-  onVisibility,
 }: {
   task: Task;
   role: Role;
   onPriority: (v: string) => Promise<void>;
-  onVisibility: (v: boolean) => Promise<void>;
 }) {
   const estimateLabel = formatHoursRange(
     task.builder_estimate_low_hours,
@@ -532,22 +526,6 @@ function MetaCard({
           {new Date(task.created_at).toLocaleDateString()}
         </span>
       </div>
-
-      {role === "builder" && (
-        <div className="krowe-meta-cell full">
-          <span className="k">Visibility</span>
-          <span className="v">
-            <InlineToggle
-              value={task.operator_visible}
-              onToggle={onVisibility}
-              trueLabel="Visible to operator"
-              falseLabel="Hidden from operator"
-              trueBadgeVariant="secondary"
-              falseBadgeVariant="outline"
-            />
-          </span>
-        </div>
-      )}
     </div>
   );
 }

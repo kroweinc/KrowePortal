@@ -4,7 +4,8 @@
    may only ask about, and rewrite, the target section's keys. The caller
    whitelists the returned patch to those keys as a second guard. */
 
-import { openai, AI_MODEL } from "./client";
+import { runChat, AI_MODEL } from "./client";
+import type { AiCallMeta } from "./usage";
 import { RefineSectionResult as RefineSchema, RefineSectionFinalResult } from "./schemas";
 import type { Question } from "./schemas";
 import type { PrdAnswer } from "./generate-prd";
@@ -94,8 +95,8 @@ function buildUserPrompt(input: RefineSectionInput): string {
   return lines.join("\n");
 }
 
-async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string> {
-  const response = await openai.chat.completions.create({
+async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: number, meta?: AiCallMeta): Promise<string> {
+  const response = await runChat({
     model: AI_MODEL,
     max_completion_tokens: maxTokens,
     response_format: { type: "json_object" },
@@ -103,7 +104,7 @@ async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: n
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-  });
+  }, meta);
   return response.choices[0]?.message?.content ?? "";
 }
 
@@ -115,13 +116,13 @@ function whitelist(patch: Record<string, unknown>, fields: string[]): Partial<Pr
   return out as Partial<PrdContent>;
 }
 
-export async function refinePrdSection(input: RefineSectionInput): Promise<RefineSectionResult> {
+export async function refinePrdSection(input: RefineSectionInput, meta?: AiCallMeta): Promise<RefineSectionResult> {
   const schema = input.forceFinal ? RefineSectionFinalResult : RefineSchema;
   const systemPrompt = buildSystemPrompt(input);
   const userPrompt = buildUserPrompt(input);
   const maxTokens = 8000;
 
-  let raw = await callOpenAI(systemPrompt, userPrompt, maxTokens);
+  let raw = await callOpenAI(systemPrompt, userPrompt, maxTokens, meta);
 
   let parsed: unknown;
   try {
@@ -136,7 +137,8 @@ export async function refinePrdSection(input: RefineSectionInput): Promise<Refin
     raw = await callOpenAI(
       systemPrompt,
       `${userPrompt}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`,
-      maxTokens
+      maxTokens,
+      meta
     );
     try {
       parsed = JSON.parse(raw || "{}");

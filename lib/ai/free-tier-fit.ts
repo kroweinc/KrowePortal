@@ -1,4 +1,5 @@
-import { openai, AI_MODEL } from "./client";
+import { runChat, AI_MODEL } from "./client";
+import type { AiCallMeta } from "./usage";
 import { FreeTierAnalysisResult } from "./schemas";
 import type { FreeTierAnalysis, FreeTierAssumption } from "./schemas";
 import type { PrdContent } from "@/lib/types";
@@ -22,8 +23,8 @@ const EMPTY: FreeTierAnalysis = {
   analyzedAt: null,
 };
 
-async function callJson(system: string, user: string): Promise<string> {
-  const res = await openai.chat.completions.create({
+async function callJson(system: string, user: string, meta?: AiCallMeta): Promise<string> {
+  const res = await runChat({
     model: AI_MODEL,
     max_completion_tokens: 3000,
     response_format: { type: "json_object" },
@@ -31,12 +32,25 @@ async function callJson(system: string, user: string): Promise<string> {
       { role: "system", content: system },
       { role: "user", content: user },
     ],
-  });
+  }, meta);
   return res.choices[0]?.message?.content || "{}";
 }
 
 function clamp(s: string | null | undefined, max: number): string {
   return (s ?? "").trim().slice(0, max);
+}
+
+/** Normalized, de-duped stack + integration names declared in the PRD. The action
+    snapshots this onto the analysis so the UI can detect a genuinely changed stack
+    (added / removed / renamed service) — independent of the concrete providers the
+    model infers from abstract entries like "Managed hosting". Must stay in sync with
+    the client's currentServiceNames() normalization (trim + lowercase). */
+export function stackServiceNames(content: PrdContent): string[] {
+  const names = [
+    ...(content.techStack ?? []).map((s) => s.name),
+    ...(content.integrations ?? []).map((s) => s.name),
+  ];
+  return Array.from(new Set(names.map((n) => (n ?? "").trim().toLowerCase()).filter(Boolean)));
 }
 
 // Compact the PRD into just the dimensions that drive usage volume — not the
@@ -202,13 +216,14 @@ function buildUserPrompt(content: PrdContent, scaleHint?: string, priorAssumptio
 export async function analyzeFreeTierFit(
   content: PrdContent,
   scaleHint?: string,
-  priorAssumptions?: FreeTierAssumption[]
+  priorAssumptions?: FreeTierAssumption[],
+  meta?: AiCallMeta
 ): Promise<FreeTierAnalysis> {
   const currentDate = new Date().toISOString().slice(0, 10);
   const system = buildSystemPrompt(currentDate);
   const user = buildUserPrompt(content, scaleHint, priorAssumptions);
 
-  let raw = await callJson(system, user);
+  let raw = await callJson(system, user, meta);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -219,7 +234,7 @@ export async function analyzeFreeTierFit(
   let result = FreeTierAnalysisResult.safeParse(parsed);
   if (!result.success) {
     const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    raw = await callJson(system, `${user}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`);
+    raw = await callJson(system, `${user}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`, meta);
     try {
       parsed = JSON.parse(raw);
     } catch {

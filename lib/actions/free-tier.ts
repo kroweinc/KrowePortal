@@ -1,7 +1,8 @@
 "use server";
 
 import { getCurrentProfile } from "@/lib/auth";
-import { analyzeFreeTierFit } from "@/lib/ai/free-tier-fit";
+import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
+import { assertAiBudget } from "@/lib/ai/usage";
 import type { FreeTierAnalysis, PrdContent } from "@/lib/types";
 
 /* Pure AI analysis for the PRD "Free-Tier Fit" (§15) section. No DB writes — the
@@ -20,16 +21,21 @@ export async function analyzeFreeTierFitAction(
     return { error: "Add tech stack or integration items first." };
   }
 
+  const budget = await assertAiBudget(profile.id);
+  if (!budget.ok) return { error: budget.error };
+
   try {
     // Pass any builder-edited assumptions from the prior run back as authoritative
     // so a re-check recomputes verdicts against the corrected numbers.
     const data = await analyzeFreeTierFit(
       content,
       content.scaleAssumptions,
-      content.freeTierAnalysis?.assumptions
+      content.freeTierAnalysis?.assumptions,
+      { userId: profile.id, operation: "free_tier_fit" }
     );
     if (!data.services.length) return { error: "Could not analyze the stack — try again." };
     data.analyzedAt = new Date().toISOString();
+    data.analyzedStack = stackServiceNames(content);
     return { data };
   } catch {
     return { error: "Analysis failed." };

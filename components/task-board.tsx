@@ -2,10 +2,13 @@
 
 import { useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { Plus, Search } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
+import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
+import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import type { Task, Engagement, TaskStatus, TaskPriority } from "@/lib/types";
 
 const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
@@ -39,6 +42,7 @@ interface TaskBoardProps {
 export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps) {
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const requestDone = useRequestDone();
+  const requestApproval = useRequestApproval();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -46,6 +50,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
   const [draggingTask, setDraggingTask] = useState<Task | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const [search, setSearch] = useState("");
   const [, startTransition] = useTransition();
 
   const [optimisticTasks, dispatchOptimistic] = useOptimistic(
@@ -61,10 +66,36 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
 
   const selectedTask = optimisticTasks.find((t) => t.id === selectedId) ?? null;
 
+  // null = All, "personal" = tasks with no engagement, otherwise an engagement id
+  const engagementFilter = searchParams.get("engagement");
+  const hasPersonalTasks = tasks.some((t) => t.engagement_id === null);
+  const visibleTasks =
+    engagementFilter === null
+      ? optimisticTasks
+      : engagementFilter === "personal"
+        ? optimisticTasks.filter((t) => t.engagement_id === null)
+        : optimisticTasks.filter((t) => t.engagement_id === engagementFilter);
+
+  // Pure view filter on top of the engagement filter — never feeds drag/reorder math.
+  const q = search.trim().toLowerCase();
+  const searchedTasks = q
+    ? visibleTasks.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          (t.description ?? "").toLowerCase().includes(q)
+      )
+    : visibleTasks;
+
   function syncSelected(id: string | null) {
     setSelectedId(id);
     const params = new URLSearchParams(searchParams.toString());
     if (id) params.set("task", id); else params.delete("task");
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  function setEngagementFilter(value: string | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set("engagement", value); else params.delete("engagement");
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }
 
@@ -82,6 +113,24 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
         const priorStatus = droppedTask.status;
         startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: "done" }); });
         requestDone({
+          task: droppedTask,
+          onCommit: () => {},
+          onCancel: () => {
+            startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: priorStatus }); });
+          },
+        });
+        return;
+      }
+    }
+
+    // Dropping into the "Approval" column opens the submit-for-approval dialog
+    // (deliverable + note), which stamps approval_sent_at via markTaskForApproval.
+    if (status === "blocked") {
+      const droppedTask = optimisticTasks.find((t) => t.id === taskId);
+      if (droppedTask && droppedTask.status !== "blocked") {
+        const priorStatus = droppedTask.status;
+        startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: "blocked" }); });
+        requestApproval({
           task: droppedTask,
           onCommit: () => {},
           onCancel: () => {
@@ -143,19 +192,62 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     });
   }
 
-  if (optimisticTasks.length === 0) {
-    return (
-      <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
-        No tasks yet — hit the + button to add something to the queue.
-      </div>
-    );
-  }
+  const showFilters = engagements.length > 1 || (engagements.length > 0 && hasPersonalTasks);
 
   return (
     <>
+      <div className="krowe-board-toolbar">
+      {showFilters && (
+        <div className="krowe-filter-row">
+          <button
+            type="button"
+            className={`krowe-filter-chip ${engagementFilter === null ? "active" : ""}`}
+            onClick={() => setEngagementFilter(null)}
+          >
+            All <span className="count">{tasks.length}</span>
+          </button>
+          {engagements.map((e) => (
+            <button
+              key={e.id}
+              type="button"
+              className={`krowe-filter-chip ${engagementFilter === e.id ? "active" : ""}`}
+              onClick={() => setEngagementFilter(e.id)}
+            >
+              {e.title}{" "}
+              <span className="count">{tasks.filter((t) => t.engagement_id === e.id).length}</span>
+            </button>
+          ))}
+          {hasPersonalTasks && (
+            <button
+              type="button"
+              className={`krowe-filter-chip ${engagementFilter === "personal" ? "active" : ""}`}
+              onClick={() => setEngagementFilter("personal")}
+            >
+              Personal{" "}
+              <span className="count">{tasks.filter((t) => t.engagement_id === null).length}</span>
+            </button>
+          )}
+        </div>
+      )}
+      <label className="krowe-board-search">
+        <Search width={15} height={15} strokeWidth={2} />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search tasks"
+        />
+      </label>
+      </div>
+      {visibleTasks.length === 0 ? (
+        <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
+          {optimisticTasks.length === 0
+            ? "No tasks yet — hit the + button to add something to the queue."
+            : "No tasks in this engagement yet — hit the + button to add one."}
+        </div>
+      ) : (
       <div className="krowe-board">
         {COLUMNS.map(({ status, label }) => {
-          const columnTasks = sortTasks(optimisticTasks.filter((t) => t.status === status));
+          const columnTasks = sortTasks(searchedTasks.filter((t) => t.status === status));
           const isOver = dragOverStatus === status;
           return (
             <div
@@ -169,6 +261,14 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
                 <span className="krowe-column-label">{label}</span>
                 <span className="krowe-column-count">{columnTasks.length}</span>
                 <span className="krowe-column-rule" />
+                <button
+                  type="button"
+                  className="krowe-column-add"
+                  title="Add a task"
+                  onClick={openNewTask}
+                >
+                  <Plus width={15} height={15} strokeWidth={2} />
+                </button>
               </div>
               {columnTasks.length === 0 ? (
                 <div className="krowe-column-empty">{isOver ? "Drop here" : "Empty"}</div>
@@ -177,7 +277,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
                   {columnTasks.map((task) => (
                     <div
                       key={task.id}
-                      style={{ marginBottom: 12 }}
+                      style={{ marginBottom: 10 }}
                       onDragOver={(e) => handleCardDragOver(e, task)}
                       onDrop={(e) => handleCardDrop(e, task)}
                     >
@@ -203,6 +303,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
           );
         })}
       </div>
+      )}
       <TaskDetailSheet
         task={selectedTask}
         role="builder"

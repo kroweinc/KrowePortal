@@ -1,5 +1,6 @@
 import { EmberGlyph } from "./ember-glyph";
 import { Icon, type IconName } from "./icon";
+import { BrandLogo } from "@/components/prd/brand-logo";
 import type { RepoContext } from "@/lib/github/types";
 import type { ArchLayer } from "@/lib/operator-project/derive-arch-layers";
 
@@ -34,6 +35,62 @@ const LANG_COLORS: Record<string, string> = {
 
 function colorFor(name: string): string {
   return LANG_COLORS[name.toLowerCase()] ?? "#888";
+}
+
+/* Brand accent for each architecture tag — recognizable product colors where we
+   have them, otherwise a stable hue hashed from the name so every tag still
+   reads as its own color instead of uniform gray. Near-black brands are left
+   out on purpose (they'd tint to the same gray) and fall through to the hash. */
+const BRAND_COLORS: Record<string, string> = {
+  ...LANG_COLORS,
+  react: "#61dafb", "react native": "#61dafb", vue: "#41b883", "vue.js": "#41b883",
+  svelte: "#ff3e00", sveltekit: "#ff3e00", angular: "#dd0031", astro: "#ff5d01",
+  nuxt: "#00dc82", tailwind: "#38bdf8", tailwindcss: "#38bdf8", "tailwind css": "#38bdf8",
+  redux: "#764abc", vite: "#646cff", "framer motion": "#0055ff", framer: "#0055ff",
+  nestjs: "#e0234e", django: "#0c4b33", flask: "#1f6feb", fastapi: "#009688",
+  rails: "#cc0000", "ruby on rails": "#cc0000", laravel: "#ff2d20", spring: "#6db33f",
+  "spring boot": "#6db33f", graphql: "#e10098", trpc: "#398ccb", prisma: "#5a67d8",
+  drizzle: "#52b000", "drizzle orm": "#52b000",
+  postgresql: "#336791", postgres: "#336791", mysql: "#4479a1", mariadb: "#003545",
+  mongodb: "#47a248", mongo: "#47a248", redis: "#ff4438", sqlite: "#0f80cc",
+  supabase: "#3ecf8e", firebase: "#ffa000", firestore: "#ffa000", neon: "#00b389",
+  planetscale: "#6b46c1", convex: "#ee342f", upstash: "#00c98d",
+  netlify: "#00c7b7", aws: "#ff9900", "amazon web services": "#ff9900",
+  cloudflare: "#f38020", "google cloud": "#4285f4", gcp: "#4285f4",
+  azure: "#0078d4", digitalocean: "#0080ff", docker: "#2496ed", kubernetes: "#326ce5",
+  nginx: "#009639", railway: "#a653f5", render: "#5d3fd3",
+  stripe: "#635bff", paypal: "#0070ba", plaid: "#0a85ea",
+  clerk: "#6c47ff", auth0: "#eb5424", workos: "#6363f1", okta: "#007dc1",
+  resend: "#5b5bd6", sendgrid: "#1a82e2", mailgun: "#c02126",
+  twilio: "#f22f46", openai: "#10a37f", anthropic: "#d97757", claude: "#d97757",
+  sentry: "#9e6cd9", posthog: "#f54e00", datadog: "#632ca6", algolia: "#5468ff",
+  sanity: "#f03e2f", strapi: "#4945ff", contentful: "#2478cc", shopify: "#7ab55c",
+  hubspot: "#ff7a59", salesforce: "#00a1e0", slack: "#611f69", discord: "#5865f2",
+  airtable: "#fcb400",
+};
+
+/** Stable 0–359 hue derived from a name, so unknown tags get a consistent,
+    distinct color across renders. */
+function hueFromName(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+/** Accent color for an architecture tag. Matches the whole normalized name, then
+    a single token (so "Supabase (Postgres)" → supabase), then a hashed hue. */
+function tagColor(raw: string): string {
+  const n = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9.+#/ -]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (BRAND_COLORS[n]) return BRAND_COLORS[n];
+  for (const t of n.split(/[\s/(),]+/).filter(Boolean)) {
+    if (BRAND_COLORS[t]) return BRAND_COLORS[t];
+  }
+  return `hsl(${hueFromName(n)} 60% 48%)`;
 }
 
 export function TechStackCard({ languages, layers }: TechStackCardProps) {
@@ -103,16 +160,26 @@ export function TechStackCard({ languages, layers }: TechStackCardProps) {
                 >
                   <div
                     style={{
-                      fontFamily: "var(--font-sans)",
-                      fontSize: isTiny ? 0 : 12,
-                      fontWeight: 600,
-                      color,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      minWidth: 0,
                     }}
                   >
-                    {l.name}
+                    {isTiny ? null : <BrandLogo name={l.name} size={16} />}
+                    <span
+                      style={{
+                        fontFamily: "var(--font-sans)",
+                        fontSize: isTiny ? 0 : 12,
+                        fontWeight: 600,
+                        color,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {l.name}
+                    </span>
                   </div>
                   <div
                     style={{
@@ -174,14 +241,7 @@ export function TechStackCard({ languages, layers }: TechStackCardProps) {
                   color: "var(--muted-foreground)",
                 }}
               >
-                <span
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: "50%",
-                    background: colorFor(l.name),
-                  }}
-                />
+                <BrandLogo name={l.name} size={14} />
                 {l.name}
               </div>
             ))}
@@ -258,23 +318,30 @@ export function TechStackCard({ languages, layers }: TechStackCardProps) {
                   </span>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {layer.items.map((it) => (
-                    <span
-                      key={it}
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 12,
-                        color: "var(--foreground)",
-                        fontWeight: 500,
-                        padding: "3px 9px",
-                        background: "var(--surface-subtle)",
-                        border: "1px solid var(--border)",
-                        borderRadius: "var(--radius-sm)",
-                      }}
-                    >
-                      {it}
-                    </span>
-                  ))}
+                  {layer.items.map((it) => {
+                    const c = tagColor(it);
+                    return (
+                      <span
+                        key={it}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 12,
+                          color: `color-mix(in srgb, ${c} 50%, var(--foreground))`,
+                          fontWeight: 500,
+                          padding: "3px 9px 3px 5px",
+                          background: `color-mix(in srgb, ${c} 12%, var(--background))`,
+                          border: `1px solid color-mix(in srgb, ${c} 34%, transparent)`,
+                          borderRadius: "var(--radius-sm)",
+                        }}
+                      >
+                        <BrandLogo name={it} size={16} />
+                        {it}
+                      </span>
+                    );
+                  })}
                 </div>
                 <div
                   style={{

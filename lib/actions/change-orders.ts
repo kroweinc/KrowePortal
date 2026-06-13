@@ -82,7 +82,7 @@ export async function createChangeOrder(
     .select("id")
     .single();
   if (error || !data) return { error: error?.message ?? "Failed to create change order." };
-  revalidatePath("/b/engagement");
+  revalidatePath(`/b/engagements/${engagementId}`);
   return { success: true, id: data.id as string };
 }
 
@@ -112,7 +112,7 @@ export async function updateChangeOrder(
   }
   const { error } = await supabase.from("change_orders").update(patch).eq("id", id);
   if (error) return { error: error.message };
-  revalidatePath("/b/engagement");
+  revalidatePath("/b/engagements");
   return { success: true };
 }
 
@@ -129,7 +129,7 @@ export async function sendChangeOrder(id: string): Promise<{ success: true } | {
     .update({ status: "sent", updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { error: error.message };
-  revalidatePath("/b/engagement");
+  revalidatePath("/b/engagements");
   revalidatePath("/o/project");
   return { success: true };
 }
@@ -155,7 +155,7 @@ export async function rejectChangeOrder(
     })
     .eq("id", id);
   if (error) return { error: error.message };
-  revalidatePath("/b/engagement");
+  revalidatePath("/b/engagements");
   revalidatePath("/o/project");
   return { success: true };
 }
@@ -205,6 +205,6 @@ export async function signChangeOrder(
   if (error) return { error: error.message };
 
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath("/b/engagements");
   return { success: true };
 }

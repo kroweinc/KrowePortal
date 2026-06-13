@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import type { GitHubRepo } from "@/lib/types"
 
 interface RepoSelectorProps {
@@ -10,19 +11,24 @@ interface RepoSelectorProps {
 }
 
 export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSelectorProps) {
+  const router = useRouter()
   const [repos, setRepos] = useState<GitHubRepo[]>(initialRepos ?? [])
   const [selected, setSelected] = useState<string>(currentRepo ?? "")
   const [loading, setLoading] = useState(!initialRepos)
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [needsReconnect, setNeedsReconnect] = useState(false)
 
   useEffect(() => {
     if (initialRepos) return
     fetch("/api/github/repos")
       .then((r) => r.json())
       .then((data) => {
-        setRepos(data.repos ?? [])
+        setRepos(Array.isArray(data?.repos) ? data.repos : [])
+        setNeedsReconnect(!!data?.needsReconnect)
         setLoading(false)
       })
+      .catch(() => setLoading(false))
   }, [initialRepos])
 
   async function handleSelect(fullName: string) {
@@ -38,15 +44,34 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
       default_branch: repo.default_branch,
     }
     if (engagementId) body.engagement_id = engagementId
-    await fetch("/api/github/repos/select", {
+    const res = await fetch("/api/github/repos/select", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     })
     setSaving(false)
+    if (res.ok) {
+      setSaved(true)
+      router.refresh()
+    }
   }
 
   if (loading) return <p className="text-sm text-neutral-400">Loading repos...</p>
+
+  if (needsReconnect) {
+    return (
+      <div className="flex flex-col gap-2">
+        <label className="text-xs font-medium text-neutral-500">Connected repository</label>
+        <p className="text-sm text-neutral-500">
+          Your GitHub connection expired.{" "}
+          <a href="/api/github/connect" className="text-neutral-900 underline underline-offset-2 hover:text-neutral-600">
+            Reconnect GitHub
+          </a>{" "}
+          to pick a repository.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-2">
@@ -66,6 +91,7 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
         ))}
       </select>
       {saving && <p className="text-xs text-neutral-400">Saving...</p>}
+      {!saving && saved && <p className="text-xs text-green-600">Saved</p>}
     </div>
   )
 }

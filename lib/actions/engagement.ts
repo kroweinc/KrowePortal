@@ -64,7 +64,25 @@ export async function setAvailability(
   });
   if (error) return { error: error.message };
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath(`/b/engagements/${engagementId}`);
+  return ok();
+}
+
+export async function clearAvailability(
+  engagementId: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can clear availability." };
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("builder_availability")
+    .delete()
+    .eq("engagement_id", engagementId);
+  if (error) return { error: error.message };
+  revalidatePath("/o/project");
+  revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
 }
 
@@ -109,7 +127,7 @@ export async function postDeliverable(
   });
   if (error) return { error: error.message };
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
 }
 
@@ -120,7 +138,7 @@ export async function deleteDeliverable(id: string): Promise<{ success: true } |
   const { error } = await supabase.from("deliverables").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath("/b/engagements");
   return ok();
 }
 
@@ -281,7 +299,7 @@ export async function updateOperatingAgreement(
   });
   if (error) return { error: error.message };
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
 }
 
@@ -308,7 +326,7 @@ export async function updatePriorityProfile(
     });
   if (error) return { error: error.message };
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
 }
 
@@ -352,7 +370,7 @@ export async function addInfraRecommendation(
   });
   if (error) return { error: error.message };
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
 }
 
@@ -394,6 +412,6 @@ export async function deleteInfraRecommendation(id: string): Promise<{ success: 
   const { error } = await supabase.from("infra_recommendations").delete().eq("id", id);
   if (error) return { error: error.message };
   revalidatePath("/o/project");
-  revalidatePath("/b/engagement");
+  revalidatePath("/b/engagements");
   return ok();
 }

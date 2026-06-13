@@ -1,4 +1,5 @@
-import { openai, AI_MODEL } from "./client";
+import { openai, runChat, AI_MODEL } from "./client";
+import { recordAiUsage, type AiCallMeta } from "./usage";
 import { PrdGenerationResult, PrdFinalResult } from "./schemas";
 import type { Question } from "./schemas";
 import type { PrdContent } from "@/lib/types";
@@ -145,16 +146,24 @@ function buildUserPrompt(input: PrdGenInput): string {
   return lines.join("\n");
 }
 
-async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string> {
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
-    max_completion_tokens: maxTokens,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-  });
+async function callOpenAI(
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  meta?: AiCallMeta
+): Promise<string> {
+  const response = await runChat(
+    {
+      model: AI_MODEL,
+      max_completion_tokens: maxTokens,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    },
+    meta
+  );
   return response.choices[0]?.message?.content ?? "";
 }
 
@@ -165,7 +174,12 @@ async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: n
     (model/endpoint doesn't support the tool) or returns nothing, it falls back
     to the plain chat-completions path so reasoning-based recommendations still
     ship. Still emits a JSON object validated by the same Zod schema downstream. */
-async function callOpenAIWithResearch(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string> {
+async function callOpenAIWithResearch(
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  meta?: AiCallMeta
+): Promise<string> {
   try {
     const response = await openai.responses.create({
       model: AI_MODEL,
@@ -177,16 +191,25 @@ async function callOpenAIWithResearch(systemPrompt: string, userPrompt: string, 
       text: { format: { type: "json_object" } },
       max_output_tokens: maxTokens,
     });
+    // The Responses API reports usage as input/output tokens — map onto the
+    // shared prompt/completion ledger shape.
+    if (meta && response.usage) {
+      void recordAiUsage(meta, AI_MODEL, {
+        prompt_tokens: response.usage.input_tokens,
+        completion_tokens: response.usage.output_tokens,
+        total_tokens: response.usage.total_tokens,
+      });
+    }
     const out = response.output_text ?? "";
     if (out.trim()) return out;
-    return await callOpenAI(systemPrompt, userPrompt, maxTokens);
+    return await callOpenAI(systemPrompt, userPrompt, maxTokens, meta);
   } catch (err) {
     console.warn("[generatePrd] web_search research call failed; falling back to chat completions", err);
-    return await callOpenAI(systemPrompt, userPrompt, maxTokens);
+    return await callOpenAI(systemPrompt, userPrompt, maxTokens, meta);
   }
 }
 
-export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
+export async function generatePrd(input: PrdGenInput, meta?: AiCallMeta): Promise<PrdGenResult> {
   const schema = input.forceFinal ? PrdFinalResult : PrdGenerationResult;
   const systemPrompt = buildSystemPrompt(input.forceFinal, input.deepContext);
   const userPrompt = buildUserPrompt(input);
@@ -201,7 +224,7 @@ export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
   // research (with graceful fallback); otherwise use the plain chat call.
   const call = process.env.OPENAI_ENABLE_WEB_SEARCH === "true" ? callOpenAIWithResearch : callOpenAI;
 
-  let raw = await call(systemPrompt, userPrompt, maxTokens);
+  let raw = await call(systemPrompt, userPrompt, maxTokens, meta);
 
   let parsed: unknown;
   try {
@@ -216,7 +239,8 @@ export async function generatePrd(input: PrdGenInput): Promise<PrdGenResult> {
     raw = await call(
       systemPrompt,
       `${userPrompt}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`,
-      maxTokens
+      maxTokens,
+      meta
     );
     try {
       parsed = JSON.parse(raw || "{}");
