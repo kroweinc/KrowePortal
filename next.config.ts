@@ -7,9 +7,7 @@ const extraDevOrigins =
     .filter(Boolean) ?? [];
 
 const nextConfig: NextConfig = {
-  assetPrefix:
-    process.env.NEXT_PUBLIC_ASSET_PREFIX?.trim() ||
-    (process.env.NODE_ENV === "production" ? "https://kroweportal.vercel.app" : undefined),
+  assetPrefix: process.env.NEXT_PUBLIC_ASSET_PREFIX?.trim() || undefined,
   turbopack: {
     root: path.resolve(__dirname),
   },
