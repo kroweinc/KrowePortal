@@ -2,12 +2,14 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { createAdminClient } from "@/lib/supabase/server"
 import { getCurrentProfile } from "@/lib/auth"
+import { getPublicAppOrigin } from "@/lib/app-origin"
 import { encryptSecret } from "@/lib/crypto"
 import { getGithubOAuthConfig } from "@/lib/github/oauth-config"
 import { GH_OAUTH_STATE_COOKIE, GH_OAUTH_RETURN_COOKIE } from "../connect/route"
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
+  const publicOrigin = getPublicAppOrigin(origin)
   const code = searchParams.get("code")
   const state = searchParams.get("state")
 
@@ -28,7 +30,7 @@ export async function GET(request: Request) {
   // Failures land on the GitHub settings page (which renders an error banner)
   // unless a caller-provided returnTo handles its own errors (e.g. onboarding).
   const errorRedirect = (codeName: string) =>
-    NextResponse.redirect(`${origin}${returnTo ?? "/b/github/settings"}?error=${codeName}`)
+    NextResponse.redirect(`${publicOrigin}${returnTo ?? "/b/github/settings"}?error=${codeName}`)
 
   if (!code || !state || !expectedState || state !== expectedState) {
     return errorRedirect("github_denied")
@@ -37,10 +39,10 @@ export async function GET(request: Request) {
   // Identity is taken from the authenticated session — never from the URL.
   const profile = await getCurrentProfile()
   if (!profile) {
-    return NextResponse.redirect(`${origin}/login`)
+    return NextResponse.redirect(`${publicOrigin}/login`)
   }
 
-  const { clientId, clientSecret, redirectUri } = getGithubOAuthConfig(origin)
+  const { clientId, clientSecret, redirectUri } = getGithubOAuthConfig(publicOrigin)
   if (!clientId || !clientSecret || !redirectUri) {
     console.error("[github/callback] missing GitHub OAuth env vars")
     return errorRedirect("github_token_failed")
@@ -89,6 +91,6 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.redirect(
-    `${origin}${returnTo ?? "/b/github/settings?github=connected"}`
+    `${publicOrigin}${returnTo ?? "/b/github/settings?github=connected"}`
   )
 }

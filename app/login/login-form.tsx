@@ -88,8 +88,9 @@ function EyeIcon({ off }: { off: boolean }) {
 export function LoginForm() {
   const searchParams = useSearchParams();
   const urlError = searchParams.get("error");
+  const initialMode = searchParams.get("mode") === "signup" ? "signup" : "signin";
 
-  const [mode, setMode] = useState<Mode>("signin");
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -103,7 +104,7 @@ export function LoginForm() {
     (urlError ? (ERROR_MESSAGES[urlError] ?? "Something went wrong. Please try again.") : null);
 
   function nextPath() {
-    return searchParams.get("next") ?? "/";
+    return searchParams.get("next") ?? "/portal";
   }
 
   function switchMode(next: Mode) {
