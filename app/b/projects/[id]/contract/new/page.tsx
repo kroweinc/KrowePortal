@@ -36,6 +36,8 @@ function pickDefault(items: { id: string; status: string }[]): string {
   );
 }
 
+export const metadata = { title: "New Contract" };
+
 export default async function NewProjectContractPage({
   params,
 }: {

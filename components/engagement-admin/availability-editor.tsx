@@ -40,7 +40,7 @@ export function AvailabilityEditor({
 
   function clear() {
     const confirmed = window.confirm(
-      "Remove your availability for this engagement? The operator will no longer see a status."
+      "Remove your availability for this client? The operator will no longer see a status."
     );
     if (!confirmed) return;
     startTransition(async () => {

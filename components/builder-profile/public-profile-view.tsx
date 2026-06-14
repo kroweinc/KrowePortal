@@ -18,6 +18,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { VerifiedBadge } from "./verified-badge";
 import { LanguageBar } from "./language-bar";
+import { TechBadge } from "./tech-badge";
 import { BrandLogo } from "@/components/prd/brand-logo";
 import { getPublicResumeUrl, type PublicBuilderProfile } from "@/lib/actions/builder-profile-public";
 import { findCodingToolPreset } from "@/lib/coding-tools";
@@ -369,9 +370,7 @@ function ProjectCard({
           </span>
         )}
         {project.tech.map((t) => (
-          <span key={t} className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-600">
-            {t}
-          </span>
+          <TechBadge key={t} tech={t} />
         ))}
       </div>
       {project.languages && project.languages.length > 0 && (

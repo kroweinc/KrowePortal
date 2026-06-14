@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Link as LinkIcon, FileArchive, Plus } from "lucide-react";
 import { ATTACHMENT_ACCEPT } from "@/lib/attachments-constants";
 import { safeExternalHref } from "@/lib/project/business-context";
 import {
@@ -96,51 +96,56 @@ export function ProjectMaterials({
   }
 
   return (
-    <section>
-      <div className="mb-2">
-        <h2 className="text-sm font-semibold text-neutral-900">Materials</h2>
-        <p className="text-xs text-neutral-500">
-          Links and files about the business. These help seed AI drafts.
-        </p>
+    <section id="materials" className="section">
+      <div className="sec-head">
+        <div>
+          <h2 className="sec-title">Materials</h2>
+          <p className="sec-desc">Links and files about the business. These help seed AI drafts.</p>
+        </div>
       </div>
 
       {materials.length > 0 ? (
-        <ul className="space-y-2 mb-3">
+        <ul className="rows">
           {materials.map((m) => (
-            <li
-              key={m.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3"
-            >
-              <div className="min-w-0 flex-1">
+            <li key={m.id} className="row">
+              <span className="row-ico">
                 {m.material_type === "link" ? (
-                  <a
-                    href={safeExternalHref(m.url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-neutral-900 hover:underline truncate block"
-                  >
-                    {m.label?.trim() || m.url}
-                  </a>
+                  <LinkIcon size={17} strokeWidth={1.9} />
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => onOpenFile(m.id)}
-                    className="text-sm font-medium text-neutral-900 hover:underline truncate block text-left"
-                  >
-                    {m.file_name}
-                  </button>
+                  <FileArchive size={17} strokeWidth={1.9} />
                 )}
-                <div className="text-xs text-neutral-400 mt-0.5">
-                  {m.material_type === "link"
-                    ? "Link"
-                    : ["File", formatBytes(m.size_bytes)].filter(Boolean).join(" · ")}
+              </span>
+              <div className="row-main">
+                <div className="row-titleline">
+                  {m.material_type === "link" ? (
+                    <a
+                      className="row-name"
+                      href={safeExternalHref(m.url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {m.label?.trim() || m.url}
+                    </a>
+                  ) : (
+                    <button type="button" className="row-name" onClick={() => onOpenFile(m.id)}>
+                      {m.file_name}
+                    </button>
+                  )}
+                  <span className="chip chip-kind">{m.material_type === "link" ? "Link" : "File"}</span>
+                </div>
+                <div className="row-sub">
+                  <span>
+                    {m.material_type === "link"
+                      ? "Link"
+                      : ["File", formatBytes(m.size_bytes)].filter(Boolean).join(" · ")}
+                  </span>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => onDelete(m.id)}
                 disabled={isPending}
-                className="shrink-0 rounded px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 disabled:opacity-50"
+                className="row-trail"
                 aria-label="Remove material"
               >
                 Remove
@@ -149,81 +154,75 @@ export function ProjectMaterials({
           ))}
         </ul>
       ) : (
-        <div className="rounded-lg border border-dashed border-neutral-200 bg-white px-4 py-4 text-xs text-neutral-400 mb-3">
-          No materials yet.
+        <div className="empty">No materials yet — add a link or upload a file to seed AI drafts.</div>
+      )}
+
+      {showLinkForm && (
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <input
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            type="text"
+            inputMode="url"
+            placeholder="https://… (link URL)"
+            className={inputClass}
+            autoFocus
+          />
+          <input
+            value={linkLabel}
+            onChange={(e) => setLinkLabel(e.target.value)}
+            type="text"
+            placeholder="Label (optional)"
+            className={`${inputClass} sm:max-w-[200px]`}
+          />
         </div>
       )}
 
-      <div className="space-y-2 rounded-lg border border-neutral-100 bg-neutral-50 p-3">
-        {showLinkForm && (
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              value={linkUrl}
-              onChange={(e) => setLinkUrl(e.target.value)}
-              type="text"
-              inputMode="url"
-              placeholder="https://… (link URL)"
-              className={inputClass}
-              autoFocus
-            />
-            <input
-              value={linkLabel}
-              onChange={(e) => setLinkLabel(e.target.value)}
-              type="text"
-              placeholder="Label (optional)"
-              className={`${inputClass} sm:max-w-[200px]`}
-            />
-          </div>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          {showLinkForm ? (
-            <>
-              <Button type="button" variant="outline" size="sm" onClick={onAddLink} disabled={isPending}>
-                Add
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setShowLinkForm(false);
-                  setLinkUrl("");
-                  setLinkLabel("");
-                }}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-            </>
-          ) : (
-            <Button
+      <div className="add-row">
+        {showLinkForm ? (
+          <>
+            <button type="button" className="add-mini" onClick={onAddLink} disabled={isPending}>
+              <span className="ai"><Plus size={14} strokeWidth={2} /></span>Add
+            </button>
+            <button
               type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setShowLinkForm(true)}
+              className="add-mini"
+              onClick={() => {
+                setShowLinkForm(false);
+                setLinkUrl("");
+                setLinkLabel("");
+              }}
               disabled={isPending}
             >
-              + Add link
-            </Button>
-          )}
-          <Button
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button
             type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
+            className="add-mini"
+            onClick={() => setShowLinkForm(true)}
             disabled={isPending}
           >
-            + Upload file
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ATTACHMENT_ACCEPT}
-            onChange={onFilesSelected}
-            className="hidden"
-          />
-        </div>
+            <span className="ai"><Plus size={14} strokeWidth={2} /></span>Add link
+          </button>
+        )}
+        <button
+          type="button"
+          className="add-mini"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isPending}
+        >
+          <span className="ai"><Plus size={14} strokeWidth={2} /></span>Upload file
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ATTACHMENT_ACCEPT}
+          onChange={onFilesSelected}
+          className="hidden"
+        />
       </div>
     </section>
   );

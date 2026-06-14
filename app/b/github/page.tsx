@@ -48,6 +48,8 @@ type RepoOption = {
   } | null; // null = engagement exists but has no repo linked yet
 };
 
+export const metadata = { title: "Repo" };
+
 export default async function ProjectProfilePage({
   searchParams,
 }: {

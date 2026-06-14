@@ -254,29 +254,6 @@ function PagesBody({ content, patch }: SectionBodyProps) {
   );
 }
 
-function StoriesBody({ content, patch }: SectionBodyProps) {
-  const stories = content.userStories ?? [];
-  const h = listPatch(stories, patch, "userStories");
-  const editing = useEditing();
-  if (!editing && stories.length === 0) return <p className="empty-note">No user stories yet.</p>;
-  return (
-    <div className="story-stack">
-      {stories.map((s, i) => (
-        <div className="story-row" key={i}>
-          <span className="story-lead">As a</span>
-          <InlineText value={s.asA} onChange={(v) => h.update(i, { asA: v })} placeholder="role" />
-          <span className="story-lead">, I want</span>
-          <InlineText value={s.iWant} onChange={(v) => h.update(i, { iWant: v })} placeholder="capability" />
-          <span className="story-lead">, so that</span>
-          <InlineText value={s.soThat} onChange={(v) => h.update(i, { soThat: v })} placeholder="outcome" />
-          <RemoveCard onClick={() => h.remove(i)} />
-        </div>
-      ))}
-      <AddButton label="Add story" onClick={() => h.add({ asA: "", iWant: "", soThat: "" })} />
-    </div>
-  );
-}
-
 function DataModelBody({ content, patch }: SectionBodyProps) {
   const rows = content.dataModel ?? [];
   const h = listPatch(rows, patch, "dataModel");
@@ -1079,7 +1056,6 @@ export const SECTIONS: SectionDef[] = [
   { id: "requirements", title: "Functional Requirements", hint: "Concrete things the system must do.", group: "scope", Body: listBody("requirements", "bullet", "requirement", "The system must…") },
   { id: "pagesScreens", title: "Pages & Screens", hint: "Every page/screen in this version and what it displays.", group: "scope", Body: PagesBody },
   { id: "successCriteria", title: "Success Criteria", hint: "Testable, binary acceptance checklist — each item is verifiably done or not.", group: "scope", Body: listBody("successCriteria", "check", "criterion", "Criterion") },
-  { id: "userStories", title: "User Stories", hint: "As a … I want … so that … (supporting detail).", group: "scope", Body: StoriesBody },
   { id: "nonFunctionalRequirements", num: "5", title: "Non-Functional Requirements", hint: "Non-feature qualities: performance, setup/hosting, security.", group: "scope", Body: listBody("nonFunctionalRequirements", "bullet", "requirement", "Quality") },
   { id: "scopeLater", num: "6", title: "Scope — Later", hint: "Features intentionally not in this version.", group: "scope", Body: listBody("scopeLater", "bullet", "item", "Deferred feature") },
   { id: "futureExpansion", title: "Future Expansion", hint: "Post-MVP upgrade opportunities the client could add later.", group: "scope", Body: listBody("futureExpansion", "bullet", "opportunity", "Opportunity") },

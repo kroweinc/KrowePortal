@@ -25,7 +25,7 @@ export function DeleteEngagementCard({ engagement }: { engagement: Engagement })
         toast.error(result.error);
         return;
       }
-      toast.success("Engagement deleted");
+      toast.success("Client deleted");
       router.push("/b/engagements");
     });
   }
@@ -34,7 +34,7 @@ export function DeleteEngagementCard({ engagement }: { engagement: Engagement })
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-neutral-500">
-          Permanently delete this engagement and everything in it.
+          Permanently delete this client and everything in it.
         </p>
         <Button
           variant="outline"
@@ -42,7 +42,7 @@ export function DeleteEngagementCard({ engagement }: { engagement: Engagement })
           onClick={() => setDeleteOpen(true)}
           className="shrink-0 text-red-600 hover:bg-red-50 hover:text-red-700"
         >
-          Delete engagement
+          Delete client
         </Button>
       </div>
 
@@ -53,12 +53,12 @@ export function DeleteEngagementCard({ engagement }: { engagement: Engagement })
           </DialogHeader>
           <div className="space-y-3 pt-2 text-sm text-neutral-600">
             <p>
-              This permanently deletes the engagement along with its tasks, milestones, briefs,
+              This permanently deletes the client along with its tasks, milestones, briefs,
               deliverables, change orders, operating agreement, invitations, and availability.
               This can&apos;t be undone.
             </p>
             {engagement.project_id && (
-              <p>The linked project is kept and can start a new engagement later.</p>
+              <p>The linked project is kept and can start a new client later.</p>
             )}
           </div>
           <div className="flex justify-end gap-2 pt-2">
@@ -72,7 +72,7 @@ export function DeleteEngagementCard({ engagement }: { engagement: Engagement })
               disabled={isPending}
               className="text-red-600 hover:bg-red-50 hover:text-red-700"
             >
-              {isPending ? "Deleting…" : "Delete engagement"}
+              {isPending ? "Deleting…" : "Delete client"}
             </Button>
           </div>
         </DialogContent>

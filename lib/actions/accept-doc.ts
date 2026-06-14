@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
-import { seedEngagementIfEmpty } from "@/lib/project/provision";
 import type { Engagement } from "@/lib/types";
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
@@ -81,7 +80,7 @@ async function linkOperatorToProject(
       .insert({
         builder_id: project.owner_id,
         project_id: project.id,
-        title: project.name ?? "Engagement",
+        title: project.name ?? "Client",
         operator_id: user.id,
       })
       .select()
@@ -93,7 +92,7 @@ async function linkOperatorToProject(
         .select("*")
         .eq("project_id", project.id)
         .maybeSingle());
-      if (!engagement) return { error: createErr?.message ?? "Could not start the engagement." };
+      if (!engagement) return { error: createErr?.message ?? "Could not start the client." };
     } else {
       return { engagement: created as Engagement };
     }
@@ -173,7 +172,7 @@ async function prepareAccept(
 export async function acceptAndSignQuote(token: string, input: AcceptInput): Promise<AcceptResult> {
   const prep = await prepareAccept("quotes", token, input);
   if (!prep.ok) return { error: prep.error };
-  const { admin, user, engagement, signerName, docId, projectId } = prep;
+  const { admin, user, signerName, docId, projectId } = prep;
 
   const ip = await clientIp();
   const now = new Date().toISOString();
@@ -192,9 +191,6 @@ export async function acceptAndSignQuote(token: string, input: AcceptInput): Pro
     .eq("token", token)
     .eq("status", "sent");
   if (error) return { error: error.message };
-
-  // Populate the engagement so the operator lands on a live portal.
-  await seedEngagementIfEmpty(admin, engagement.id, projectId, engagement.builder_id);
 
   revalidatePath(`/quotes/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
@@ -231,6 +227,15 @@ export async function acceptAndSignContract(token: string, input: AcceptInput): 
     .update({ status: "won", updated_at: now })
     .eq("id", projectId)
     .eq("status", "active");
+
+  // A signed contract also takes the engagement live (if the builder hasn't
+  // already begun it). Stamping started_at here is what makes "engagement
+  // successful" follow contract signing rather than mere doc acceptance.
+  await admin
+    .from("engagements")
+    .update({ started_at: now })
+    .eq("project_id", projectId)
+    .is("started_at", null);
 
   revalidatePath(`/contract/${token}`);
   revalidatePath(`/b/projects/${projectId}`);

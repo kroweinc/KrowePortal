@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light only" />
+  <meta name="supported-color-schemes" content="light only" />
+  <title>Confirm your email</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings>
+        <o:PixelsPerInch>96</o:PixelsPerInch>
+      </o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <!-- Web fonts load in Apple Mail / iOS Mail; everywhere else falls back gracefully. -->
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Instrument+Serif&display=swap" rel="stylesheet" />
+  <style>
+    /* Reset */
+    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+    a { color: #f97316; }
+
+    /* Brand type stacks */
+    .font-sans  { font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    .font-serif { font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif; }
+
+    @media only screen and (max-width: 600px) {
+      .container { width: 100% !important; }
+      .px { padding-left: 28px !important; padding-right: 28px !important; }
+      .headline { font-size: 30px !important; line-height: 36px !important; }
+      .btn-a { display: block !important; }
+    }
+  </style>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f1ec;">
+  <!-- Preheader (hidden inbox preview text) -->
+  <div style="display:none; font-size:1px; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden; mso-hide:all; font-family:sans-serif;">
+    Confirm your email to activate your Krowe account.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#f4f1ec;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+
+        <!-- Card -->
+        <table role="presentation" class="container" cellpadding="0" cellspacing="0" border="0" width="600" style="width:600px; max-width:600px; background-color:#ffffff; border:1px solid #ece8e1; border-radius:16px; overflow:hidden;">
+
+          <!-- Brand accent bar -->
+          <tr>
+            <td style="height:4px; line-height:4px; font-size:4px; background-color:#f97316;">&nbsp;</td>
+          </tr>
+
+          <!-- Logo header -->
+          <tr>
+            <td class="px" align="center" style="padding:36px 48px 8px 48px;">
+              <img src="https://krowe-portal.vercel.app/images/KroweLogo.png" width="148" alt="Krowe" style="display:block; width:148px; max-width:148px; height:auto;" />
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td class="px font-sans" style="padding:24px 48px 8px 48px;">
+
+              <!-- Eyebrow -->
+              <p style="margin:0 0 14px 0; font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:11px; font-weight:600; letter-spacing:0.14em; text-transform:uppercase; color:#f97316;">
+                Account verification
+              </p>
+
+              <!-- Headline -->
+              <h1 class="headline font-serif" style="margin:0 0 16px 0; font-family:'Instrument Serif',Georgia,'Times New Roman',serif; font-weight:400; font-size:38px; line-height:44px; color:#2a2723; letter-spacing:-0.01em;">
+                Confirm your email address
+              </h1>
+
+              <!-- Lead -->
+              <p style="margin:0 0 28px 0; font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:15px; line-height:24px; color:#5c574f;">
+                Welcome to Krowe — where operators and builders meet. Confirm this email
+                to activate your account and get into your portal.
+              </p>
+
+              <!-- CTA button (bulletproof) -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
+                <tr>
+                  <td align="left">
+                    <!--[if mso]>
+                    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="{{ .ConfirmationURL }}" style="height:52px;v-text-anchor:middle;width:240px;" arcsize="22%" strokecolor="#f97316" fillcolor="#f97316">
+                      <w:anchorlock/>
+                      <center style="color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:15px;font-weight:bold;">Confirm my email&nbsp;&rarr;</center>
+                    </v:roundrect>
+                    <![endif]-->
+                    <!--[if !mso]><!-->
+                    <a class="btn-a font-sans" href="{{ .ConfirmationURL }}" target="_blank"
+                       style="display:inline-block; background-color:#f97316; color:#ffffff; font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:15px; font-weight:600; line-height:20px; text-decoration:none; padding:16px 30px; border-radius:10px; box-shadow:0 4px 10px rgba(249,115,22,0.28);">
+                      Confirm my email&nbsp;&rarr;
+                    </a>
+                    <!--<![endif]-->
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Fallback link -->
+              <p style="margin:0 0 8px 0; font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; line-height:20px; color:#9a958c;">
+                Button not working? Paste this link into your browser:
+              </p>
+              <p style="margin:0 0 28px 0; padding:12px 14px; background-color:#faf8f4; border:1px solid #ece8e1; border-radius:10px; font-family:'Geist Mono','SFMono-Regular',Menlo,Consolas,monospace; font-size:12px; line-height:18px; color:#5c574f; word-break:break-all;">
+                <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#f97316; text-decoration:none; word-break:break-all;">{{ .ConfirmationURL }}</a>
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- Divider -->
+          <tr>
+            <td class="px" style="padding:0 48px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+                <tr><td style="height:1px; line-height:1px; font-size:1px; background-color:#ece8e1;">&nbsp;</td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Security note -->
+          <tr>
+            <td class="px font-sans" style="padding:22px 48px 36px 48px;">
+              <p style="margin:0; font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:13px; line-height:20px; color:#9a958c;">
+                This link expires in 24 hours. If you didn't create a Krowe account,
+                you can safely ignore this email — no account will be created.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+        <!-- Footer -->
+        <table role="presentation" class="container" cellpadding="0" cellspacing="0" border="0" width="600" style="width:600px; max-width:600px;">
+          <tr>
+            <td align="center" style="padding:24px 48px 8px 48px;">
+              <p class="font-serif" style="margin:0 0 4px 0; font-family:'Instrument Serif',Georgia,serif; font-size:18px; color:#2a2723;">Krowe</p>
+              <p style="margin:0 0 12px 0; font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:12px; line-height:18px; color:#9a958c;">
+                Connecting operators and builders.
+              </p>
+              <p style="margin:0; font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:11px; line-height:18px; color:#b8b2a8;">
+                You're receiving this because someone signed up for Krowe with this email address.
+              </p>
+            </td>
+          </tr>
+        </table>
+        <!-- /Footer -->
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

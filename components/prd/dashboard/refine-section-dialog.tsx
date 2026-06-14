@@ -44,7 +44,6 @@ const FIELD_LABELS: Record<string, string> = {
   coreUserFlow: "Core User Flow",
   features: "Features",
   requirements: "Functional Requirements",
-  userStories: "User Stories",
   pagesScreens: "Pages & Screens",
   successCriteria: "Success Criteria",
   nonFunctionalRequirements: "Non-Functional Requirements",

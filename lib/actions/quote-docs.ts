@@ -7,6 +7,7 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { getProjectMaterials } from "@/lib/actions/project-materials";
+import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
 import { getPrdById } from "@/lib/actions/prds";
 import { friendlyAiError } from "@/lib/ai/client";
@@ -15,6 +16,8 @@ import { assertAiBudget } from "@/lib/ai/usage";
 import { refineQuoteSection as runRefineSection } from "@/lib/ai/refine-quote-section";
 import { fieldsForSection, refinableSection } from "@/lib/quote/section-fields";
 import { recomputeTotals, applyMilestonePercents } from "@/lib/quote/totals";
+import { applyPricingDefaults } from "@/lib/quote/defaults";
+import { getPricingDefaults } from "@/lib/actions/pricing-defaults";
 import type { Question } from "@/lib/ai/schemas";
 import type { Quote, QuoteContent, PrdContent } from "@/lib/types";
 
@@ -84,6 +87,7 @@ export async function draftQuote(input: DraftQuoteInput): Promise<DraftQuoteResu
   if (project.owner_id !== profile.id) return { error: "Not your document." };
 
   const materials = await getProjectMaterials(projectId);
+  const sopTranscripts = await getProjectSopTranscripts(projectId);
 
   // Load the source PRD (from-PRD path). It must belong to the same project.
   let prdContent: PrdContent | undefined;
@@ -105,6 +109,9 @@ export async function draftQuote(input: DraftQuoteInput): Promise<DraftQuoteResu
   const budget = await assertAiBudget(profile.id);
   if (!budget.ok) return { error: budget.error };
 
+  // Builder's pricing defaults seed every new quote (rate, payment terms, design).
+  const pricingDefaults = await getPricingDefaults(profile.id);
+
   let result;
   try {
     result = await generateQuote(
@@ -112,10 +119,11 @@ export async function draftQuote(input: DraftQuoteInput): Promise<DraftQuoteResu
         title,
         notes: source === "notes" ? notes : undefined,
         prdContent,
-        businessContext: composeBusinessContext(project, materials),
+        businessContext: composeBusinessContext(project, materials, sopTranscripts),
         answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
         forceFinal,
         deepContext,
+        hourlyRate: pricingDefaults.hourlyRate,
         currentDate: new Date().toISOString().slice(0, 10),
       },
       { userId: profile.id, operation: "generate_quote" }
@@ -134,9 +142,13 @@ export async function draftQuote(input: DraftQuoteInput): Promise<DraftQuoteResu
     : "";
   const sourceNotes = [notes?.trim(), transcript].filter(Boolean).join("\n\n---\n\n") || null;
 
-  // Server-side guard: tie all arithmetic out regardless of model drift. Price
-  // line items by hours × rate, then derive milestone amounts from the percents.
-  const content = applyMilestonePercents(recomputeTotals(result.content));
+  // Seed the builder's defaults (rate, payment terms, design system), then tie all
+  // arithmetic out regardless of model drift: price line items by hours × rate and
+  // derive milestone amounts from the percents. Defaults must be applied BEFORE
+  // recompute so the design fee feeds the grand total and milestones derive from it.
+  const content = applyMilestonePercents(
+    recomputeTotals(applyPricingDefaults(result.content, pricingDefaults))
+  );
 
   const supabase = await getClient(profile.id);
   const { data, error } = await supabase
@@ -197,10 +209,11 @@ export async function regenerateQuote(
 
   const project = await getProjectById(before.project_id as string);
   const materials = await getProjectMaterials(before.project_id as string);
+  const sopTranscripts = await getProjectSopTranscripts(before.project_id as string);
   const result = await generateQuote({
     title: before.title as string,
     notes: clean,
-    businessContext: project ? composeBusinessContext(project, materials) : undefined,
+    businessContext: project ? composeBusinessContext(project, materials, sopTranscripts) : undefined,
     forceFinal: true,
     currentDate: new Date().toISOString().slice(0, 10),
   });

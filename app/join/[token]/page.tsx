@@ -7,6 +7,8 @@ interface Props {
   params: Promise<{ token: string }>;
 }
 
+export const metadata = { title: "Join" };
+
 export default async function JoinPage({ params }: Props) {
   const { token } = await params;
 

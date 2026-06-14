@@ -9,6 +9,7 @@ interface Props {
 
 // Share links are capability URLs — keep them out of search engines.
 export const metadata: Metadata = {
+  title: "Profile",
   robots: { index: false, follow: false },
 };
 

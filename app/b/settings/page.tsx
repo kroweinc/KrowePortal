@@ -5,10 +5,14 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { Ember } from "@/components/design-atoms";
 import { ConnectGitHubButton } from "@/components/github/connect-github-button";
 import { ProfileEditor } from "@/components/settings/profile-editor";
+import { PricingDefaultsEditor } from "@/components/settings/pricing-defaults-editor";
+import { getPricingDefaults } from "@/lib/actions/pricing-defaults";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+
+export const metadata = { title: "Settings" };
 
 export default async function BuilderSettingsPage() {
   const profile = await getCurrentProfile();
@@ -26,6 +30,8 @@ export default async function BuilderSettingsPage() {
     .single();
 
   const connected = !!connection;
+
+  const pricingDefaults = await getPricingDefaults(profile.id);
 
   return (
     <main className="krowe-page">
@@ -59,7 +65,7 @@ export default async function BuilderSettingsPage() {
           </div>
         </Section>
 
-        <Section title="GitHub" hint="Connect your account to link repos to your engagements.">
+        <Section title="GitHub" hint="Connect your account to link repos to your clients.">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <ConnectGitHubButton connected={connected} username={connection?.github_username} />
             {connected && (
@@ -71,6 +77,10 @@ export default async function BuilderSettingsPage() {
               </Link>
             )}
           </div>
+        </Section>
+
+        <Section title="Quote Defaults" hint="The base pricing every new quote starts from.">
+          <PricingDefaultsEditor initial={pricingDefaults} />
         </Section>
       </div>
     </main>

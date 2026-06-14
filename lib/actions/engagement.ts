@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { normalizeUrl } from "@/lib/project/business-context";
 import type {
   BuilderAvailability,
   Deliverable,
@@ -235,6 +236,7 @@ export async function upsertBusinessContext(
   });
   if (error) return { error: error.message };
   revalidatePath("/o/project");
+  revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
 }
 
@@ -414,4 +416,69 @@ export async function deleteInfraRecommendation(id: string): Promise<{ success: 
   revalidatePath("/o/project");
   revalidatePath("/b/engagements");
   return ok();
+}
+
+const businessLinksSchema = z.object({
+  websiteUrl: z.string().max(2000).nullish(),
+  linkedinUrl: z.string().max(2000).nullish(),
+});
+
+// Saves landing page / LinkedIn links for a client. Standalone clients (no
+// project_id yet) get a backing document record created and linked on first save.
+export async function saveEngagementBusinessLinks(
+  engagementId: string,
+  links: { websiteUrl?: string | null; linkedinUrl?: string | null }
+): Promise<{ success: true; projectId: string } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can edit client links." };
+
+  const parsed = businessLinksSchema.safeParse(links);
+  if (!parsed.success) return { error: "Invalid link input." };
+
+  const admin = createAdminClient();
+  const { data: engagement } = await admin
+    .from("engagements")
+    .select("id, title, project_id")
+    .eq("id", engagementId)
+    .eq("builder_id", profile.id)
+    .maybeSingle();
+  if (!engagement) return { error: "Client not found." };
+
+  let projectId = engagement.project_id as string | null;
+
+  if (!projectId) {
+    const { data: project, error: createErr } = await admin
+      .from("projects")
+      .insert({
+        owner_id: profile.id,
+        name: (engagement.title as string).trim() || "Client",
+      })
+      .select("id")
+      .single();
+    if (createErr || !project) return { error: createErr?.message ?? "Failed to create document." };
+    projectId = project.id as string;
+
+    const { error: linkErr } = await admin
+      .from("engagements")
+      .update({ project_id: projectId })
+      .eq("id", engagementId);
+    if (linkErr) return { error: linkErr.message };
+  }
+
+  const patch = {
+    website_url: normalizeUrl(parsed.data.websiteUrl),
+    linkedin_url: normalizeUrl(parsed.data.linkedinUrl),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error: updateErr } = await admin.from("projects").update(patch).eq("id", projectId);
+  if (updateErr) return { error: updateErr.message };
+
+  revalidatePath(`/b/engagements/${engagementId}`);
+  revalidatePath("/b/engagements");
+  revalidatePath("/b/projects");
+  revalidatePath(`/b/projects/${projectId}`);
+  revalidatePath("/o/project");
+  return { success: true, projectId };
 }

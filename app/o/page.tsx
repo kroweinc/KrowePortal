@@ -7,6 +7,8 @@ import { OperatorTaskList } from "@/components/operator-task-list";
 import { NewTaskForm } from "@/components/new-task-form";
 import type { Engagement, Task } from "@/lib/types";
 
+export const metadata = { title: "Tasks" };
+
 export default async function OperatorDashboard() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");

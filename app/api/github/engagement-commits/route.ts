@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
       {
         error: "no_repo",
         message:
-          "No GitHub repo available. Connect GitHub and select a default repo (or set a repo on this engagement) in settings.",
+          "No GitHub repo available. Connect GitHub and select a default repo (or set a repo on this client) in settings.",
       },
       { status: 412 }
     );

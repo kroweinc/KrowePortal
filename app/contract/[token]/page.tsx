@@ -7,6 +7,8 @@ interface Props {
   params: Promise<{ token: string }>;
 }
 
+export const metadata = { title: "Contract" };
+
 export default async function PublicContractPage({ params }: Props) {
   const { token } = await params;
 

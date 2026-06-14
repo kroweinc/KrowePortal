@@ -1,0 +1,166 @@
+/* ============================================================
+   ENGAGEMENTS — list cards + Manage (detail) view
+   Ported from the Claude Design mockup (Engagements.html). Reuses the
+   global Krowe tokens in app/globals.css (--primary, --foreground,
+   --border, --surface-subtle, --radius-*, --shadow-*, --font-*). Only the
+   page CONTENT is styled here; the app shell (sidebar/topbar) is global.
+   All classes are namespaced (.eng-*, .logo-tile, .detail-*, .section*)
+   so nothing collides with .krowe-* or the global .brand-logo.
+   ============================================================ */
+
+/* ───────── List ───────── */
+.eng-list { display: flex; flex-direction: column; gap: 14px; }
+
+.eng-card {
+  position: relative; display: flex; align-items: stretch; gap: 18px;
+  background: #fff; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 18px 20px 18px 18px; box-shadow: var(--shadow-1); cursor: pointer;
+  transition: transform 170ms var(--ease-out-smooth), box-shadow 170ms var(--ease-out-smooth),
+    border-color 170ms var(--ease-out-smooth);
+  overflow: hidden;
+}
+.eng-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(var(--primary), var(--primary-accent));
+  opacity: 0; transition: opacity 170ms var(--ease-out-smooth);
+}
+.eng-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--border-strong); }
+.eng-card:hover::before { opacity: 1; }
+.eng-card:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-2), 0 0 0 4px color-mix(in oklch, var(--primary) 12%, transparent);
+}
+
+/* ───────── Logo tile + builder badge ───────── */
+.eng-logo { position: relative; flex-shrink: 0; display: inline-block; }
+
+.logo-tile {
+  position: relative; width: 100%; height: 100%; overflow: hidden;
+  border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; box-shadow: var(--shadow-1);
+  border: 1px solid color-mix(in srgb, #000 14%, transparent);
+}
+.logo-tile--ink   { background: linear-gradient(155deg, oklch(32% 0.02 60), oklch(20% 0.012 60)); }
+.logo-tile--clay  { background: linear-gradient(155deg, #c2603a, #9a4424); }
+.logo-tile--slate { background: linear-gradient(155deg, oklch(46% 0.03 250), oklch(32% 0.03 255)); }
+
+/* Soft top gloss — only over the gradient monogram, never over a real logo. */
+.logo-tile:not(:has(img.brand-logo))::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 55%);
+}
+.logo-tile-mono { font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+
+/* When a real Brandfetch/favicon image resolves, the logo fills the tile edge-to-edge
+   and the gradient monogram is suppressed. When BrandLogo misses (renders its neutral
+   .brand-logo--fallback span), we hide that span so the gradient + initials underneath
+   show through. :has() keys off the real <img> only. */
+.logo-tile:has(img.brand-logo) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.logo-tile:has(img.brand-logo) .logo-tile-mono { opacity: 0; }
+.logo-tile img.brand-logo {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  border: none; border-radius: inherit; padding: 0;
+  background: transparent; object-fit: cover;
+  box-sizing: border-box;
+}
+.logo-tile .brand-logo--fallback { display: none; }
+
+/* Landing-page input logo preview (BusinessLinksEditor) */
+.biz-link-logo {
+  position: relative; flex-shrink: 0; width: 34px; height: 34px;
+  overflow: hidden; border-radius: 10px;
+}
+.biz-link-logo img.brand-logo {
+  width: 100% !important; height: 100% !important;
+  border: none; border-radius: inherit; padding: 0;
+  background: transparent; object-fit: cover; box-sizing: border-box;
+}
+.biz-link-logo .brand-logo--fallback {
+  width: 100% !important; height: 100% !important;
+  border-radius: inherit; font-size: 14px;
+}
+
+.op-badge {
+  position: absolute; right: -4px; bottom: -4px; width: 22px; height: 22px; overflow: hidden;
+  border-radius: var(--radius-full); background: var(--foreground); color: #fff;
+  border: 2px solid #fff; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9.5px; font-weight: 600; box-shadow: var(--shadow-1);
+}
+.op-badge img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+
+/* ───────── Card body ───────── */
+.eng-body { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.eng-name { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--foreground); }
+.eng-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+
+.eng-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--muted-foreground); }
+.eng-status .dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; }
+.eng-status.live .dot { background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+.eng-status.pend .dot { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-soft); }
+.eng-status.none .dot { background: var(--border-strong); }
+
+.eng-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: var(--surface-subtle); color: var(--muted-foreground); white-space: nowrap;
+}
+.eng-chip .ci { color: var(--faint-foreground); display: inline-flex; }
+.eng-chip.mono { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: -0.01em; }
+.eng-dotsep { width: 3px; height: 3px; border-radius: 999px; background: var(--border-strong); }
+
+.eng-prog { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.eng-bar { flex: 1; max-width: 240px; height: 5px; border-radius: 999px; background: var(--surface-sunken); overflow: hidden; }
+.eng-bar > span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--success), color-mix(in srgb, var(--success) 70%, var(--primary))); }
+.eng-prog-label { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint-foreground); white-space: nowrap; }
+
+/* ───────── Manage pill ───────── */
+.eng-aside { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 10px; flex-shrink: 0; }
+.manage-btn {
+  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px 0 15px;
+  border-radius: var(--radius-full); border: 1px solid var(--border); background: #fff;
+  color: var(--foreground); font-size: 12.5px; font-weight: 600;
+  transition: border-color 160ms var(--ease-out-smooth), color 160ms var(--ease-out-smooth);
+}
+.eng-card:hover .manage-btn { border-color: var(--primary); color: var(--primary-hover); }
+.manage-btn .mi { transition: transform 160ms var(--ease-out-smooth); }
+.eng-card:hover .manage-btn .mi { transform: translateX(2px); }
+
+/* ───────── Detail / Manage view ───────── */
+.eng-backlink { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted-foreground); transition: color 140ms var(--ease-out-smooth); }
+.eng-backlink:hover { color: var(--foreground); }
+
+.detail-hero {
+  display: flex; align-items: center; gap: 20px;
+  padding: 22px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: #fff; box-shadow: var(--shadow-1); position: relative; overflow: hidden;
+}
+.detail-hero::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.5;
+  background: radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--primary) 7%, transparent), transparent 60%);
+}
+.detail-hero .eng-logo { z-index: 1; }
+.detail-hero .logo-tile { border-radius: 16px; }
+.detail-hero .op-badge { width: 24px; height: 24px; font-size: 10px; }
+.hero-body { flex: 1; min-width: 0; position: relative; z-index: 1; }
+.hero-title { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: var(--foreground); }
+.hero-sub { margin-top: 5px; font-size: 13.5px; color: var(--muted-foreground); }
+.hero-stats { display: flex; align-items: center; gap: 8px; margin-top: 13px; flex-wrap: wrap; }
+.hero-stats .eng-status.live { color: var(--success); }
+
+/* ───────── Sections ───────── */
+.eng-sections { display: flex; flex-direction: column; gap: 18px; margin-top: 22px; }
+.eng-section { border: 1px solid var(--border); border-radius: var(--radius-lg); background: #fff; box-shadow: var(--shadow-1); padding: 22px; }
+.section-head { display: flex; align-items: flex-start; gap: 13px; margin-bottom: 16px; }
+.section-ic {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: var(--radius-md);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-subtle); border: 1px solid var(--border); color: var(--muted-foreground);
+}
+.eng-section.danger .section-ic { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 22%, white); color: var(--danger); }
+.section-titles { flex: 1; min-width: 0; }
+.section-title { font-size: 14.5px; font-weight: 600; color: var(--foreground); }
+.section-hint { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; line-height: 1.45; }

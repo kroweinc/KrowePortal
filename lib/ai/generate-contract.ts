@@ -13,11 +13,17 @@ export type ContractDraftInput = {
    * deliverables so the contract reflects what was agreed in the PRD.
    */
   prdContent?: PrdContent;
+  /**
+   * Discovery-call transcript(s) for the project, pre-composed via
+   * composeSopBlock. BACKGROUND ONLY — when a PRD/quote is present the contract
+   * takes scope/fees from them; the transcript only fills gaps (e.g. a contract
+   * drafted before any PRD/quote exists).
+   */
+  sopContext?: string;
 };
 
 type AIResponse = {
   parties?: { provider?: string; client?: string };
-  effectiveDate?: string | null;
   scopeOfServices?: string;
   deliverables?: string[];
   fees?: string;
@@ -41,7 +47,6 @@ Output ONLY valid JSON in this exact shape (omit fields the notes don't support)
 
 {
   "parties": { "provider": "the builder/agency name", "client": "the client business name" },
-  "effectiveDate": "ISO date or null if unknown",
   "scopeOfServices": "What the provider will do, in 2–6 sentences.",
   "deliverables": [ "A concrete deliverable." ],
   "fees": "The pricing model and amounts (fixed fee, hourly rate, retainer).",
@@ -69,6 +74,7 @@ Rules:
 - Use the provided provider/client names in "parties" when given.
 - If a quote is provided, make "fees", "paymentTerms", and "deliverables" CONSISTENT with it — do not contradict the quoted amounts or scope. The contract attaches the quote's full Payment Schedule and Scope of Work as exhibits, so "fees" should state the total and reference the payment schedule rather than re-listing every milestone, and "paymentTerms" should describe deposit / invoicing / late terms (not restate each milestone amount).
 - If a PRD is provided, base "scopeOfServices" and "deliverables" on its features and requirements; keep them consistent with both the PRD and the quote.
+- If a "Discovery context" transcript is provided, treat it as BACKGROUND ONLY. When a PRD or quote is present, take scope, deliverables, fees, and payment terms from THEM — never from the raw transcript. Use the transcript only to fill gaps the PRD/quote leave open (e.g. governing jurisdiction, special arrangements the parties discussed). Never quote transcript text verbatim.
 - Do NOT invent jurisdiction, dates, or amounts not present in the notes, quote, or PRD. Leave them out / null.`;
 
 function buildUserPrompt(input: ContractDraftInput): string {
@@ -105,6 +111,14 @@ function buildUserPrompt(input: ContractDraftInput): string {
     const features = (prd.features ?? []).map((f) => f.title).filter(Boolean);
     if (features.length) lines.push(`- Features: ${features.join("; ")}`);
     if (prd.requirements?.length) lines.push(`- Requirements: ${prd.requirements.join("; ")}`);
+  }
+
+  if (input.sopContext?.trim()) {
+    lines.push("");
+    lines.push(
+      "Discovery context (BACKGROUND ONLY — when a PRD or quote is present above, take scope/fees/deliverables from them; use this only to fill gaps they leave open):"
+    );
+    lines.push(input.sopContext.trim());
   }
   return lines.join("\n");
 }
@@ -150,7 +164,8 @@ export async function generateContractDraft(
 
   return {
     parties: provider || client ? { provider, client } : undefined,
-    effectiveDate: str(ai.effectiveDate) ?? null,
+    // Effective date is system-managed (floats to today, freezes on send) — never
+    // drafted by the AI, so it isn't set here.
     scopeOfServices: str(ai.scopeOfServices),
     deliverables: strList(ai.deliverables),
     fees: str(ai.fees),

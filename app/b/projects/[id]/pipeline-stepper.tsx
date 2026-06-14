@@ -8,47 +8,34 @@ const STATUS_CAPTION: Record<StageStatus, string> = {
   done: "Live",
 };
 
-function dotClass(stage: PipelineStage, isCurrent: boolean): string {
-  if (stage.status === "signed" || stage.status === "done") return "bg-emerald-500";
-  if (stage.status === "sent") return "bg-sky-500";
-  if (stage.status === "draft") return "bg-neutral-400";
-  return isCurrent ? "bg-neutral-300 ring-2 ring-neutral-400" : "bg-neutral-200";
+// Maps a stage's lifecycle status to the colored dot / status-caption class.
+function toneClass(status: StageStatus): "draft" | "sent" | "signed" | "idle" {
+  if (status === "signed" || status === "done") return "signed";
+  if (status === "sent") return "sent";
+  if (status === "draft") return "draft";
+  return "idle";
 }
 
-// Guided, not enforced: the stepper only visualizes where the deal is —
-// every stage stays clickable/creatable regardless of order.
+// Guided, not enforced: the grid only visualizes where the deal is —
+// every stage stays clickable/creatable regardless of order. Each cell
+// anchor-scrolls to its section below.
 export function PipelineStepper({ pipeline }: { pipeline: ProjectPipeline }) {
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white px-4 py-3">
-      <ol className="flex items-center">
-        {pipeline.stages.map((stage, i) => {
-          const isCurrent = stage.key === pipeline.current;
-          return (
-            <li key={stage.key} className="flex items-center flex-1 last:flex-none">
-              <a href={`#${stage.key}`} className="group flex items-center gap-2">
-                <span
-                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${dotClass(stage, isCurrent)}`}
-                />
-                <span className="flex flex-col leading-tight">
-                  <span
-                    className={`text-xs font-medium group-hover:underline ${
-                      isCurrent ? "text-neutral-900" : "text-neutral-600"
-                    }`}
-                  >
-                    {stage.label}
-                  </span>
-                  <span className="text-[10px] text-neutral-400">
-                    {STATUS_CAPTION[stage.status]}
-                  </span>
-                </span>
-              </a>
-              {i < pipeline.stages.length - 1 && (
-                <span className="mx-3 h-px flex-1 bg-neutral-200" aria-hidden />
-              )}
-            </li>
-          );
-        })}
-      </ol>
+    <div className="pipeline">
+      {pipeline.stages.map((stage: PipelineStage) => {
+        const tone = toneClass(stage.status);
+        const lit = stage.status !== "not_started";
+        const statusTone = tone === "sent" || tone === "signed" ? tone : "";
+        return (
+          <a key={stage.key} href={`#${stage.key}`} className={`pstep ${lit ? "lit" : "dim"}`}>
+            <div className="pstep-top">
+              <span className={`pdot ${tone}`} />
+              <span className="pname">{stage.label}</span>
+            </div>
+            <span className={`pstatus ${statusTone}`}>{STATUS_CAPTION[stage.status]}</span>
+          </a>
+        );
+      })}
     </div>
   );
 }

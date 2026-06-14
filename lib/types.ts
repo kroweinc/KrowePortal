@@ -24,6 +24,8 @@ export type TaskSource = "operator_request" | "builder_added";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
 export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
+// First-time product-tour lifecycle (separate from the onboarding form wizard).
+export type TourStatus = "pending" | "completed" | "dismissed";
 export type OnboardingPath = "no_clients" | "has_clients";
 export type OnboardingStep = "path" | "prospect" | "handoff" | "client" | "repo" | "tasks" | "docs";
 
@@ -43,6 +45,7 @@ export interface Profile {
   created_at: string;
   onboarding_status: OnboardingStatus;
   onboarding: OnboardingState;
+  tour_status: TourStatus;
 }
 
 export interface Engagement {
@@ -51,6 +54,10 @@ export interface Engagement {
   builder_id: string;
   title: string;
   created_at: string;
+  // Set when the build actually begins — the builder explicitly begins the
+  // engagement, or a contract is signed. Null while it's only a shell created
+  // so an operator who accepted a doc gets portal access (see migration 0057).
+  started_at?: string | null;
   project_id?: string | null;
   github_repo_full_name?: string | null;
   github_repo_owner?: string | null;
@@ -367,6 +374,39 @@ export interface ProjectMaterial {
   created_at: string;
 }
 
+// A discovery-call transcript (SOP) on a project. Unlike a material, the
+// transcript TEXT is extracted on upload and stored in `content` — it's the
+// canonical discovery source the PRD/quote/contract generators read.
+export type SopSourceType = "file" | "paste";
+
+export interface ProjectSopTranscript {
+  id: string;
+  project_id: string;
+  uploaded_by: string;
+  label: string | null; // builder name, derived filename, or "Pasted transcript"
+  source_type: SopSourceType;
+  file_name: string | null; // original file name (file source only)
+  storage_path: string | null; // original file in project-materials bucket (file source only)
+  mime_type: string | null;
+  content: string; // extracted/pasted transcript text — what the AI reads
+  char_count: number | null;
+  created_at: string;
+}
+
+// ── Product Feedback ───────────────────────────────────────────────────
+export type FeedbackCategory = "bug" | "idea" | "other";
+
+export interface ProductFeedback {
+  id: string;
+  user_id: string;
+  user_role: Role; // snapshot of the submitter's role at submission time
+  category: FeedbackCategory;
+  rating: number | null; // 1–5; nullable in DB, required by the form
+  message: string;
+  page_path: string | null; // route the user was on when submitting
+  created_at: string;
+}
+
 // ── PRD ────────────────────────────────────────────────────────────────
 export type PrdPriority = "must" | "should" | "could";
 
@@ -376,12 +416,6 @@ export interface PrdFeature {
   priority?: PrdPriority | null;
   details?: string[]; // enumerated specifics: fields, columns, statuses, actions
   examples?: string[]; // illustrative sample values (e.g. "REF-1024")
-}
-
-export interface PrdUserStory {
-  asA: string;
-  iWant: string;
-  soThat: string;
 }
 
 // §3 — who's it for: one entry per user type, with their authorization level.
@@ -488,7 +522,6 @@ export interface PrdContent {
   coreUserFlow?: string[]; //    numbered end-to-end walkthrough
   features?: PrdFeature[]; // §4
   requirements?: string[]; // §4
-  userStories?: PrdUserStory[]; //    supporting
   pagesScreens?: PrdPage[]; //    every screen + what it displays
   successCriteria?: string[]; //    testable acceptance checklist
   nonFunctionalRequirements?: string[]; // §5 — load time, setup, security
@@ -737,9 +770,22 @@ export interface BuilderProfile {
   token: string;
   github_synced_at: string | null;
   tags: string[]; // achievement/identity badges, e.g. "Hackathon Winner"
+  // Quote defaults — the base pricing every new quote starts from (0058).
+  default_hourly_rate: number; // blended rate line items price at (hours × rate)
+  payment_terms_preset: PaymentTermsPreset; // seeds paymentMilestones on new quotes
+  design_system_mode: DesignSystemMode; // how the design system is handled
+  design_fixed_cost: number; // the charge when design_system_mode === "fixed"
   created_at: string;
   updated_at: string;
 }
+
+// Builder quote-default option sets. The DB check constraints in
+// 0058_quote_pricing_defaults.sql mirror these — keep them in sync.
+export const PAYMENT_TERMS_PRESETS = ["50_25_25", "50_50", "100_upfront", "34_33_33"] as const;
+export type PaymentTermsPreset = (typeof PAYMENT_TERMS_PRESETS)[number];
+
+export const DESIGN_SYSTEM_MODES = ["included", "fixed", "none"] as const;
+export type DesignSystemMode = (typeof DESIGN_SYSTEM_MODES)[number];
 
 export interface BuilderProfileProject {
   id: string;

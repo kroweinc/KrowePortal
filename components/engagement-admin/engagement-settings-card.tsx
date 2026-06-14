@@ -43,14 +43,14 @@ export function EngagementSettingsCard({
         toast.error(result.error);
         return;
       }
-      toast.success("Engagement renamed");
+      toast.success("Client renamed");
       router.refresh();
     });
   }
 
   function handleRemoveOperator() {
     const confirmed = window.confirm(
-      `Remove ${operatorName ?? "the operator"} from this engagement? They'll lose access to its dashboard, but their tasks and materials are kept. You can invite someone new afterward.`
+      `Remove ${operatorName ?? "the operator"} from this client? They'll lose access to its dashboard, but their tasks and materials are kept. You can invite someone new afterward.`
     );
     if (!confirmed) return;
     startTransition(async () => {
@@ -106,7 +106,7 @@ export function EngagementSettingsCard({
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Engagement name"
+            placeholder="Client name"
             maxLength={120}
           />
           <Button

@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { getProjects } from "@/lib/actions/projects";
 import { getProjectStages } from "@/lib/actions/begin-engagement";
-import { safeExternalHref } from "@/lib/project/business-context";
 import { Ember } from "@/components/design-atoms";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +27,8 @@ const STATUS_VARIANT: Record<ProjectStatus, "secondary" | "sent" | "approved" | 
   archived: "secondary",
 };
 
+export const metadata = { title: "Project Documents" };
+
 export default async function ProjectsListPage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -42,7 +43,7 @@ export default async function ProjectsListPage() {
         <div className="krowe-page-head">
           <div>
             <h1 className="krowe-page-title">
-              <Ember size={22} /> Documents
+              <Ember size={22} /> Project Documents
             </h1>
             <div className="krowe-page-sub">
               <span>{projects.length} document{projects.length !== 1 ? "s" : ""}</span>
@@ -52,7 +53,7 @@ export default async function ProjectsListPage() {
               </span>
             </div>
           </div>
-          <Link href="/b/projects/new">
+          <Link href="/b/projects/new" data-tour="new-document">
             <Button>+ New document</Button>
           </Link>
         </div>
@@ -95,7 +96,7 @@ function ProjectRow({ project, pipeline }: { project: Project; pipeline?: Projec
           <Badge variant={STATUS_VARIANT[project.status]}>{STATUS_LABEL[project.status]}</Badge>
           {currentStage && (
             <Badge variant="secondary">
-              {pipeline?.engagementStarted ? "Engagement live" : `Stage: ${currentStage.label}`}
+              {pipeline?.engagementStarted ? "Client live" : `Stage: ${currentStage.label}`}
             </Badge>
           )}
         </div>
@@ -104,16 +105,6 @@ function ProjectRow({ project, pipeline }: { project: Project; pipeline?: Projec
           Created {formatDate(project.created_at)}
         </div>
       </Link>
-      {project.live_url && (
-        <a
-          href={safeExternalHref(project.live_url)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="shrink-0 text-sm font-medium text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
-        >
-          View live ↗
-        </a>
-      )}
     </div>
   );
 }

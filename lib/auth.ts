@@ -19,6 +19,7 @@ const DEV_PROFILES: Record<string, Profile> = {
     created_at: new Date().toISOString(),
     onboarding_status: "completed",
     onboarding: {},
+    tour_status: "completed",
   },
   builder: {
     id: "00000000-0000-0000-0000-000000000002",
@@ -27,6 +28,8 @@ const DEV_PROFILES: Record<string, Profile> = {
     created_at: new Date().toISOString(),
     onboarding_status: "completed",
     onboarding: {},
+    // Flip to "pending" locally to exercise the tour's auto-start.
+    tour_status: "completed",
   },
 };
 

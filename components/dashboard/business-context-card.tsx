@@ -10,19 +10,42 @@ import type { BusinessContextCard as BCC, BusinessContextKind } from "@/lib/type
 
 const CARDS: { kind: BusinessContextKind; title: string; hint: string }[] = [
   { kind: "old_workflow", title: "The old workflow", hint: "How things work today, end to end, in your words." },
-  { kind: "problem", title: "The problem", hint: "What hurts about it — why this engagement exists." },
+  { kind: "problem", title: "The problem", hint: "What hurts about it — why this client exists." },
 ];
 
 export function BusinessContextCard({
   engagementId,
   cards,
   canEdit,
+  variant = "card",
 }: {
   engagementId: string;
   cards: BCC[];
   canEdit: boolean;
+  variant?: "card" | "bare";
 }) {
   const byKind = new Map(cards.map((c) => [c.kind, c.body]));
+
+  const fields = (
+    <div className="space-y-4">
+      {CARDS.map((c) => (
+        <ContextField
+          key={c.kind}
+          engagementId={engagementId}
+          kind={c.kind}
+          title={c.title}
+          hint={c.hint}
+          initial={byKind.get(c.kind) ?? ""}
+          canEdit={canEdit}
+        />
+      ))}
+    </div>
+  );
+
+  // Bare: just the fields, for callers that supply their own section chrome
+  // (e.g. the builder engagement view's EngagementSection). Card: self-contained
+  // bordered panel with its own heading.
+  if (variant === "bare") return fields;
 
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
@@ -30,19 +53,7 @@ export function BusinessContextCard({
         <BookOpen className="h-4 w-4 text-neutral-500" />
         <h2 className="text-sm font-semibold text-neutral-900">Business context</h2>
       </div>
-      <div className="space-y-4">
-        {CARDS.map((c) => (
-          <ContextField
-            key={c.kind}
-            engagementId={engagementId}
-            kind={c.kind}
-            title={c.title}
-            hint={c.hint}
-            initial={byKind.get(c.kind) ?? ""}
-            canEdit={canEdit}
-          />
-        ))}
-      </div>
+      {fields}
     </div>
   );
 }

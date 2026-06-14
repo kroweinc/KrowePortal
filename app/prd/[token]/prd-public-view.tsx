@@ -37,15 +37,13 @@ export function PrdPublicView({
       <div className="prd-dashboard">
         <div className="dash">
           <header className="dash-header">
-            <div className="dash-header__row">
-              <div className="dash-header__lead">
-                <h1 className="dash-title dash-title--serif">{prd.title}</h1>
-                <div className="dash-meta">
-                  <PreparedBy builder={data.builder} className="dash-updated" />
-                </div>
-              </div>
-              <div className="dash-header__actions">
-                <PrdDownloadButton title={prd.title} className="prd-btn prd-btn--outline" />
+            <div className="dash-header__actions">
+              <PrdDownloadButton title={prd.title} className="prd-btn prd-btn--outline" />
+            </div>
+            <div className="dash-header__lead">
+              <h1 className="dash-title dash-title--serif">{prd.title}</h1>
+              <div className="dash-meta">
+                <PreparedBy builder={data.builder} className="dash-updated" />
               </div>
             </div>
           </header>

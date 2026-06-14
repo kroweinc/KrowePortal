@@ -5,6 +5,8 @@ import { getContractById } from "@/lib/actions/contracts";
 import { ContractDashboard } from "@/components/contract/contract-dashboard";
 import { BusinessContactCard } from "@/components/doc/business-contact-card";
 
+export const metadata = { title: "Contract" };
+
 export default async function ProjectContractPage({
   params,
 }: {

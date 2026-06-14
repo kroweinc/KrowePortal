@@ -6,6 +6,7 @@ import { ConnectGitHubButton } from "@/components/github/connect-github-button"
 import { RepoSelector } from "@/components/github/repo-selector"
 import { decryptSecret } from "@/lib/crypto"
 import { fetchGithubRepos } from "@/lib/github/list-repos"
+import { fetchGithubProfile } from "@/lib/github/profile"
 import type { Engagement } from "@/lib/types"
 
 interface EngagementWithRepo extends Engagement {
@@ -17,6 +18,8 @@ const GH_ERROR_MESSAGES: Record<string, string> = {
   github_token_failed: "Couldn't complete the GitHub handshake. Please try connecting again.",
   github_save_failed: "We couldn't save your GitHub connection. Please try again.",
 }
+
+export const metadata = { title: "Repo Settings" };
 
 export default async function GitHubSettingsPage({
   searchParams,
@@ -46,9 +49,12 @@ export default async function GitHubSettingsPage({
 
   const engagementList = (engagements ?? []) as EngagementWithRepo[]
   const connected = !!connection
-  const repos = connected && connection?.access_token
-    ? await fetchGithubRepos(decryptSecret(connection.access_token))
-    : []
+  const token = connected && connection?.access_token
+    ? decryptSecret(connection.access_token)
+    : null
+  const [repos, githubProfile] = token
+    ? await Promise.all([fetchGithubRepos(token), fetchGithubProfile(token)])
+    : [[], null]
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10 space-y-8">
@@ -56,7 +62,7 @@ export default async function GitHubSettingsPage({
         <div>
           <h2 className="text-xl font-semibold text-neutral-900">GitHub settings</h2>
           <p className="mt-0.5 text-sm text-neutral-400">
-            Connect your GitHub account and link repos to your engagements.{" "}
+            Connect your GitHub account and link repos to your clients.{" "}
             <Link href="/b/github" className="text-neutral-600 underline underline-offset-2 hover:text-neutral-900">
               Back to project
             </Link>
@@ -77,22 +83,51 @@ export default async function GitHubSettingsPage({
         </div>
       )}
 
+      {connected && githubProfile && (
+        <div className="flex items-center gap-4 rounded-lg border border-neutral-200 bg-white p-5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={githubProfile.avatarUrl}
+            alt={`${githubProfile.login} avatar`}
+            width={56}
+            height={56}
+            className="h-14 w-14 shrink-0 rounded-xl border border-neutral-200 bg-neutral-50 object-contain p-2"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-neutral-900">
+              {githubProfile.name ?? githubProfile.login}
+            </p>
+            <a
+              href={githubProfile.htmlUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-neutral-500 underline-offset-2 hover:text-neutral-900 hover:underline"
+            >
+              @{githubProfile.login}
+            </a>
+            {githubProfile.bio && (
+              <p className="mt-1 truncate text-sm text-neutral-400">{githubProfile.bio}</p>
+            )}
+            <div className="mt-2 flex gap-4 text-xs text-neutral-400">
+              <span>
+                <span className="font-medium text-neutral-600">{githubProfile.publicRepos}</span> repos
+              </span>
+              <span>
+                <span className="font-medium text-neutral-600">{githubProfile.followers}</span> followers
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!connected && (
         <p className="text-sm text-neutral-400">
-          Connect GitHub above to link repos to your engagements.
+          Connect GitHub above to link repos to your clients.
         </p>
       )}
 
       {connected && (
         <div className="space-y-4">
-          <div className="rounded-lg border border-neutral-200 bg-white p-5 space-y-3">
-            <p className="text-sm font-medium text-neutral-900">Default Repository</p>
-            <RepoSelector
-              currentRepo={connection?.selected_repo_full_name ?? null}
-              initialRepos={repos}
-            />
-          </div>
-
           {engagementList.map((engagement) => (
             <div
               key={engagement.id}

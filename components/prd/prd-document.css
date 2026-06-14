@@ -15,7 +15,9 @@
   padding: 40px 16px 64px;
 }
 .prd-doc-stage .preview-doc {
-  max-width: 760px;
+  /* Fill the document frame rather than sitting in a narrow 760px column —
+     keeps the preview/client document as wide as the edit-mode content. */
+  max-width: 1240px;
   margin: 0 auto;
 }
 .prd-doc-stage .preview-head {
@@ -116,8 +118,7 @@
 .prd-doc-stage .doc-ordered,
 .prd-doc-stage .doc-checks,
 .prd-doc-stage .doc-flat,
-.prd-doc-stage .doc-objlist,
-.prd-doc-stage .doc-stories {
+.prd-doc-stage .doc-objlist {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -229,17 +230,6 @@
 .prd-doc-stage .doc-check__mark {
   color: var(--success);
   flex-shrink: 0;
-}
-.prd-doc-stage .doc-stories li {
-  font-size: 14.5px;
-  color: var(--foreground);
-  line-height: 1.6;
-}
-.prd-doc-stage .doc-stories li + li {
-  margin-top: 8px;
-}
-.prd-doc-stage .doc-story__lead {
-  color: var(--muted-foreground);
 }
 .prd-doc-stage .doc-flat li {
   font-size: 14.5px;

@@ -24,17 +24,26 @@ export function BuilderProfileDrawer({
   token,
   name,
   children,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: {
   token: string;
   name: string;
-  children: ReactNode;
+  children?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+
   const [profile, setProfile] = useState<PublicBuilderProfile | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
 
   function handleOpenChange(next: boolean) {
-    setOpen(next);
+    if (isControlled) controlledOnOpenChange?.(next);
+    else setInternalOpen(next);
+
     if (next && !profile && status !== "loading") {
       setStatus("loading");
       getBuilderProfileByToken(token)
@@ -52,7 +61,7 @@ export function BuilderProfileDrawer({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <SheetTrigger asChild>{children}</SheetTrigger>
+      {children ? <SheetTrigger asChild>{children}</SheetTrigger> : null}
       <SheetContent side="left" className="flex flex-col gap-0 p-0 sm:max-w-[560px]">
         <SheetHeader className="bg-white">
           <SheetTitle>{name}</SheetTitle>

@@ -2,6 +2,8 @@ import { Suspense } from "react";
 import { LoginForm } from "./login-form";
 import { PortalPreview, TrustLine, Wordmark } from "./portal-preview";
 
+export const metadata = { title: "Sign In" };
+
 export default function LoginPage() {
   return (
     <main className="flex min-h-screen flex-col-reverse md:flex-row-reverse">

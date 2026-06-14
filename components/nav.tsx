@@ -1,5 +1,7 @@
-import { Search, CircleHelp, Bell } from "lucide-react";
+import { Bell } from "lucide-react";
 import { DEV_TOGGLE_ENABLED } from "@/lib/auth";
+import { GlobalSearch } from "@/components/global-search";
+import { TourHelpButton } from "@/components/tour/tour-help-button";
 import type { Profile } from "@/lib/types";
 
 interface NavProps {
@@ -20,14 +22,7 @@ export function Nav({ profile }: NavProps) {
 
   return (
     <header className="krowe-topbar">
-      <label className="krowe-tb-search">
-        <Search
-          size={15}
-          strokeWidth={2}
-          style={{ color: "var(--faint-foreground)" }}
-        />
-        <input placeholder="Search tasks" />
-      </label>
+      <GlobalSearch role={role} />
 
       <div className="krowe-topbar-right">
         {/* Dev role switcher — sits immediately left of the help (?) icon. */}
@@ -44,9 +39,7 @@ export function Nav({ profile }: NavProps) {
           </form>
         )}
 
-        <button type="button" className="krowe-tb-icon" title="Help">
-          <CircleHelp size={18} />
-        </button>
+        <TourHelpButton />
         <button type="button" className="krowe-tb-icon" title="Notifications">
           <Bell size={18} />
         </button>

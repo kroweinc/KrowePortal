@@ -23,6 +23,8 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
   high: "High",
 };
 
+export const metadata = { title: "Task" };
+
 export default async function OperatorTaskDetail({
   params,
 }: {

@@ -4,6 +4,8 @@ import { getProjectById } from "@/lib/actions/projects";
 import { getPrdsByProject } from "@/lib/actions/prds";
 import { QuoteWizard } from "@/components/quote/quote-wizard";
 
+export const metadata = { title: "New Quote" };
+
 export default async function NewProjectQuotePage({
   params,
   searchParams,

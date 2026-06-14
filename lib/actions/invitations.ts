@@ -30,11 +30,12 @@ export async function getOrCreateEngagement(profileId: string): Promise<Engageme
 
   const { data: engagement, error } = await admin
     .from("engagements")
-    .insert({ builder_id: profileId, title: "Shared space" })
+    // Standalone personal workspace — live from creation, no project pipeline.
+    .insert({ builder_id: profileId, title: "Shared space", started_at: new Date().toISOString() })
     .select()
     .single();
 
-  if (error || !engagement) throw new Error(error?.message ?? "Failed to create engagement");
+  if (error || !engagement) throw new Error(error?.message ?? "Failed to create client");
 
   // Backfill existing personal tasks into the new engagement
   await admin
@@ -55,19 +56,20 @@ export async function createEngagement(
 ): Promise<{ engagement: Engagement } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can create engagements." };
+  if (profile.role !== "builder") return { error: "Only builders can create clients." };
 
   const parsed = createEngagementSchema.safeParse({ title });
-  if (!parsed.success) return { error: "Engagement name must be 1–120 characters." };
+  if (!parsed.success) return { error: "Client name must be 1–120 characters." };
 
   const admin = createAdminClient();
   const { data: engagement, error } = await admin
     .from("engagements")
-    .insert({ builder_id: profile.id, title: parsed.data.title.trim() })
+    // Builder explicitly created this engagement — live from creation.
+    .insert({ builder_id: profile.id, title: parsed.data.title.trim(), started_at: new Date().toISOString() })
     .select()
     .single();
 
-  if (error || !engagement) return { error: error?.message ?? "Failed to create engagement" };
+  if (error || !engagement) return { error: error?.message ?? "Failed to create client" };
 
   revalidatePath("/b/engagements");
   revalidatePath("/b");
@@ -90,7 +92,7 @@ export async function createInvitation(
       .eq("id", engagementId)
       .eq("builder_id", profile.id)
       .maybeSingle();
-    if (!data) return { error: "Engagement not found." };
+    if (!data) return { error: "Client not found." };
     engagement = data as Engagement;
   } else {
     try {
@@ -101,7 +103,7 @@ export async function createInvitation(
   }
 
   if (engagement.operator_id) {
-    return { error: "This engagement already has an operator." };
+    return { error: "This client already has an operator." };
   }
 
   const supabase = await getClient(profile.id);
@@ -154,10 +156,10 @@ export async function renameEngagement(
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can rename engagements." };
+  if (profile.role !== "builder") return { error: "Only builders can rename clients." };
 
   const parsed = createEngagementSchema.safeParse({ title });
-  if (!parsed.success) return { error: "Engagement name must be 1–120 characters." };
+  if (!parsed.success) return { error: "Client name must be 1–120 characters." };
 
   const admin = createAdminClient();
   const { data, error } = await admin
@@ -169,7 +171,7 @@ export async function renameEngagement(
     .maybeSingle();
 
   if (error) return { error: error.message };
-  if (!data) return { error: "Engagement not found." };
+  if (!data) return { error: "Client not found." };
 
   revalidatePath("/b");
   revalidatePath("/b/engagements");
@@ -188,8 +190,8 @@ export async function removeOperator(
   if (profile.role !== "builder") return { error: "Only builders can remove operators." };
 
   const engagement = await getOwnedEngagement(engagementId, profile.id);
-  if (!engagement) return { error: "Engagement not found." };
-  if (!engagement.operator_id) return { error: "This engagement has no operator." };
+  if (!engagement) return { error: "Client not found." };
+  if (!engagement.operator_id) return { error: "This client has no operator." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -218,7 +220,7 @@ export async function revokeInvitation(
   if (profile.role !== "builder") return { error: "Only builders can revoke invitations." };
 
   const engagement = await getOwnedEngagement(engagementId, profile.id);
-  if (!engagement) return { error: "Engagement not found." };
+  if (!engagement) return { error: "Client not found." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -240,10 +242,10 @@ export async function deleteEngagement(
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can delete engagements." };
+  if (profile.role !== "builder") return { error: "Only builders can delete clients." };
 
   const engagement = await getOwnedEngagement(engagementId, profile.id);
-  if (!engagement) return { error: "Engagement not found." };
+  if (!engagement) return { error: "Client not found." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -263,13 +265,21 @@ export async function getMyEngagements(): Promise<Engagement[]> {
   const profile = await getCurrentProfile();
   if (!profile || profile.role !== "builder") return [];
 
-  const supabase = await getClient(profile.id);
+  // Admin client: the operator embed reads the operator's profile row, which
+  // profiles_select RLS ("auth.uid() = id") forbids the builder from seeing —
+  // under the RLS client that embed silently returns null and the UI shows
+  // "No operator yet" even after the operator joins. Ownership is enforced by
+  // the explicit builder_id filter below (same pattern as getOwnedEngagement).
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("engagements")
     .select(
       "*, operator:profiles!operator_id(display_name), project:projects(id, name, prospect_name, prospect_email, website_url, linkedin_url, live_url, context)"
     )
     .eq("builder_id", profile.id)
+    // Only live engagements — exclude shells created when an operator accepted
+    // a doc but the build hasn't begun (see migration 0057).
+    .not("started_at", "is", null)
     .order("created_at", { ascending: true });
 
   return (data ?? []) as Engagement[];

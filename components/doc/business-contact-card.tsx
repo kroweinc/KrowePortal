@@ -1,3 +1,4 @@
+import { ExternalLink } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { safeExternalHref } from "@/lib/project/business-context";
 
@@ -29,6 +30,13 @@ interface BusinessContactCardProps {
   contact: BusinessContact | null | undefined;
   label?: string;
   variant?: "inline" | "card";
+  // The deployed deliverable (live_url) is internal build context, not something
+  // a client-facing doc "Prepared for" block should expose — so the Live site
+  // link is opt-in. Only the builder's engagement view turns it on.
+  showLiveUrl?: boolean;
+  // Compact client-manage layout: name/email plus a small landing-page button
+  // (no logo). Opt-in so doc "Prepared for" blocks keep their plain heading.
+  showBrand?: boolean;
   className?: string;
 }
 
@@ -36,37 +44,53 @@ export function BusinessContactCard({
   contact,
   label = "Business contact",
   variant = "inline",
+  showLiveUrl = false,
+  showBrand = false,
   className,
 }: BusinessContactCardProps) {
   if (!contact) return null;
 
-  const { prospect_name, prospect_email, website_url, linkedin_url, live_url, context } = contact;
+  const { prospect_name, prospect_email, website_url, linkedin_url, context } = contact;
+  const live_url = showLiveUrl ? contact.live_url : null;
   const hasAny =
     prospect_name || prospect_email || website_url || linkedin_url || live_url || context;
   if (!hasAny) return null;
 
+  const nameEmail = (prospect_name || prospect_email) && (
+    <p className="text-sm text-neutral-500">
+      {prospect_name}
+      {prospect_name && prospect_email ? " · " : ""}
+      {prospect_email}
+    </p>
+  );
+
   const body = (
     <>
-      {(prospect_name || prospect_email) && (
-        <p className="text-sm text-neutral-500">
-          {prospect_name}
-          {prospect_name && prospect_email ? " · " : ""}
-          {prospect_email}
-        </p>
-      )}
-      {(linkedin_url || website_url || live_url) && (
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          {live_url && (
+      {showBrand ? (
+        <>
+          {nameEmail}
+          {website_url && (
             <a
-              href={safeExternalHref(live_url)}
+              href={safeExternalHref(website_url)}
               target="_blank"
               rel="noopener noreferrer"
-              className="font-medium text-neutral-900 underline underline-offset-2 hover:text-neutral-600"
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md border border-neutral-300 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50 hover:text-neutral-900",
+                (prospect_name || prospect_email) && "mt-2",
+              )}
             >
-              View live work ↗
+              Visit landing page
+              <ExternalLink className="h-3 w-3" aria-hidden />
             </a>
           )}
-          {website_url && (
+        </>
+      ) : (
+        nameEmail
+      )}
+      {(linkedin_url || live_url || (website_url && !showBrand)) && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          {/* Client-manage view uses the compact landing-page button above. */}
+          {website_url && !showBrand && (
             <a
               href={safeExternalHref(website_url)}
               target="_blank"
@@ -84,6 +108,16 @@ export function BusinessContactCard({
               className="text-neutral-600 hover:text-neutral-900 hover:underline"
             >
               LinkedIn ↗
+            </a>
+          )}
+          {live_url && (
+            <a
+              href={safeExternalHref(live_url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-neutral-600 hover:text-neutral-900 hover:underline"
+            >
+              Live site ↗
             </a>
           )}
         </div>

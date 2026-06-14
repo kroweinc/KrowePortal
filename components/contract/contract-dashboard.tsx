@@ -6,18 +6,17 @@
                quote breakdown).
    • Preview — the canonical ContractDocument the client e-signs.
    Edits persist automatically (debounced). Carries Send / Delete / Copy-link /
-   Download PDF and the AI "Re-draft from notes". Mirrors quote-dashboard.tsx. */
+   Download PDF. Mirrors quote-dashboard.tsx. */
 
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Sparkles, Check, Link2, Plus, X } from "lucide-react";
+import { Send, Check, Link2, Plus, X } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import {
   updateContractContent,
   sendContract,
   deleteContract,
-  regenerateContract,
 } from "@/lib/actions/contracts";
 import type {
   Contract,
@@ -26,6 +25,7 @@ import type {
   ContractPaymentMilestone,
 } from "@/lib/types";
 import { ContractDocument } from "@/components/contract/contract-document";
+import { useTodayISODate } from "@/lib/contract/use-today";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
 import { EditContext, InlineText } from "@/components/prd/dashboard/inline-edit";
 import { EditorSection, TextField, StringListEditor } from "@/components/doc/editor-primitives";
@@ -78,8 +78,6 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
   const [mode, setMode] = useState<"edit" | "preview">(isDraft ? "edit" : "preview");
   const [title, setTitle] = useState(contract.title);
   const [content, setContent] = useState<ContractContent>(contract.content ?? {});
-  const [notes, setNotes] = useState(contract.source_notes ?? "");
-  const [showRegen, setShowRegen] = useState(false);
 
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const lastSavedRef = useRef(serializeContract(contract.title, contract.content ?? {}));
@@ -93,6 +91,12 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
   const snapshot = useMemo(() => serializeContract(title, content), [title, content]);
   const dirty = snapshot !== lastSavedRef.current;
   const editable = contract.status !== "signed";
+
+  // The effective date is system-managed: it floats to today while the contract
+  // is a draft, then freezes to the day it's sent. Once sent, use the frozen
+  // value from the server (the prop), not local edit state.
+  const today = useTodayISODate();
+  const effectiveDate = isDraft ? today : contract.content?.effectiveDate ?? null;
 
   function patch(p: Partial<ContractContent>) {
     setContent((prev) => ({ ...prev, ...p }));
@@ -157,11 +161,14 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
       return false;
     }
     if (!isDraft) return true;
-    const result = await sendContract(contract.id);
+    const result = await sendContract(contract.id, today);
     if ("error" in result) {
       toast.error(result.error);
       return false;
     }
+    // Mirror the frozen effective date into local state so later edits (a sent
+    // contract is still editable) don't autosave it back to empty.
+    setContent((prev) => ({ ...prev, effectiveDate: result.effectiveDate }));
     return true;
   }
 
@@ -199,21 +206,6 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
         return;
       }
       router.push(backHref);
-    });
-  }
-
-  function regenerate() {
-    if (!confirm("Re-draft this contract from the notes below? Your current edits will be replaced.")) return;
-    startTransition(async () => {
-      const result = await regenerateContract(contract.id, notes);
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
-      setContent(result.content);
-      setShowRegen(false);
-      toast.success("Re-drafted");
-      router.refresh();
     });
   }
 
@@ -259,20 +251,18 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
             </button>
             {editing && (
               <div className="dash-actions">
-                <SaveStatus state={saveState} onRetry={saveNow} />
                 {isDraft && (
                   <button type="button" className="prd-btn prd-btn--ghost" onClick={remove} disabled={isPending}>
                     Delete
                   </button>
                 )}
-                <button
-                  type="button"
-                  className="prd-btn prd-btn--outline"
-                  onClick={saveNow}
-                  disabled={isPending || saveState === "saving" || !dirty}
-                >
-                  {saveState === "saving" ? "Saving…" : isDraft ? "Save draft" : "Save changes"}
-                </button>
+                <SaveControl
+                  state={saveState}
+                  dirty={dirty}
+                  isDraft={isDraft}
+                  isPending={isPending}
+                  onSave={saveNow}
+                />
                 {isDraft && (
                   <button type="button" className="prd-btn prd-btn--primary" onClick={send} disabled={isPending}>
                     <Send className="h-3.5 w-3.5" /> Send to client
@@ -304,30 +294,6 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
             </div>
           </EditContext.Provider>
 
-          {editing && isDraft && (
-            <div className="regen-panel">
-              <button type="button" className="regen-toggle" onClick={() => setShowRegen((s) => !s)}>
-                <Sparkles className="h-4 w-4" /> Re-draft from notes
-              </button>
-              {showRegen && (
-                <div className="regen-body">
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={8}
-                    placeholder="Paste fresh notes to re-draft from…"
-                    className="regen-textarea"
-                  />
-                  <div className="regen-actions">
-                    <button type="button" className="prd-btn prd-btn--primary" onClick={regenerate} disabled={isPending}>
-                      {isPending ? "Drafting…" : "Re-draft contract"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
           {editing ? (
             <div className="dash-grid">
               <div className="space-y-6">
@@ -336,11 +302,10 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
                   <div className="grid grid-cols-3 gap-4">
                     <PartyField label="Provider" value={content.parties?.provider} onChange={(v) => patchParties({ provider: v })} />
                     <PartyField label="Client" value={content.parties?.client} onChange={(v) => patchParties({ client: v })} />
-                    <PartyField
+                    <ReadOnlyField
                       label="Effective date"
-                      value={content.effectiveDate ?? ""}
-                      onChange={(v) => patch({ effectiveDate: v })}
-                      placeholder="e.g. 2026-06-01"
+                      value={effectiveDate}
+                      hint={isDraft ? "Set to today — locks when sent." : "Locked on send."}
                     />
                   </div>
                 </div>
@@ -408,7 +373,7 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
                     </div>
                   </header>
                   <div className="preview-card">
-                    <ContractDocument content={content} />
+                    <ContractDocument content={content} effectiveDate={effectiveDate} />
                   </div>
                 </div>
               </div>
@@ -434,7 +399,7 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
               </div>
             </header>
             <div className="preview-card">
-              <ContractDocument content={content} />
+              <ContractDocument content={content} effectiveDate={effectiveDate} />
             </div>
             <p className="preview-footer">Powered by Krowe Portal</p>
           </div>
@@ -465,6 +430,28 @@ function PartyField({
         placeholder={placeholder}
         className="w-full rounded border border-neutral-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
       />
+    </label>
+  );
+}
+
+// System-managed field shown in the parties grid (e.g. the effective date,
+// which floats to today until the contract is sent, then locks).
+function ReadOnlyField({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value?: string | null;
+  hint?: string;
+}) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-1">{label}</span>
+      <div className="w-full rounded border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-sm text-neutral-700 tabular-nums">
+        {value || "—"}
+      </div>
+      {hint && <p className="mt-1 text-xs text-neutral-400">{hint}</p>}
     </label>
   );
 }
@@ -596,25 +583,52 @@ function PaymentScheduleEditor({
   );
 }
 
-function SaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
+/** Combined save pill: reflects the live auto-save state and, whenever there are
+    pending edits, doubles as the explicit "save now" button. At rest it reads
+    "Saved"; with unsaved edits it reads "Save draft" / "Save changes". */
+function SaveControl({
+  state,
+  dirty,
+  isDraft,
+  isPending,
+  onSave,
+}: {
+  state: SaveState;
+  dirty: boolean;
+  isDraft: boolean;
+  isPending: boolean;
+  onSave: () => void;
+}) {
+  if (state === "saving") {
+    return (
+      <span className="prd-btn prd-btn--outline is-saved" aria-live="polite">
+        <span className="save-spinner" aria-hidden="true" /> Saving…
+      </span>
+    );
+  }
+  if (state === "error") {
+    return (
+      <button
+        type="button"
+        className="prd-btn prd-btn--outline is-error"
+        onClick={onSave}
+        disabled={isPending}
+        aria-live="polite"
+      >
+        Save failed — retry
+      </button>
+    );
+  }
+  if (dirty) {
+    return (
+      <button type="button" className="prd-btn prd-btn--outline" onClick={onSave} disabled={isPending}>
+        {isDraft ? "Save draft" : "Save changes"}
+      </button>
+    );
+  }
   return (
-    <span className={"dash-save-status is-" + state} aria-live="polite">
-      {state === "saving" && (
-        <>
-          <span className="save-spinner" aria-hidden="true" /> Saving…
-        </>
-      )}
-      {state === "saved" && (
-        <>
-          <Check className="h-3 w-3" aria-hidden="true" /> Saved
-        </>
-      )}
-      {state === "unsaved" && <>Unsaved changes</>}
-      {state === "error" && (
-        <button type="button" className="dash-save-retry" onClick={onRetry}>
-          Save failed — retry
-        </button>
-      )}
+    <span className="prd-btn prd-btn--outline is-saved" aria-live="polite">
+      <Check className="h-3 w-3" aria-hidden="true" /> Saved
     </span>
   );
 }

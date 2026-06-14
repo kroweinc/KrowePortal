@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Pencil } from "lucide-react";
 import {
   Dialog,
   DialogTrigger,
@@ -38,7 +39,6 @@ export function EditProjectDialog({ project }: { project: Project }) {
   const [prospectEmail, setProspectEmail] = useState(project.prospect_email ?? "");
   const [linkedinUrl, setLinkedinUrl] = useState(project.linkedin_url ?? "");
   const [websiteUrl, setWebsiteUrl] = useState(project.website_url ?? "");
-  const [liveUrl, setLiveUrl] = useState(project.live_url ?? "");
   const [context, setContext] = useState(project.context ?? "");
 
   // Reset fields to the current project whenever the dialog (re)opens.
@@ -50,7 +50,6 @@ export function EditProjectDialog({ project }: { project: Project }) {
       setProspectEmail(project.prospect_email ?? "");
       setLinkedinUrl(project.linkedin_url ?? "");
       setWebsiteUrl(project.website_url ?? "");
-      setLiveUrl(project.live_url ?? "");
       setContext(project.context ?? "");
     }
     setOpen(next);
@@ -70,7 +69,6 @@ export function EditProjectDialog({ project }: { project: Project }) {
         prospectEmail: prospectEmail.trim() || null,
         linkedinUrl: linkedinUrl.trim() || null,
         websiteUrl: websiteUrl.trim() || null,
-        liveUrl: liveUrl.trim() || null,
         context: context.trim() || null,
       });
       if ("error" in result) {
@@ -106,9 +104,9 @@ export function EditProjectDialog({ project }: { project: Project }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
-          Edit
-        </Button>
+        <button type="button" className="edit-btn">
+          <Pencil size={14} strokeWidth={2} /> Edit
+        </button>
       </DialogTrigger>
       <DialogContent>
         <form onSubmit={onSubmit}>
@@ -124,7 +122,7 @@ export function EditProjectDialog({ project }: { project: Project }) {
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Nissan of McKinney"
+                placeholder="e.g. Krowe"
                 maxLength={200}
                 autoFocus
               />
@@ -166,7 +164,7 @@ export function EditProjectDialog({ project }: { project: Project }) {
               <Input
                 value={linkedinUrl}
                 onChange={(e) => setLinkedinUrl(e.target.value)}
-                placeholder="e.g. linkedin.com/company/nissan"
+                placeholder="e.g. linkedin.com/company/krowe"
                 maxLength={2000}
               />
             </Field>
@@ -175,16 +173,7 @@ export function EditProjectDialog({ project }: { project: Project }) {
               <Input
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
-                placeholder="e.g. nissanofmckinney.com"
-                maxLength={2000}
-              />
-            </Field>
-
-            <Field label="Live work URL" hint="Link to the deliverable — a deployed app or live demo people can interact with.">
-              <Input
-                value={liveUrl}
-                onChange={(e) => setLiveUrl(e.target.value)}
-                placeholder="e.g. app.nissanofmckinney.com"
+                placeholder="e.g. krowe.com"
                 maxLength={2000}
               />
             </Field>

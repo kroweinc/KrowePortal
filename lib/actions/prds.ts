@@ -7,6 +7,7 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { getProjectMaterials } from "@/lib/actions/project-materials";
+import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
 import { generatePrd } from "@/lib/ai/generate-prd";
 import { assertAiBudget } from "@/lib/ai/usage";
@@ -103,6 +104,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   if (project.owner_id !== profile.id) return { error: "Not your document." };
 
   const materials = await getProjectMaterials(projectId);
+  const sopTranscripts = await getProjectSopTranscripts(projectId);
 
   // No written notes ⇒ deep context-gathering mode: more rounds, broad→specific
   // questions, and a synthesized context summary saved back to the project.
@@ -118,7 +120,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
       {
         title,
         notes,
-        businessContext: composeBusinessContext(project, materials),
+        businessContext: composeBusinessContext(project, materials, sopTranscripts),
         answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
         forceFinal,
         deepContext,
@@ -203,10 +205,11 @@ export async function regeneratePrd(
 
   const project = await getProjectById(before.project_id as string);
   const materials = await getProjectMaterials(before.project_id as string);
+  const sopTranscripts = await getProjectSopTranscripts(before.project_id as string);
   const result = await generatePrd({
     title: before.title as string,
     notes: clean,
-    businessContext: project ? composeBusinessContext(project, materials) : undefined,
+    businessContext: project ? composeBusinessContext(project, materials, sopTranscripts) : undefined,
     forceFinal: true,
     currentDate: new Date().toISOString().slice(0, 10),
   });

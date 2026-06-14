@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, GitCommitHorizontal, Globe, Lock, Pencil, Star, Tra
 import { ManualProjectForm } from "./manual-project-form";
 import { VerifiedBadge } from "./verified-badge";
 import { LanguageBar } from "./language-bar";
+import { TechBadge } from "./tech-badge";
 import {
   deleteProfileProject,
   reorderProfileProjects,
@@ -137,9 +138,7 @@ export function ProjectList({ projects }: { projects: BuilderProfileProject[] })
                   </span>
                 )}
                 {project.tech.map((t) => (
-                  <span key={t} className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-600">
-                    {t}
-                  </span>
+                  <TechBadge key={t} tech={t} />
                 ))}
               </div>
               {project.languages && project.languages.length > 0 && (

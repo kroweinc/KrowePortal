@@ -109,7 +109,7 @@ export async function createClientEngagement(input: {
 }): Promise<ClientEngagementResult> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can create engagements." };
+  if (profile.role !== "builder") return { error: "Only builders can create clients." };
 
   const admin = createAdminClient();
 
@@ -152,7 +152,13 @@ export async function createClientEngagement(input: {
 
   const { data: engagement, error: engErr } = await admin
     .from("engagements")
-    .insert({ builder_id: profile.id, title: clientName, project_id: project.id })
+    // Builder is deliberately setting up a client engagement — live from creation.
+    .insert({
+      builder_id: profile.id,
+      title: clientName,
+      project_id: project.id,
+      started_at: new Date().toISOString(),
+    })
     .select()
     .single();
 
@@ -169,7 +175,7 @@ export async function createClientEngagement(input: {
         return { engagementId: raced.id as string, projectId: project.id, inviteToken: null };
       }
     }
-    return { error: engErr?.message ?? "Failed to create engagement." };
+    return { error: engErr?.message ?? "Failed to create client." };
   }
 
   let inviteToken: string | null = null;

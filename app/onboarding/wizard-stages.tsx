@@ -106,7 +106,7 @@ export function PortalTeaserStage() {
     { n: "Harbor coffee subscription", m: "Board · 6 open tasks", t: "Active" },
   ];
   return (
-    <StageWindow titlebar="Krowe · Home" status="3 engagements" statusTone="ready" width={470}>
+    <StageWindow titlebar="Krowe · Home" status="3 clients" statusTone="ready" width={470}>
       <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
         {rows.map((e, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", background: "var(--surface-subtle)" }}>
@@ -136,7 +136,7 @@ export function DossierStage({ projectName, contactName, contactEmail, website, 
   return (
     <StageWindow titlebar="Project" status={ready ? "Ready" : "Draft"} statusTone={ready ? "ready" : "muted"}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-        {hasLink && <BrandLogo domain={site} name={name} size={40} />}
+        {hasLink && <BrandLogo domain={site} name={name} size={40} plain />}
         <div style={{ fontFamily: "var(--font-serif)", fontSize: 24, lineHeight: 1.15, letterSpacing: "-0.01em", color: "var(--foreground)" }}>{name}</div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -150,7 +150,7 @@ export function DossierStage({ projectName, contactName, contactEmail, website, 
         <PipelineStep n="1" label="Product requirements (PRD)" state={ready ? "next" : "queued"} />
         <PipelineStep n="2" label="Quote" state="queued" />
         <PipelineStep n="3" label="Contract" state="queued" />
-        <PipelineStep n="4" label="Live engagement" state="queued" />
+        <PipelineStep n="4" label="Live client" state="queued" />
       </div>
     </StageWindow>
   );
@@ -162,7 +162,7 @@ export function EngagementStage({ clientName, stage }: { clientName?: string; st
   const initials = name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const invited = stage === "invite";
   return (
-    <StageWindow titlebar="Engagement" status={invited ? "Invite sent" : "New"} statusTone={invited ? "active" : "muted"}>
+    <StageWindow titlebar="Client" status={invited ? "Invite sent" : "New"} statusTone={invited ? "active" : "muted"}>
       <div style={{ fontFamily: "var(--font-serif)", fontSize: 24, lineHeight: 1.15, letterSpacing: "-0.01em", color: "var(--foreground)", marginBottom: 3 }}>{name}</div>
       <div style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--muted-foreground)", marginBottom: 16 }}>Shared workspace</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
@@ -176,7 +176,7 @@ export function EngagementStage({ clientName, stage }: { clientName?: string; st
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>kroweportal.com/join/…</span>
         </div>
       ) : (
-        <div style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--muted-foreground)", fontStyle: "italic" }}>An invite link generates as soon as the engagement is created.</div>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--muted-foreground)", fontStyle: "italic" }}>An invite link generates as soon as the client is created.</div>
       )}
     </StageWindow>
   );

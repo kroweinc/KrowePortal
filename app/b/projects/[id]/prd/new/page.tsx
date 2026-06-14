@@ -1,7 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
+import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { PrdWizard } from "@/components/prd/prd-wizard";
+
+export const metadata = { title: "New PRD" };
 
 export default async function NewProjectPrdPage({
   params,
@@ -13,19 +16,21 @@ export default async function NewProjectPrdPage({
   if (profile.role !== "builder") redirect("/o");
 
   const { id } = await params;
-  const project = await getProjectById(id);
+  const [project, sopTranscripts] = await Promise.all([
+    getProjectById(id),
+    getProjectSopTranscripts(id),
+  ]);
   if (!project) notFound();
 
   return (
     <main className="krowe-page">
-      <div className="krowe-page-inner max-w-2xl">
-        <PrdWizard
-          projectId={id}
-          projectName={project.name}
-          backHref={`/b/projects/${id}`}
-          initialTitle={`${project.name} — PRD`}
-        />
-      </div>
+      <PrdWizard
+        projectId={id}
+        projectName={project.name}
+        backHref={`/b/projects/${id}`}
+        initialTitle={`${project.name} — PRD`}
+        initialSopTranscripts={sopTranscripts}
+      />
     </main>
   );
 }

@@ -46,8 +46,18 @@ const PROSE_SECTIONS: { key: keyof ContractContent; title: string }[] = [
   { key: "governingLaw", title: "Governing Law" },
 ];
 
-export function ContractDocument({ content: c }: { content: ContractContent }) {
+// `effectiveDate` is injected by the caller (which knows the contract's status):
+// today's date while it's a draft, the frozen date once it's been sent. Falls
+// back to whatever is stored on the content for any caller that doesn't pass it.
+export function ContractDocument({
+  content: c,
+  effectiveDate,
+}: {
+  content: ContractContent;
+  effectiveDate?: string | null;
+}) {
   const parties = c.parties;
+  const shownEffectiveDate = effectiveDate !== undefined ? effectiveDate : c.effectiveDate ?? null;
   const deliverables = c.deliverables ?? [];
   const scopeItems = (c.scopeItems ?? []).filter((s) => s.title);
   const payments = (c.paymentSchedule ?? []).filter((p) => p.label || p.amount);
@@ -59,7 +69,7 @@ export function ContractDocument({ content: c }: { content: ContractContent }) {
 
   return (
     <div className="doc-body">
-      {(parties?.provider || parties?.client || c.effectiveDate) && (
+      {(parties?.provider || parties?.client || shownEffectiveDate) && (
         <DocSection title="Parties">
           <div className="doc-prose">
             {parties?.provider && (
@@ -72,9 +82,9 @@ export function ContractDocument({ content: c }: { content: ContractContent }) {
                 <span className="doc-muted">Client:</span> {parties.client}
               </div>
             )}
-            {c.effectiveDate && (
+            {shownEffectiveDate && (
               <div>
-                <span className="doc-muted">Effective date:</span> {c.effectiveDate}
+                <span className="doc-muted">Effective date:</span> {shownEffectiveDate}
               </div>
             )}
           </div>

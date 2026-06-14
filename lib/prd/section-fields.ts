@@ -24,7 +24,6 @@ export const REFINABLE_SECTIONS: RefinableSection[] = [
   { id: "requirements", title: "Functional Requirements", fields: ["requirements"] },
   { id: "pagesScreens", title: "Pages & Screens", fields: ["pagesScreens"] },
   { id: "successCriteria", title: "Success Criteria", fields: ["successCriteria"] },
-  { id: "userStories", title: "User Stories", fields: ["userStories"] },
   {
     id: "nonFunctionalRequirements",
     title: "Non-Functional Requirements",

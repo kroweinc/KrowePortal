@@ -1,6 +1,7 @@
 import { Wallet } from "lucide-react";
 import type { Quote, EngagementAgreement, InfraRecommendation } from "@/lib/types";
 import type { MilestoneWithProgress } from "@/lib/actions/milestones";
+import { DEFAULT_QUOTE_HOURLY_RATE } from "@/lib/quote/totals";
 
 function fmt(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -16,18 +17,22 @@ export function FinancialsCard({
   milestones,
   agreement,
   infra,
+  defaultRate,
 }: {
   signedQuote: Quote | null;
   milestones: MilestoneWithProgress[];
   agreement: EngagementAgreement | null;
   infra: InfraRecommendation[];
+  /** The builder's default hourly rate (from getPricingDefaults). Used only when
+      the signed quote carries no rate; falls back to the shared default. */
+  defaultRate?: number;
 }) {
   const totals = signedQuote?.content.totals;
   const grand = totals?.grand ?? 0;
   // Quotes price the build via modules + extras (no separate pre-work line).
   const buildLabor = totals?.modulesTotal ?? grand;
   const extras = totals?.extrasTotal ?? 0;
-  const rate = signedQuote?.content.hourlyRate ?? 175;
+  const rate = signedQuote?.content.hourlyRate ?? defaultRate ?? DEFAULT_QUOTE_HOURLY_RATE;
 
   // "Delivered value" = sum of source_amount on done milestones (proxy for spend).
   const delivered = milestones

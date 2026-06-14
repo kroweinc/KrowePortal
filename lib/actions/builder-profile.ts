@@ -170,6 +170,56 @@ export async function getOrCreateBuilderProfile(): Promise<BuilderProfileBundle 
 }
 
 // ============================================================
+// Identity (avatar badge)
+// ============================================================
+
+export interface BuilderIdentity {
+  displayName: string | null;
+  avatarUrl: string | null;
+  initials: string;
+}
+
+/** Initials for an avatar fallback: first letters of up to two words. */
+function deriveInitials(name: string | null | undefined): string {
+  const parts = (name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "•";
+  return parts
+    .slice(0, 2)
+    .map((p) => p.charAt(0).toUpperCase())
+    .join("");
+}
+
+/** The current builder's display name, signed avatar URL, and initials — for the
+    small avatar badge on the engagement cards / hero. Self-scoped: it signs only
+    the caller's OWN avatar_storage_path (no caller-supplied path), so it's safe to
+    export where getOrCreateBuilderProfile's full bundle would be overkill. Falls
+    back to the account display name when no builder_profiles row exists yet
+    (e.g. the dev builder). */
+export async function getMyBuilderIdentity(): Promise<BuilderIdentity | null> {
+  const { profile } = await requireBuilder();
+  if (!profile) return null;
+
+  const supabase = await getClient(profile.id);
+  const { data: row } = await supabase
+    .from("builder_profiles")
+    .select("display_name, avatar_storage_path")
+    .eq("user_id", profile.id)
+    .maybeSingle();
+
+  const displayName = row?.display_name ?? profile.display_name ?? null;
+
+  let avatarUrl: string | null = null;
+  if (row?.avatar_storage_path) {
+    const { data: signed } = await createAdminClient()
+      .storage.from(AVATARS_BUCKET)
+      .createSignedUrl(row.avatar_storage_path, AVATAR_SIGNED_URL_TTL);
+    avatarUrl = signed?.signedUrl ?? null;
+  }
+
+  return { displayName, avatarUrl, initials: deriveInitials(displayName) };
+}
+
+// ============================================================
 // Basics
 // ============================================================
 

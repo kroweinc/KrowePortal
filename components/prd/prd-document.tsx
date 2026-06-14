@@ -196,20 +196,6 @@ export function PrdDocument({ content: c }: { content: PrdContent }) {
         </DocSection>
       )}
 
-      {(c.userStories ?? []).length > 0 && (
-        <DocSection title="User Stories">
-          <ul className="doc-stories">
-            {c.userStories!.map((s, i) => (
-              <li key={i}>
-                <span className="doc-story__lead">As a</span> {s.asA || "—"}
-                <span className="doc-story__lead">, I want</span> {s.iWant || "—"}
-                <span className="doc-story__lead">, so that</span> {s.soThat || "—"}.
-              </li>
-            ))}
-          </ul>
-        </DocSection>
-      )}
-
       {(c.nonFunctionalRequirements ?? []).length > 0 && (
         <DocSection title="Non-Functional Requirements">
           <Bullets items={c.nonFunctionalRequirements!} />

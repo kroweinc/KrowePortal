@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { createProject } from "@/lib/actions/projects";
 import { uploadProjectMaterial } from "@/lib/actions/project-materials";
-import { ATTACHMENT_ACCEPT } from "@/lib/attachments-constants";
+import { addSopTranscriptText, uploadSopTranscript } from "@/lib/actions/project-sop";
+import { ATTACHMENT_ACCEPT, SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
 
 const inputClass =
   "w-full rounded border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400";
@@ -23,16 +24,18 @@ export function NewProjectForm() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sopFileInputRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState("");
   const [prospectName, setProspectName] = useState("");
   const [prospectEmail, setProspectEmail] = useState("");
   const [linkedinUrl, setLinkedinUrl] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
-  const [liveUrl, setLiveUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [files, setFiles] = useState<File[]>([]);
+  const [sopText, setSopText] = useState("");
+  const [sopFiles, setSopFiles] = useState<File[]>([]);
 
   function addLink() {
     setLinks((prev) => [...prev, { url: "", label: "" }]);
@@ -53,6 +56,15 @@ export function NewProjectForm() {
     setFiles((prev) => prev.filter((_, idx) => idx !== i));
   }
 
+  function onSopFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length) setSopFiles((prev) => [...prev, ...selected]);
+    e.target.value = "";
+  }
+  function removeSopFile(i: number) {
+    setSopFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
@@ -70,7 +82,6 @@ export function NewProjectForm() {
         prospectEmail: prospectEmail.trim() || undefined,
         linkedinUrl: linkedinUrl.trim() || undefined,
         websiteUrl: websiteUrl.trim() || undefined,
-        liveUrl: liveUrl.trim() || undefined,
         notes: notes.trim() || undefined,
         links: cleanLinks.length ? cleanLinks : undefined,
       });
@@ -96,6 +107,27 @@ export function NewProjectForm() {
         );
       }
 
+      // Third phase: attach SOP transcripts (pasted text + uploaded files).
+      // Also non-fatal — they can be added from the project page afterwards.
+      let sopFailed = 0;
+      const pastedSop = sopText.trim();
+      if (pastedSop) {
+        const res = await addSopTranscriptText(result.id, pastedSop);
+        if (res.error) sopFailed++;
+      }
+      for (const file of sopFiles) {
+        const fd = new FormData();
+        fd.append("project_id", result.id);
+        fd.append("file", file);
+        const up = await uploadSopTranscript(fd);
+        if (up.error) sopFailed++;
+      }
+      if (sopFailed > 0) {
+        toast.error(
+          `Document created, but ${sopFailed} transcript${sopFailed > 1 ? "s" : ""} didn't attach. Add them from the document page.`
+        );
+      }
+
       router.push(`/b/projects/${result.id}`);
     });
   }
@@ -109,7 +141,7 @@ export function NewProjectForm() {
             onChange={(e) => setName(e.target.value)}
             type="text"
             required
-            placeholder="e.g. Nissan of McKinney"
+            placeholder="e.g. Krowe"
             className={inputClass}
           />
         </Field>
@@ -142,7 +174,7 @@ export function NewProjectForm() {
             onChange={(e) => setLinkedinUrl(e.target.value)}
             type="text"
             inputMode="url"
-            placeholder="e.g. linkedin.com/company/nissan"
+            placeholder="e.g. linkedin.com/company/krowe"
             className={inputClass}
           />
         </Field>
@@ -153,18 +185,7 @@ export function NewProjectForm() {
             onChange={(e) => setWebsiteUrl(e.target.value)}
             type="text"
             inputMode="url"
-            placeholder="e.g. nissanofmckinney.com"
-            className={inputClass}
-          />
-        </Field>
-
-        <Field label="Live work URL" hint="Link to the deliverable — a deployed app or demo people can interact with. Optional.">
-          <input
-            value={liveUrl}
-            onChange={(e) => setLiveUrl(e.target.value)}
-            type="text"
-            inputMode="url"
-            placeholder="e.g. app.nissanofmckinney.com"
+            placeholder="e.g. krowe.com"
             className={inputClass}
           />
         </Field>
@@ -258,6 +279,65 @@ export function NewProjectForm() {
             placeholder="e.g. Leads scattered across 5 sources and getting lost. Wants one place to track every lead."
             className="w-full rounded border border-neutral-200 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-neutral-400"
           />
+        </Field>
+
+        <Field
+          label="Discovery transcript (SOP)"
+          hint="Paste or upload a discovery-call transcript. Its text feeds the PRD, quote, and contract — kept separate from Notes. Optional."
+        >
+          <div className="space-y-3">
+            <textarea
+              value={sopText}
+              onChange={(e) => setSopText(e.target.value)}
+              rows={5}
+              maxLength={MAX_SOP_CHARS}
+              placeholder="Paste the call transcript or discovery notes here…"
+              className="w-full rounded border border-neutral-200 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-neutral-400"
+            />
+
+            {sopFiles.length > 0 && (
+              <ul className="space-y-1.5">
+                {sopFiles.map((file, i) => (
+                  <li
+                    key={i}
+                    className="flex items-center justify-between gap-2 rounded border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm"
+                  >
+                    <span className="min-w-0 truncate text-neutral-700">
+                      {file.name}
+                      <span className="ml-2 text-xs text-neutral-400">{formatBytes(file.size)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeSopFile(i)}
+                      className="shrink-0 rounded px-2 py-0.5 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+                      aria-label="Remove transcript file"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => sopFileInputRef.current?.click()}
+              >
+                + Upload transcript file
+              </Button>
+              <input
+                ref={sopFileInputRef}
+                type="file"
+                multiple
+                accept={SOP_ACCEPT}
+                onChange={onSopFilesSelected}
+                className="hidden"
+              />
+            </div>
+          </div>
         </Field>
       </Section>
 

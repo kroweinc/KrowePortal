@@ -4,15 +4,15 @@
    • Edit    — total banner + section rail with click-any-field inline editing.
    • Preview — the same, read-only.
    Edits persist automatically (debounced); money edits recompute subtotals + the
-   grand total live via recomputeTotals. Also carries Send / Delete / Copy-link
-   and the AI "Re-draft from notes". Mirrors prd-dashboard.tsx. */
+   grand total live via recomputeTotals. Also carries Send / Delete / Copy-link.
+   Mirrors prd-dashboard.tsx. */
 
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Send, Sparkles, Check, Link2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
-import { updateQuoteContent, sendQuote, deleteQuote, regenerateQuote } from "@/lib/actions/quote-docs";
+import { updateQuoteContent, sendQuote, deleteQuote } from "@/lib/actions/quote-docs";
 import type { Quote, QuoteContent } from "@/lib/types";
 import { recomputeTotals, applyMilestonePercents } from "@/lib/quote/totals";
 import { QuoteDocument } from "@/components/quote/quote-document";
@@ -64,8 +64,6 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
     [quote.content]
   );
   const [content, setContent] = useState<QuoteContent>(initialContent);
-  const [notes, setNotes] = useState(quote.source_notes ?? "");
-  const [showRegen, setShowRegen] = useState(false);
   const [refine, setRefine] = useState<{ open: boolean; sectionId: string | null }>({
     open: false,
     sectionId: null,
@@ -194,20 +192,6 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
     });
   }
 
-  function regenerate() {
-    if (!confirm("Re-draft this quote from the notes below? Your current edits will be replaced.")) return;
-    startTransition(async () => {
-      const result = await regenerateQuote(quote.id, notes);
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
-      setContent(recomputeTotals(result.content));
-      setShowRegen(false);
-      toast.success("Re-drafted");
-      router.refresh();
-    });
-  }
 
   const editing = mode === "edit";
   const headerTitle = content.companyName || projectName;
@@ -252,7 +236,6 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
             </button>
             {editing && (
               <div className="dash-actions">
-                <SaveStatus state={saveState} onRetry={saveNow} />
                 {isDraft && (
                   <button type="button" className="prd-btn prd-btn--ghost" onClick={remove} disabled={isPending}>
                     Delete
@@ -266,14 +249,13 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
                 >
                   <Sparkles className="h-3.5 w-3.5" /> Refine a section
                 </button>
-                <button
-                  type="button"
-                  className="prd-btn prd-btn--outline"
-                  onClick={saveNow}
-                  disabled={isPending || saveState === "saving" || !dirty}
-                >
-                  {saveState === "saving" ? "Saving…" : isDraft ? "Save draft" : "Save changes"}
-                </button>
+                <SaveControl
+                  state={saveState}
+                  dirty={dirty}
+                  isDraft={isDraft}
+                  isPending={isPending}
+                  onSave={saveNow}
+                />
                 {isDraft && (
                   <button type="button" className="prd-btn prd-btn--primary" onClick={send} disabled={isPending}>
                     <Send className="h-3.5 w-3.5" /> Send to client
@@ -302,30 +284,6 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
               <QuoteStatStrip content={content} status={quote.status} />
             </div>
           </EditContext.Provider>
-
-          {editing && isDraft && (
-            <div className="regen-panel">
-              <button type="button" className="regen-toggle" onClick={() => setShowRegen((s) => !s)}>
-                <Sparkles className="h-4 w-4" /> Re-draft from notes
-              </button>
-              {showRegen && (
-                <div className="regen-body">
-                  <textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={8}
-                    placeholder="Paste fresh notes to re-draft from…"
-                    className="regen-textarea"
-                  />
-                  <div className="regen-actions">
-                    <button type="button" className="prd-btn prd-btn--primary" onClick={regenerate} disabled={isPending}>
-                      {isPending ? "Drafting…" : "Re-draft quote"}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           <EditContext.Provider value={{ editing }}>
             <div className="dash-grid">
@@ -371,25 +329,52 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
   );
 }
 
-function SaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
+/** Combined save pill: reflects the live auto-save state and, whenever there are
+    pending edits, doubles as the explicit "save now" button. At rest it reads
+    "Saved"; with unsaved edits it reads "Save draft" / "Save changes". */
+function SaveControl({
+  state,
+  dirty,
+  isDraft,
+  isPending,
+  onSave,
+}: {
+  state: SaveState;
+  dirty: boolean;
+  isDraft: boolean;
+  isPending: boolean;
+  onSave: () => void;
+}) {
+  if (state === "saving") {
+    return (
+      <span className="prd-btn prd-btn--outline is-saved" aria-live="polite">
+        <span className="save-spinner" aria-hidden="true" /> Saving…
+      </span>
+    );
+  }
+  if (state === "error") {
+    return (
+      <button
+        type="button"
+        className="prd-btn prd-btn--outline is-error"
+        onClick={onSave}
+        disabled={isPending}
+        aria-live="polite"
+      >
+        Save failed — retry
+      </button>
+    );
+  }
+  if (dirty) {
+    return (
+      <button type="button" className="prd-btn prd-btn--outline" onClick={onSave} disabled={isPending}>
+        {isDraft ? "Save draft" : "Save changes"}
+      </button>
+    );
+  }
   return (
-    <span className={"dash-save-status is-" + state} aria-live="polite">
-      {state === "saving" && (
-        <>
-          <span className="save-spinner" aria-hidden="true" /> Saving…
-        </>
-      )}
-      {state === "saved" && (
-        <>
-          <Check className="h-3 w-3" aria-hidden="true" /> Saved
-        </>
-      )}
-      {state === "unsaved" && <>Unsaved changes</>}
-      {state === "error" && (
-        <button type="button" className="dash-save-retry" onClick={onRetry}>
-          Save failed — retry
-        </button>
-      )}
+    <span className="prd-btn prd-btn--outline is-saved" aria-live="polite">
+      <Check className="h-3 w-3" aria-hidden="true" /> Saved
     </span>
   );
 }

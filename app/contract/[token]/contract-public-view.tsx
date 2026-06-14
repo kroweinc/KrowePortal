@@ -6,6 +6,7 @@
    panel. Mirrors quote-public-view.tsx, reusing the generic DocSignPanel. */
 
 import { ContractDocument } from "@/components/contract/contract-document";
+import { useTodayISODate } from "@/lib/contract/use-today";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
 import { DocSignPanel, DocSignedBanner } from "@/components/doc/doc-sign-panel";
 import { PreparedBy } from "@/components/doc/prepared-by";
@@ -23,6 +24,9 @@ export function ContractPublicView({
   const { contract, builderName } = data;
   const content: ContractContent = contract.content ?? {};
   const isSigned = contract.status === "signed";
+  // Floats to today only for a not-yet-sent draft; sent/signed show the frozen date.
+  const today = useTodayISODate();
+  const effectiveDate = contract.status === "draft" ? today : content.effectiveDate ?? null;
   // Legal party name from the contract itself; shown alongside the builder's
   // profile identity only when it names someone else (e.g. a company).
   const providerName = content.parties?.provider;
@@ -46,7 +50,7 @@ export function ContractPublicView({
           </header>
 
           <div className="preview-card">
-            <ContractDocument content={content} />
+            <ContractDocument content={content} effectiveDate={effectiveDate} />
           </div>
 
           <div className="prd-print-hide">

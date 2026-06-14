@@ -12,6 +12,8 @@ import type { OnboardingStep } from "@/lib/types";
 // The wizard's current step lives in profiles.onboarding.step — this page just
 // renders whatever the DB says, so refresh, re-login, and the GitHub OAuth
 // round-trip all resume at the right step.
+export const metadata = { title: "Welcome" };
+
 export default async function OnboardingPage({
   searchParams,
 }: {
@@ -39,7 +41,7 @@ export default async function OnboardingPage({
         note="This is how clients and teammates will see you across the portal."
         stageEyebrow="Welcome to Krowe"
         stageHeadline="Everything for your clients, in one calm place."
-        stageSub="Pitches, engagements, code, and the shared board — they all live here."
+        stageSub="Pitches, clients, code, and the shared board — they all live here."
         stage={<PortalTeaserStage />}
       >
         <OnboardingForm defaultName={fullName} />

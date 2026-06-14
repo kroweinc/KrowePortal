@@ -30,18 +30,8 @@ import { deriveArchLayers } from "@/lib/operator-project/derive-arch-layers";
 import type { RepoContext } from "@/lib/github/types";
 import type { Engagement } from "@/lib/types";
 import { Icon } from "@/components/operator-project-profile/icon";
-import { getMilestonesForEngagement } from "@/lib/actions/milestones";
-import { getSignedDocsForEngagement } from "@/lib/actions/operator-docs";
-import { SignedQuoteCard } from "@/components/dashboard/signed-quote-card";
-import { MilestoneProgressCard } from "@/components/dashboard/milestone-progress-card";
-import {
-  getInfraRecommendations,
-  getDeliverables,
-} from "@/lib/actions/engagement";
-import { getChangeOrders } from "@/lib/actions/change-orders";
-import { InfraCard } from "@/components/dashboard/infra-card";
-import { DeliverablesCard } from "@/components/dashboard/deliverables-card";
-import { ChangeOrdersCard } from "@/components/dashboard/change-orders-card";
+
+export const metadata = { title: "Project" };
 
 export default async function OperatorProjectPage() {
   const profile = await getCurrentProfile();
@@ -98,20 +88,6 @@ export default async function OperatorProjectPage() {
     .eq("id", engagement.builder_id)
     .maybeSingle();
   const builderName = builderRow?.display_name ?? null;
-
-  // Engagement spine — provisioned from the signed quote (new project model).
-  const [signedDocs, milestones] = await Promise.all([
-    getSignedDocsForEngagement(engagement),
-    getMilestonesForEngagement(engagement.id),
-  ]);
-  const signedQuote = signedDocs.quote;
-
-  // Engagement detail cards (Phases 7–10).
-  const [infra, deliverables, changeOrders] = await Promise.all([
-    getInfraRecommendations(engagement.id),
-    getDeliverables(engagement.id),
-    getChangeOrders(engagement.id),
-  ]);
 
   let profilePromise: Promise<ProjectProfile | null> = Promise.resolve(null);
   let branchGraphPromise: Promise<BranchGraph | null> = Promise.resolve(null);
@@ -190,40 +166,6 @@ export default async function OperatorProjectPage() {
           builderName={builderName}
           startedAt={engagement.created_at}
         />
-
-        {(signedQuote || milestones.length > 0) && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-              gap: 20,
-              alignItems: "start",
-            }}
-          >
-            {signedQuote && (
-              <SignedQuoteCard
-                quote={signedQuote}
-                contractToken={signedDocs.contract?.token ?? null}
-                prdToken={signedDocs.prd?.token ?? null}
-              />
-            )}
-            {milestones.length > 0 && <MilestoneProgressCard milestones={milestones} />}
-          </div>
-        )}
-
-        {/* Engagement detail cards (Phases 7–10) */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
-            gap: 20,
-            alignItems: "start",
-          }}
-        >
-          <InfraCard recommendations={infra} canOverride />
-          <DeliverablesCard deliverables={deliverables} />
-          <ChangeOrdersCard changeOrders={changeOrders} canSign />
-        </div>
 
         {hasRepo && repoContext ? (
           <>

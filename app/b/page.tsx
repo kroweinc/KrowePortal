@@ -10,6 +10,8 @@ import { CreateInvitationDialog } from "@/components/create-invitation-dialog";
 import { getMyEngagements, getMyPendingInvites } from "@/lib/actions/invitations";
 import type { Task } from "@/lib/types";
 
+export const metadata = { title: "Tasks" };
+
 export default async function BuilderDashboard({
   searchParams,
 }: {
@@ -58,7 +60,7 @@ export default async function BuilderDashboard({
           <div className="krowe-board-titlewrap">
             <h1 className="krowe-board-title">Build Board</h1>
             <div className="krowe-board-sub">
-              <span>{engagementList.length} engagement{engagementList.length !== 1 ? "s" : ""}</span>
+              <span>{engagementList.length} client{engagementList.length !== 1 ? "s" : ""}</span>
               <span className="sep">·</span>
               <span>{tasks.length} task{tasks.length !== 1 ? "s" : ""}</span>
               <span className="sep">·</span>
@@ -67,7 +69,7 @@ export default async function BuilderDashboard({
           </div>
           <div className="krowe-board-actions">
             <Link href="/b/engagements" className="krowe-pill-ghost">
-              Engagements
+              Clients
             </Link>
             {(showInvite || operatorName) && (
               <CreateInvitationDialog
@@ -78,14 +80,17 @@ export default async function BuilderDashboard({
             )}
           </div>
         </div>
-        <Suspense>
-          <TaskBoard tasks={tasks} engagements={engagementList} currentUserId={profile.id} />
-        </Suspense>
+        <div data-tour="task-board">
+          <Suspense>
+            <TaskBoard tasks={tasks} engagements={engagementList} currentUserId={profile.id} />
+          </Suspense>
+        </div>
       </div>
       <NewTaskForm
         engagementId={activeEngagement?.id ?? firstEngagement?.id}
         engagements={engagementList.map((e) => ({ id: e.id, title: e.title }))}
         placeholder="Add something to the build queue…"
+        tourId="new-task"
       />
     </main>
   );

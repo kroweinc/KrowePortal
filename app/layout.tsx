@@ -3,7 +3,10 @@ import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Krowe Portal",
+  title: {
+    default: "Krowe",
+    template: "Krowe | %s",
+  },
   description: "Connecting operators and builders",
 };
 

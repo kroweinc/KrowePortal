@@ -60,17 +60,20 @@ export function DocSignPanel({
   // fully readable; only accepting requires an account.
   if (!isAuthenticated) {
     return (
-      <div className="mt-6 rounded-lg border border-neutral-200 bg-white p-6 text-center shadow-sm">
-        <div className="mb-3 flex items-center justify-center gap-2">
-          <UserPlus className="h-4 w-4 text-neutral-500" />
+      <div className="mt-6 flex flex-col items-center rounded-lg border border-neutral-200 bg-white p-8 text-center shadow-sm">
+        <div className="flex items-center justify-center gap-2">
+          <UserPlus className="h-4 w-4 text-[#f97316]" />
           <h2 className="text-sm font-semibold text-neutral-900">{heading}</h2>
         </div>
-        <p className="mx-auto mb-4 max-w-sm text-sm text-neutral-600">
+        <p className="mt-3 max-w-sm text-sm leading-relaxed text-neutral-600">
           Create a free account to accept and sign this document from{" "}
-          <span className="font-medium text-neutral-900">{builderName}</span>. It only takes a moment
-          and gives you a portal to track the work.
+          <span className="font-medium text-neutral-900">{builderName}</span>. It only takes a
+          moment and gives you a portal to track the work.
         </p>
-        <Button onClick={() => router.push(loginHref)} className="w-full">
+        <Button
+          onClick={() => router.push(loginHref)}
+          className="mt-6 w-full bg-[#f97316] text-white hover:bg-[#ea580c]"
+        >
           Create an account to accept
         </Button>
       </div>
@@ -144,7 +147,7 @@ export function DocSignPanel({
         />
       </label>
 
-      <label className="mt-3 flex items-start gap-2 text-sm text-neutral-700">
+      <label className="mt-4 flex items-start gap-2 text-sm text-neutral-700">
         <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} className="mt-0.5" />
         <span>
           {consentText}{" "}
@@ -152,11 +155,15 @@ export function DocSignPanel({
         </span>
       </label>
 
-      <Button onClick={sign} disabled={isPending} className="mt-4 w-full">
+      <Button
+        onClick={sign}
+        disabled={isPending}
+        className="mt-8 w-full bg-[#f97316] text-white hover:bg-[#ea580c]"
+      >
         {isPending ? "Accepting…" : buttonLabel}
       </Button>
 
-      <p className="mt-2 text-center text-xs text-neutral-400">
+      <p className="mt-4 text-center text-xs text-neutral-400">
         Your name, account, the time, and your IP address are recorded as your electronic signature.
       </p>
 
@@ -165,7 +172,7 @@ export function DocSignPanel({
           type="button"
           onClick={() => setDeclining(true)}
           disabled={isPending}
-          className="mt-3 w-full text-center text-xs text-neutral-500 transition-colors hover:text-neutral-800 disabled:opacity-50"
+          className="mt-6 w-full text-center text-xs text-neutral-500 transition-colors hover:text-neutral-800 disabled:opacity-50"
         >
           Decline this document
         </button>

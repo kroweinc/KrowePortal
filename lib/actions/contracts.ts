@@ -11,6 +11,9 @@ import { getPrdsByProject, getPrdById } from "@/lib/actions/prds";
 import { generateContractDraft } from "@/lib/ai/generate-contract";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { exhibitFromQuote } from "@/lib/contract/exhibit";
+import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
+import { composeSopBlock } from "@/lib/project/business-context";
+import { todayISODate, isISODate } from "@/lib/contract/effective-date";
 import type { Contract, ContractContent, QuoteContent, PrdContent } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -102,6 +105,7 @@ export async function createContractDraft(
 
   const quoteContent = await selectedQuoteContent(parsed.data.projectId, parsed.data.quoteId);
   const prdContent = await selectedPrdContent(parsed.data.projectId, parsed.data.prdId);
+  const sopContext = composeSopBlock(await getProjectSopTranscripts(parsed.data.projectId));
 
   const budget = await assertAiBudget(profile.id);
   if (!budget.ok) return { error: budget.error };
@@ -114,6 +118,7 @@ export async function createContractDraft(
       clientName: project.prospect_name ?? project.name,
       quoteContent,
       prdContent,
+      sopContext,
     },
     { userId: profile.id, operation: "generate_contract" }
   );
@@ -166,6 +171,7 @@ export async function regenerateContract(
   const project = await getProjectById(before.project_id as string);
   const quoteContent = await bestQuoteContent(before.project_id as string);
   const prdContent = await bestPrdContent(before.project_id as string);
+  const sopContext = composeSopBlock(await getProjectSopTranscripts(before.project_id as string));
   const aiContent = await generateContractDraft({
     title: before.title as string,
     notes: clean,
@@ -173,6 +179,7 @@ export async function regenerateContract(
     clientName: project?.prospect_name ?? project?.name,
     quoteContent,
     prdContent,
+    sopContext,
   });
   // Re-snapshot the exhibit so a re-draft picks up the latest quote breakdown.
   const content: ContractContent = { ...aiContent, ...exhibitFromQuote(quoteContent) };
@@ -228,7 +235,13 @@ export async function updateContractContent(
   return { success: true };
 }
 
-export async function sendContract(id: string): Promise<{ success: true } | { error: string }> {
+// `clientEffectiveDate` is the builder's local `YYYY-MM-DD` (the date they saw
+// in the draft). Sending freezes the effective date to that day; until then it
+// floats to the current date. We validate it and fall back to the server's date.
+export async function sendContract(
+  id: string,
+  clientEffectiveDate?: string
+): Promise<{ success: true; effectiveDate: string } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only the builder can send a contract." };
@@ -236,7 +249,7 @@ export async function sendContract(id: string): Promise<{ success: true } | { er
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("contracts")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, content")
     .eq("id", id)
     .single();
 
@@ -244,15 +257,18 @@ export async function sendContract(id: string): Promise<{ success: true } | { er
   if (before.created_by !== profile.id) return { error: "Not your contract." };
   if (before.status !== "draft") return { error: "Only drafts can be sent." };
 
+  const effectiveDate = isISODate(clientEffectiveDate) ? clientEffectiveDate : todayISODate();
+  const content: ContractContent = { ...((before.content as ContractContent) ?? {}), effectiveDate };
+
   const now = new Date().toISOString();
   const { error } = await supabase
     .from("contracts")
-    .update({ status: "sent", sent_at: now, updated_at: now })
+    .update({ status: "sent", sent_at: now, updated_at: now, content })
     .eq("id", id);
   if (error) return { error: error.message };
 
   revalidateContract(before.project_id as string, id, before.token as string | null);
-  return { success: true };
+  return { success: true, effectiveDate };
 }
 
 export async function deleteContract(id: string): Promise<{ success: true } | { error: string }> {

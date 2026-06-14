@@ -5,6 +5,8 @@ import { getQuoteById } from "@/lib/actions/quote-docs";
 import { QuoteDashboard } from "@/components/quote/dashboard/quote-dashboard";
 import { BusinessContactCard } from "@/components/doc/business-contact-card";
 
+export const metadata = { title: "Quote" };
+
 export default async function ProjectQuotePage({
   params,
 }: {

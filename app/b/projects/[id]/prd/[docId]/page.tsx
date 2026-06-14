@@ -5,6 +5,8 @@ import { getPrdById } from "@/lib/actions/prds";
 import { PrdDashboard } from "@/components/prd/dashboard/prd-dashboard";
 import { BusinessContactCard } from "@/components/doc/business-contact-card";
 
+export const metadata = { title: "PRD" };
+
 export default async function ProjectPrdPage({
   params,
 }: {

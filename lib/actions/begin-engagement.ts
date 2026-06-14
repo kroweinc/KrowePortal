@@ -60,7 +60,7 @@ export async function getProjectStages(
     admin.from("contracts").select("project_id, status").in("project_id", projectIds),
     admin
       .from("engagements")
-      .select("id, project_id")
+      .select("id, project_id, started_at")
       .in("project_id", projectIds)
       .eq("builder_id", profile.id),
   ]);
@@ -74,10 +74,11 @@ export async function getProjectStages(
   const quotes = byProject(quoteRows.data as { project_id: string; status: string }[] | null);
   const contracts = byProject(contractRows.data as { project_id: string; status: string }[] | null);
   const engagements = new Map(
-    ((engagementRows.data ?? []) as { id: string; project_id: string }[]).map((e) => [
-      e.project_id,
-      { id: e.id },
-    ])
+    ((engagementRows.data ?? []) as {
+      id: string;
+      project_id: string;
+      started_at: string | null;
+    }[]).map((e) => [e.project_id, { id: e.id, started_at: e.started_at }])
   );
 
   const result: Record<string, ProjectPipeline> = {};
@@ -118,10 +119,10 @@ export type BeginEngagementResult =
 export async function beginEngagement(input: BeginEngagementInput): Promise<BeginEngagementResult> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can begin engagements." };
+  if (profile.role !== "builder") return { error: "Only builders can begin clients." };
 
   const parsed = beginSchema.safeParse(input);
-  if (!parsed.success) return { error: "Engagement name must be 1–120 characters." };
+  if (!parsed.success) return { error: "Client name must be 1–120 characters." };
   const { projectId, title, seedTasks, createInvite } = parsed.data;
 
   // Admin client throughout — ownership is verified explicitly below.
@@ -134,25 +135,46 @@ export async function beginEngagement(input: BeginEngagementInput): Promise<Begi
     .maybeSingle();
   if (!project || project.owner_id !== profile.id) return { error: "Document not found." };
 
+  const now = new Date().toISOString();
+
+  // A shell may already exist from an operator accepting a doc (PRD/quote) —
+  // linkOperatorToProject creates one without started_at. Beginning the
+  // engagement means stamping started_at; only an already-started engagement
+  // is a no-op error.
   const { data: existing } = await admin
     .from("engagements")
-    .select("id")
+    .select("id, started_at")
     .eq("project_id", projectId)
     .maybeSingle();
-  if (existing) return { error: "An engagement was already started for this document." };
 
-  const { data: engagement, error: engErr } = await admin
-    .from("engagements")
-    .insert({ builder_id: profile.id, title: title.trim(), project_id: projectId })
-    .select()
-    .single();
-
-  if (engErr || !engagement) {
-    // 23505 = unique violation on engagements_project_unique (double-click race)
-    if (engErr?.code === "23505") {
-      return { error: "An engagement was already started for this document." };
+  let engagement: { id: string };
+  if (existing) {
+    if (existing.started_at) {
+      return { error: "A client was already started for this document." };
     }
-    return { error: engErr?.message ?? "Failed to create engagement." };
+    const { data: started, error: startErr } = await admin
+      .from("engagements")
+      .update({ started_at: now, title: title.trim() })
+      .eq("id", existing.id)
+      .select("id")
+      .single();
+    if (startErr || !started) return { error: startErr?.message ?? "Failed to begin client." };
+    engagement = started as { id: string };
+  } else {
+    const { data: created, error: engErr } = await admin
+      .from("engagements")
+      .insert({ builder_id: profile.id, title: title.trim(), project_id: projectId, started_at: now })
+      .select("id")
+      .single();
+
+    if (engErr || !created) {
+      // 23505 = unique violation on engagements_project_unique (double-click race)
+      if (engErr?.code === "23505") {
+        return { error: "A client was already started for this document." };
+      }
+      return { error: engErr?.message ?? "Failed to create client." };
+    }
+    engagement = created as { id: string };
   }
 
   let seededMilestones = 0;

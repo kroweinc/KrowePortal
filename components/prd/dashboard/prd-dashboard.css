@@ -28,8 +28,11 @@
 }
 
 /* ---------- dashboard frame ---------- */
+/* Fill the available width so the document lines up with the page wrapper
+   (.krowe-page-inner, 1500px) and the "Prepared for" card above it, instead
+   of sitting in a narrow 1180px column with wide empty gutters. */
 .prd-dashboard .dash {
-  max-width: 1180px;
+  max-width: 1500px;
   margin: 0 auto;
   padding: 4px 0 64px;
 }
@@ -46,18 +49,11 @@
 .prd-dashboard .dash-header {
   margin-bottom: 4px;
 }
-.prd-dashboard .dash-header__row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-}
 .prd-dashboard .dash-header__lead {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
 }
 .prd-dashboard .dash-meta {
   display: flex;
@@ -91,13 +87,16 @@
   white-space: nowrap;
 }
 
+/* Full-width toolbar row above the title — mirrors the quote layout so the
+   serif title sits in its own full-width row below and never gets squeezed
+   into a narrow column that wraps "Patel Gaines — PRD" onto multiple lines. */
 .prd-dashboard .dash-header__actions {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-shrink: 0;
   flex-wrap: wrap;
   justify-content: flex-end;
+  margin-bottom: 16px;
 }
 
 /* mode toggle */
@@ -166,6 +165,19 @@
 .prd-dashboard .prd-btn--outline:hover:not(:disabled) {
   border-color: var(--accent);
 }
+/* Combined save pill — the resting "Saved" / "Saving…" state is informational,
+   not a button, so it stays calm and non-interactive; "error" borrows danger. */
+.prd-dashboard .prd-btn--outline.is-saved {
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.prd-dashboard .prd-btn--outline.is-saved svg {
+  opacity: 0.7;
+}
+.prd-dashboard .prd-btn--outline.is-error {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
 .prd-dashboard .prd-btn--primary {
   background: oklch(22% 0.012 60);
   color: #fff;
@@ -175,30 +187,7 @@
   box-shadow: var(--shadow-2);
 }
 
-/* ---------- auto-save status ---------- */
-.prd-dashboard .dash-save-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-  white-space: nowrap;
-}
-.prd-dashboard .dash-save-status.is-error {
-  color: var(--danger);
-}
-.prd-dashboard .dash-save-status svg {
-  opacity: 0.7;
-}
-.prd-dashboard .dash-save-retry {
-  font: inherit;
-  color: var(--danger);
-  text-decoration: underline;
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
+/* ---------- auto-save spinner ---------- */
 .prd-dashboard .save-spinner {
   width: 10px;
   height: 10px;
@@ -206,50 +195,6 @@
   border-top-color: var(--muted-foreground);
   border-radius: 50%;
   animation: lookup-spin 0.7s linear infinite;
-}
-
-/* ---------- re-draft panel ---------- */
-.prd-dashboard .regen-panel {
-  margin: 18px 0 4px;
-  border: 1px solid var(--border);
-  background: #fff;
-  border-radius: var(--radius-lg);
-  padding: 14px 16px;
-  box-shadow: var(--shadow-1);
-}
-.prd-dashboard .regen-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--foreground);
-}
-.prd-dashboard .regen-toggle:hover {
-  color: var(--accent);
-}
-.prd-dashboard .regen-body {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.prd-dashboard .regen-textarea {
-  width: 100%;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--background);
-  resize: vertical;
-}
-.prd-dashboard .regen-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 /* ---------- stat strip ---------- */
@@ -302,8 +247,8 @@
 }
 .prd-dashboard .rail-layout {
   display: grid;
-  grid-template-columns: 196px 1fr;
-  gap: 34px;
+  grid-template-columns: 212px 1fr;
+  gap: 48px;
   align-items: start;
 }
 .prd-dashboard .toc {
@@ -479,8 +424,7 @@
 }
 .prd-dashboard .inline-list__item:hover .inline-remove,
 .prd-dashboard .prd-card:hover .inline-remove,
-.prd-dashboard .milestone-row:hover .inline-remove,
-.prd-dashboard .story-row:hover .inline-remove {
+.prd-dashboard .milestone-row:hover .inline-remove {
   opacity: 1;
 }
 .prd-dashboard .inline-remove:hover {
@@ -603,10 +547,13 @@
 .prd-dashboard .prio .inline-tag {
   font: inherit;
 }
-/* In edit mode the priority dropdown should read as part of the pill,
-   not a nested input box — drop its own border/background and inherit
-   the pill's color & text styling, keeping only a compact caret. */
-.prd-dashboard .prio .inline-select {
+/* In edit mode a pill's dropdown should read as part of the pill, not a
+   nested input box — drop its own border/background and inherit the pill's
+   color & text styling, keeping only a compact caret. Applies to the
+   priority, auth, and data-direction ("import/export/both") pills. */
+.prd-dashboard .prio .inline-select,
+.prd-dashboard .auth-pill .inline-select,
+.prd-dashboard .dir-pill .inline-select {
   font: inherit;
   font-weight: inherit;
   text-transform: inherit;
@@ -625,7 +572,9 @@
   background-position: right center;
   background-size: 8px 5px;
 }
-.prd-dashboard .prio .inline-select:focus-visible {
+.prd-dashboard .prio .inline-select:focus-visible,
+.prd-dashboard .auth-pill .inline-select:focus-visible,
+.prd-dashboard .dir-pill .inline-select:focus-visible {
   outline: none;
 }
 .prd-dashboard .stack-meta {
@@ -849,23 +798,6 @@
   color: var(--danger);
 }
 
-/* stories */
-.prd-dashboard .story-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.prd-dashboard .story-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-size: 14px;
-  color: var(--foreground);
-}
-.prd-dashboard .story-lead {
-  color: var(--muted-foreground);
-}
 .prd-dashboard .empty-note {
   font-size: 13px;
   color: var(--muted-foreground);

@@ -5,6 +5,8 @@ import { Ember } from "@/components/design-atoms";
 import { ProfileEditor } from "@/components/builder-profile/profile-editor";
 import { ProfileViewToggle } from "@/components/builder-profile/profile-view-toggle";
 
+export const metadata = { title: "Profile" };
+
 export default async function BuilderProfilePage() {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");

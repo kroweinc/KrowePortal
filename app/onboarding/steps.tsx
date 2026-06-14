@@ -55,7 +55,7 @@ export function PathStep({ nav }: { nav: WizardNav }) {
       note="Most people start where the money is. You can switch tracks any time."
       stageEyebrow="Welcome to Krowe"
       stageHeadline="Everything for your clients, in one calm place."
-      stageSub="Pitches, engagements, code, and the shared board — they all live here."
+      stageSub="Pitches, clients, code, and the shared board — they all live here."
       stage={<PortalTeaserStage />}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -63,7 +63,7 @@ export function PathStep({ nav }: { nav: WizardNav }) {
           glyph={<WzIcon name="megaphone" size={20} />}
           kicker="No client yet"
           title="I'm pitching new clients"
-          body="Start with a PRD, quote, and contract. When they sign, it becomes a live engagement."
+          body="Start with a PRD, quote, and contract. When they sign, they become a live client."
           onClick={() => choose("no_clients")}
           disabled={isPending}
         />
@@ -175,7 +175,7 @@ export function HandoffStep({ nav, project }: { nav: WizardNav; project: { id: s
         <>
           <strong style={{ color: "var(--foreground)", fontWeight: 600 }}>{project.name}</strong>{" "}
           is ready. Your pipeline starts with the PRD — from there you&apos;ll quote it, get the
-          contract signed, and begin the engagement.
+          contract signed, and begin working with the client.
         </>
       }
       note="The PRD is your anchor. Everything else quotes from it."
@@ -195,7 +195,7 @@ export function HandoffStep({ nav, project }: { nav: WizardNav; project: { id: s
         <WzSecondary
           icon={<WzIcon name="folder" size={16} />}
           disabled={isPending}
-          onClick={() => go(`/b/projects/${project.id}`, { title: "Opening your project", sub: "Everything for this engagement lives here." })}
+          onClick={() => go(`/b/projects/${project.id}`, { title: "Opening your project", sub: "Everything for this client lives here." })}
         >
           View the project
         </WzSecondary>
@@ -253,7 +253,7 @@ function InvitePanel({
           <strong style={{ color: "var(--foreground)", fontWeight: 600 }}>{clientName}</strong>{" "}
           {inviteToken
             ? "is set up. Send this link — they'll join as the operator on your shared board."
-            : "is set up. Your client has already joined this engagement."}
+            : "is set up. Your client has already joined."}
         </>
       }
       note="One link, and they're in. No passwords to chase."
@@ -342,9 +342,9 @@ export function ClientStep({
       nav={nav}
       progress={{ pathLabel: CLIENT_LABEL, index: 1, total: 5 }}
       title="Set up your client"
-      sub="We'll create your engagement and an invite link to share."
+      sub="We'll create your client and an invite link to share."
       note="They'll see exactly what you put on the board — nothing else."
-      stageEyebrow="The engagement"
+      stageEyebrow="The client"
       stageHeadline="Your shared workspace."
       stageSub="One place you and your client both work from."
       stage={<EngagementStage stage="client" clientName={namePreview} />}
@@ -358,7 +358,7 @@ export function ClientStep({
         <WzLineField label="Client email" optional type="email" name="clientEmail" placeholder="jane@acme.com" maxLength={320} />
         {error && <p style={{ margin: 0, fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--danger)" }}>{error}</p>}
         <div style={{ marginTop: 8 }}>
-          <WzPrimary type="submit" disabled={isPending}>{isPending ? "Setting up…" : "Create engagement & invite link"}</WzPrimary>
+          <WzPrimary type="submit" disabled={isPending}>{isPending ? "Setting up…" : "Create client & invite link"}</WzPrimary>
         </div>
         <div style={{ display: "flex", justifyContent: "center", marginTop: -6 }}>
           <WzGhostLink onClick={nav.exit} disabled={isPending}>{SKIP}</WzGhostLink>
@@ -400,7 +400,7 @@ export function RepoStep({
       nav={nav}
       progress={{ pathLabel: CLIENT_LABEL, index: 3, total: 5 }}
       title="Link your repository"
-      sub="Connect the code you'll be working in. Krowe ties commits to this engagement."
+      sub="Connect the code you'll be working in. Krowe ties commits to this client."
       note="Linked once, your client watches progress without ever asking."
       stageEyebrow="The codebase"
       stageHeadline="Progress, straight from the source."
@@ -554,7 +554,7 @@ export function DocsStep({
       progress={{ pathLabel: CLIENT_LABEL, index: 5, total: 5 }}
       title="One last thing"
       sub="Documents are optional — add them now, or anytime later from Documents."
-      note="Skip these if you're mid-engagement. Add them when a client asks."
+      note="Skip these if you're already working with a client. Add them when they ask."
       stageEyebrow="The documents"
       stageHeadline="Paperwork, only when you need it."
       stageSub="A PRD, quote, or contract — each one starts from what's already here."

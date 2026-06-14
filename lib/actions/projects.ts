@@ -22,7 +22,6 @@ const createSchema = z.object({
   prospectEmail: z.string().email("Enter a valid email.").max(320).optional().or(z.literal("")),
   linkedinUrl: z.string().max(2000).optional(),
   websiteUrl: z.string().max(2000).optional(),
-  liveUrl: z.string().max(2000).optional(),
   notes: z.string().max(20000).optional(),
   links: z
     .array(z.object({ url: z.string().min(1), label: z.string().max(200).optional() }))
@@ -38,7 +37,6 @@ export async function createProject(input: {
   prospectEmail?: string;
   linkedinUrl?: string;
   websiteUrl?: string;
-  liveUrl?: string;
   notes?: string;
   links?: { url: string; label?: string }[];
 }): Promise<{ id: string } | { error: string }> {
@@ -59,10 +57,6 @@ export async function createProject(input: {
   if (parsed.data.websiteUrl?.trim() && !isValidUrl(websiteUrl)) {
     return { error: "Enter a valid website URL." };
   }
-  const liveUrl = normalizeUrl(parsed.data.liveUrl);
-  if (parsed.data.liveUrl?.trim() && !isValidUrl(liveUrl)) {
-    return { error: "Enter a valid live work URL." };
-  }
 
   const supabase = await getClient(profile.id);
   const { data, error } = await supabase
@@ -74,7 +68,6 @@ export async function createProject(input: {
       prospect_email: parsed.data.prospectEmail || null,
       linkedin_url: linkedinUrl,
       website_url: websiteUrl,
-      live_url: liveUrl,
       context: parsed.data.notes?.trim() || null,
     })
     .select("id")

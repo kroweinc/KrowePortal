@@ -53,6 +53,8 @@ interface NewTaskFormProps {
   engagements?: { id: string; title: string }[];
   placeholder?: string;
   onSuccess?: () => void;
+  /** Product-tour anchor key, emitted as data-tour on the launcher. */
+  tourId?: string;
 }
 
 const PERSONAL = "__personal__";
@@ -70,7 +72,7 @@ type AiMode =
     }
   | { kind: "accepting" };
 
-export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuccess }: NewTaskFormProps) {
+export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuccess, tourId }: NewTaskFormProps) {
   const [expanded, setExpanded] = useState(false);
   const [modal, setModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -560,7 +562,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
 
         {engagements.length > 1 && (
           <div>
-            <label className="block text-xs font-medium text-neutral-700 mb-1">Engagement</label>
+            <label className="block text-xs font-medium text-neutral-700 mb-1">Client</label>
             <Select
               name="engagement"
               value={selectedEngagement}
@@ -571,7 +573,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
                   {eng.title}
                 </option>
               ))}
-              <option value={PERSONAL}>Personal (no engagement)</option>
+              <option value={PERSONAL}>Personal (no client)</option>
             </Select>
           </div>
         )}
@@ -719,7 +721,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
         </div>
       )}
 
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+      <div data-tour={tourId} className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
         {expanded && !modal && (
           <div className="w-80 rounded-xl border border-neutral-200 bg-white shadow-xl p-4">
             {panelContent}

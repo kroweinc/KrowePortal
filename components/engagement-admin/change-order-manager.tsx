@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Plus, X, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createChangeOrder, sendChangeOrder } from "@/lib/actions/change-orders";
+import { DEFAULT_QUOTE_HOURLY_RATE } from "@/lib/quote/totals";
 import type { ChangeOrder } from "@/lib/types";
 
 function fmt(n: number): string {
@@ -27,16 +28,21 @@ const STATUS_LABEL: Record<string, string> = {
 export function ChangeOrderManager({
   engagementId,
   changeOrders,
+  defaultRate,
 }: {
   engagementId: string;
   changeOrders: ChangeOrder[];
+  /** The builder's default hourly rate (from getPricingDefaults). Seeds the rate
+      field; falls back to the shared default when not supplied by the parent. */
+  defaultRate?: number;
 }) {
   const router = useRouter();
+  const rateDefault = defaultRate ?? DEFAULT_QUOTE_HOURLY_RATE;
   const [isPending, startTransition] = useTransition();
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
-  const [rate, setRate] = useState("200");
+  const [rate, setRate] = useState(String(rateDefault));
   const [items, setItems] = useState<DraftItem[]>([{ label: "", hours: "" }]);
 
   const total = items.reduce((s, it) => s + Math.round((Number(it.hours) || 0) * (Number(rate) || 0)), 0);
@@ -52,7 +58,7 @@ export function ChangeOrderManager({
     startTransition(async () => {
       const result = await createChangeOrder(engagementId, {
         title: title.trim(),
-        content: { summary: summary.trim() || undefined, lineItems, hourlyRate: Number(rate) || 200 },
+        content: { summary: summary.trim() || undefined, lineItems, hourlyRate: Number(rate) || rateDefault },
       });
       if ("error" in result) {
         toast.error(result.error);

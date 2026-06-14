@@ -15,6 +15,8 @@ const STATUS_LABELS: Record<string, string> = {
   done: "Done",
 };
 
+export const metadata = { title: "Task" };
+
 export default async function BuilderTaskDetail({
   params,
 }: {

@@ -172,7 +172,7 @@ export function CommitPicker({ taskId, selected, onChange, disabled }: Props) {
                 : "Search commits"
             }
             disabled={disabled || state.kind === "no_repo" || state.kind === "auth"}
-            className="flex-1 bg-transparent text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none disabled:opacity-50"
+            className="krowe-search-input flex-1 bg-transparent text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none disabled:opacity-50"
           />
         </div>
 

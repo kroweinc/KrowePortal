@@ -2,15 +2,17 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { Ember } from "@/components/design-atoms";
-import { BusinessContactCard } from "@/components/doc/business-contact-card";
+import { BuilderBasicsCard } from "@/components/engagement/builder-basics-card";
 import {
   EngagementDocuments,
   type EngagementDocItem,
 } from "@/components/doc/engagement-documents";
-import { getBusinessContactForEngagement } from "@/lib/actions/operator-contact";
+import { getBuilderBasicsForEngagement } from "@/lib/actions/operator-builder";
 import { getSignedDocsForEngagement } from "@/lib/actions/operator-docs";
 import { docMeta, quoteDocMeta } from "@/lib/doc/doc-summary";
 import type { Engagement } from "@/lib/types";
+
+export const metadata = { title: "Builder" };
 
 export default async function OperatorEngagementPage() {
   const profile = await getCurrentProfile();
@@ -33,7 +35,7 @@ export default async function OperatorEngagementPage() {
   // membership and read RLS-restricted project data via the admin client.
   // Operators see the final, signed documents — the ones they signed follow the
   // engagement here; drafts stay builder-internal.
-  const contact = engagement ? await getBusinessContactForEngagement(engagement) : null;
+  const builder = engagement ? await getBuilderBasicsForEngagement(engagement) : null;
   const signed = engagement ? await getSignedDocsForEngagement(engagement) : null;
 
   const docItems: EngagementDocItem[] = [];
@@ -71,11 +73,11 @@ export default async function OperatorEngagementPage() {
         <div className="krowe-page-head">
           <div>
             <h1 className="krowe-page-title">
-              <Ember size={22} /> Engagement
+              <Ember size={22} /> Builder
             </h1>
             <div className="krowe-page-sub">
               <span style={{ fontStyle: "italic", textTransform: "none", letterSpacing: "normal" }}>
-                The business details and documents your builder is working from.
+                Who you&apos;re working with and the documents you&apos;ve signed.
               </span>
             </div>
           </div>
@@ -83,11 +85,11 @@ export default async function OperatorEngagementPage() {
 
         {engagement ? (
           <div className="space-y-5">
-            {contact ? (
-              <BusinessContactCard contact={contact} label="Business contact" variant="card" />
+            {builder ? (
+              <BuilderBasicsCard builder={builder} />
             ) : (
               <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
-                No business details have been added to this engagement yet.
+                Builder details aren&apos;t available yet.
               </div>
             )}
 
@@ -101,8 +103,8 @@ export default async function OperatorEngagementPage() {
           </div>
         ) : (
           <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
-            No engagement yet — once your builder invites you, the business details and documents
-            will show here.
+            No project yet — once your builder invites you, their profile and your signed
+            documents will show here.
           </div>
         )}
       </div>

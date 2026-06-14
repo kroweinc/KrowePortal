@@ -6,6 +6,7 @@ import { PublicProfileView } from "@/components/builder-profile/public-profile-v
 
 // Owner-only preview — keep it out of search engines like the share links.
 export const metadata: Metadata = {
+  title: "Profile Preview",
   robots: { index: false, follow: false },
 };
 

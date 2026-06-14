@@ -7,7 +7,7 @@ import { ApprovalDeliverableProvider } from "@/components/approval-deliverable-p
 
 const OPERATOR_TABS = [
   { label: "Tasks", href: "/o", icon: "list-checks" },
-  { label: "Engagement", href: "/o/engagement", icon: "briefcase" },
+  { label: "Builder", href: "/o/engagement", icon: "briefcase" },
   { label: "Project", href: "/o/project", icon: "folder-kanban" },
 ];
 

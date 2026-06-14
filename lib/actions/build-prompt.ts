@@ -69,7 +69,7 @@ export async function generateBuildPromptAction(
       ok: false,
       needsRepo: true,
       error:
-        "No GitHub repo is connected for this task. Connect a repo in GitHub settings or on the engagement.",
+        "No GitHub repo is connected for this task. Connect a repo in GitHub settings or on the client.",
     };
   }
 

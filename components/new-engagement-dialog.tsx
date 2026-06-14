@@ -26,7 +26,7 @@ export function NewEngagementDialog() {
 
   function handleCreate() {
     if (!title.trim()) {
-      setError("Give the engagement a name first.");
+      setError("Give the client a name first.");
       return;
     }
     setError(null);
@@ -66,11 +66,11 @@ export function NewEngagementDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button size="sm">New engagement</Button>
+        <Button size="sm">New client</Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New engagement</DialogTitle>
+          <DialogTitle>New client</DialogTitle>
         </DialogHeader>
 
         {!token ? (
@@ -82,13 +82,13 @@ export function NewEngagementDialog() {
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Engagement name (e.g. Acme rebuild)"
+              placeholder="Client name (e.g. Acme rebuild)"
               maxLength={120}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             />
             {error && <p className="text-xs text-red-600">{error}</p>}
             <Button onClick={handleCreate} disabled={isPending} className="w-full">
-              {isPending ? "Creating…" : "Create engagement"}
+              {isPending ? "Creating…" : "Create client"}
             </Button>
           </div>
         ) : (

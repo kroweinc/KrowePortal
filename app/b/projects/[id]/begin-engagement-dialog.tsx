@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Rocket } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -47,7 +48,7 @@ export function BeginEngagementDialog({
 
   function handleBegin() {
     if (!title.trim()) {
-      setError("Give the engagement a name first.");
+      setError("Give the client a name first.");
       return;
     }
     setError(null);
@@ -88,23 +89,20 @@ export function BeginEngagementDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        {contractSigned ? (
-          <Button size="sm">Begin engagement</Button>
-        ) : (
-          <Button variant="outline" size="sm">
-            Begin engagement early
-          </Button>
-        )}
+        <button type="button" className="engage-cta">
+          <Rocket size={15} strokeWidth={2} />
+          {contractSigned ? "Begin client" : "Begin client early"}
+        </button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Begin engagement</DialogTitle>
+          <DialogTitle>Begin client</DialogTitle>
         </DialogHeader>
 
         {!result ? (
           <div className="space-y-4 pt-2">
             <p className="text-sm text-neutral-500">
-              Turn this project into a live engagement with a task board and repo.
+              Turn this project into a live client with a task board and repo.
             </p>
             {!contractSigned && (
               <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -115,7 +113,7 @@ export function BeginEngagementDialog({
             <Input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Engagement name"
+              placeholder="Client name"
               maxLength={120}
               onKeyDown={(e) => e.key === "Enter" && handleBegin()}
             />
@@ -161,7 +159,7 @@ export function BeginEngagementDialog({
 
             {error && <p className="text-xs text-red-600">{error}</p>}
             <Button onClick={handleBegin} disabled={isPending} className="w-full">
-              {isPending ? "Starting…" : "Begin engagement"}
+              {isPending ? "Starting…" : "Begin client"}
             </Button>
           </div>
         ) : (

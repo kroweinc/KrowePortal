@@ -109,12 +109,6 @@ const PrdFeatureSchema = z.object({
   examples: z.array(z.string().min(1).max(200)).max(20).default([]),
 });
 
-const PrdUserStorySchema = z.object({
-  asA: z.string().max(120).default(""),
-  iWant: z.string().max(300).default(""),
-  soThat: z.string().max(300).default(""),
-});
-
 const PrdUserRoleSchema = z.object({
   role: z.string().min(1).max(120),
   // One–two sentence narrative for this named user sub-group.
@@ -234,7 +228,6 @@ export const PrdContentSchema = z.object({
   coreUserFlow: z.array(z.string().min(1).max(400)).max(20).default([]),
   features: z.array(PrdFeatureSchema).max(30).default([]),
   requirements: z.array(z.string().min(1).max(400)).max(40).default([]),
-  userStories: z.array(PrdUserStorySchema).max(30).default([]),
   // Every page/screen in this version and what it displays.
   pagesScreens: z.array(PrdPageSchema).max(20).default([]),
   // Testable, binary acceptance checklist (distinct from successMetrics).

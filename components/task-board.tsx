@@ -242,7 +242,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
         <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
           {optimisticTasks.length === 0
             ? "No tasks yet — hit the + button to add something to the queue."
-            : "No tasks in this engagement yet — hit the + button to add one."}
+            : "No tasks for this client yet — hit the + button to add one."}
         </div>
       ) : (
       <div className="krowe-board">

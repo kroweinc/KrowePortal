@@ -7,6 +7,8 @@ import { ResetPasswordForm } from "./reset-password-form";
 // /auth/callback first to exchange the recovery code for a session. If that
 // session is present, the user can set a new password; otherwise the link is
 // stale and we send them back to request a fresh one.
+export const metadata = { title: "Reset Password" };
+
 export default async function ResetPasswordPage() {
   const supabase = await createClient();
   const {

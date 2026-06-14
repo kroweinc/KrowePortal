@@ -3,10 +3,10 @@
 /* PRD Dashboard — the builder's PRD screen with two modes:
    • Edit    — summary strip + section rail with click-any-field inline editing.
    • Preview — the same summary strip + section rail, read-only: every edit
-               affordance (inputs, add/remove, Save/Send/Delete, re-draft) hidden.
+               affordance (inputs, add/remove, Save/Send/Delete) hidden.
    Edits persist automatically (debounced) the moment any field — tech stack,
    integrations, any section — changes; the explicit Save button is an optional
-   "save now". Also carries Send / Delete and the AI "Re-draft from notes". */
+   "save now". Also carries Send / Delete. */
 
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
@@ -14,7 +14,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Send, Sparkles, Check, Link2, Receipt } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
-import { updatePrdContent, sendPrd, deletePrd, regeneratePrd } from "@/lib/actions/prds";
+import { updatePrdContent, sendPrd, deletePrd } from "@/lib/actions/prds";
 import type { Prd, PrdContent } from "@/lib/types";
 import { PrdDocument } from "@/components/prd/prd-document";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
@@ -58,8 +58,6 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
   const [mode, setMode] = useState<"edit" | "preview">("edit");
   const [title, setTitle] = useState(prd.title);
   const [content, setContent] = useState<PrdContent>(prd.content ?? {});
-  const [notes, setNotes] = useState(prd.source_notes ?? "");
-  const [showRegen, setShowRegen] = useState(false);
   const [refine, setRefine] = useState<{ open: boolean; sectionId: string | null }>({
     open: false,
     sectionId: null,
@@ -203,23 +201,6 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
     });
   }
 
-  function regenerate() {
-    if (!confirm("Re-draft this PRD from the notes below? Your current edits will be replaced.")) return;
-    startTransition(async () => {
-      const result = await regeneratePrd(prd.id, notes);
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
-      // regeneratePrd persists server-side; setting content here makes the doc
-      // dirty vs. lastSavedRef, so auto-save reconciles any local title edit too.
-      setContent(result.content);
-      setShowRegen(false);
-      toast.success("Re-drafted");
-      router.refresh();
-    });
-  }
-
   const editing = mode === "edit";
 
   return (
@@ -238,20 +219,7 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
         </a>
 
         <header className="dash-header">
-          <div className="dash-header__row">
-            <div className="dash-header__lead">
-              <EditContext.Provider value={{ editing }}>
-                <h1 className="dash-title dash-title--serif">
-                  <InlineText value={title} onChange={setTitle} placeholder="PRD title" serif />
-                </h1>
-              </EditContext.Provider>
-              <div className="dash-meta">
-                <BriefStatusPill status={prd.status} />
-                {prd.sent_at && <span className="dash-updated">Sent {formatDateTime(prd.sent_at)}</span>}
-              </div>
-            </div>
-
-            <div className="dash-header__actions">
+          <div className="dash-header__actions">
               <div className="mode-toggle" role="tablist" aria-label="View mode">
                 <button
                   type="button"
@@ -286,7 +254,6 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
               </button>
               {editing && (
                 <div className="dash-actions">
-                  <SaveStatus state={saveState} onRetry={saveNow} />
                   {isDraft && (
                     <button type="button" className="prd-btn prd-btn--ghost" onClick={remove} disabled={isPending}>
                       Delete
@@ -300,14 +267,13 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
                   >
                     <Sparkles className="h-3.5 w-3.5" /> Refine a section
                   </button>
-                  <button
-                    type="button"
-                    className="prd-btn prd-btn--outline"
-                    onClick={saveNow}
-                    disabled={isPending || saveState === "saving" || !dirty}
-                  >
-                    {saveState === "saving" ? "Saving…" : isDraft ? "Save draft" : "Save changes"}
-                  </button>
+                  <SaveControl
+                    state={saveState}
+                    dirty={dirty}
+                    isDraft={isDraft}
+                    isPending={isPending}
+                    onSave={saveNow}
+                  />
                   {isDraft && (
                     <button type="button" className="prd-btn prd-btn--primary" onClick={send} disabled={isPending}>
                       <Send className="h-3.5 w-3.5" /> Send to client
@@ -315,33 +281,20 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
                   )}
                 </div>
               )}
+          </div>
+
+          <div className="dash-header__lead">
+            <EditContext.Provider value={{ editing }}>
+              <h1 className="dash-title dash-title--serif">
+                <InlineText value={title} onChange={setTitle} placeholder="PRD title" serif />
+              </h1>
+            </EditContext.Provider>
+            <div className="dash-meta">
+              <BriefStatusPill status={prd.status} />
+              {prd.sent_at && <span className="dash-updated">Sent {formatDateTime(prd.sent_at)}</span>}
             </div>
           </div>
         </header>
-
-        {editing && isDraft && (
-          <div className="regen-panel">
-            <button type="button" className="regen-toggle" onClick={() => setShowRegen((s) => !s)}>
-              <Sparkles className="h-4 w-4" /> Re-draft from notes
-            </button>
-            {showRegen && (
-              <div className="regen-body">
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={8}
-                  placeholder="Paste fresh notes to re-draft from…"
-                  className="regen-textarea"
-                />
-                <div className="regen-actions">
-                  <button type="button" className="prd-btn prd-btn--primary" onClick={regenerate} disabled={isPending}>
-                    {isPending ? "Drafting…" : "Re-draft PRD"}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         <PrdStatStrip content={content} />
 
@@ -389,26 +342,52 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
   );
 }
 
-/** Small live-region badge reflecting the auto-save state. */
-function SaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
+/** Combined save pill: reflects the live auto-save state and, whenever there are
+    pending edits, doubles as the explicit "save now" button. At rest it reads
+    "Saved"; with unsaved edits it reads "Save draft" / "Save changes". */
+function SaveControl({
+  state,
+  dirty,
+  isDraft,
+  isPending,
+  onSave,
+}: {
+  state: SaveState;
+  dirty: boolean;
+  isDraft: boolean;
+  isPending: boolean;
+  onSave: () => void;
+}) {
+  if (state === "saving") {
+    return (
+      <span className="prd-btn prd-btn--outline is-saved" aria-live="polite">
+        <span className="save-spinner" aria-hidden="true" /> Saving…
+      </span>
+    );
+  }
+  if (state === "error") {
+    return (
+      <button
+        type="button"
+        className="prd-btn prd-btn--outline is-error"
+        onClick={onSave}
+        disabled={isPending}
+        aria-live="polite"
+      >
+        Save failed — retry
+      </button>
+    );
+  }
+  if (dirty) {
+    return (
+      <button type="button" className="prd-btn prd-btn--outline" onClick={onSave} disabled={isPending}>
+        {isDraft ? "Save draft" : "Save changes"}
+      </button>
+    );
+  }
   return (
-    <span className={"dash-save-status is-" + state} aria-live="polite">
-      {state === "saving" && (
-        <>
-          <span className="save-spinner" aria-hidden="true" /> Saving…
-        </>
-      )}
-      {state === "saved" && (
-        <>
-          <Check className="h-3 w-3" aria-hidden="true" /> Saved
-        </>
-      )}
-      {state === "unsaved" && <>Unsaved changes</>}
-      {state === "error" && (
-        <button type="button" className="dash-save-retry" onClick={onRetry}>
-          Save failed — retry
-        </button>
-      )}
+    <span className="prd-btn prd-btn--outline is-saved" aria-live="polite">
+      <Check className="h-3 w-3" aria-hidden="true" /> Saved
     </span>
   );
 }

@@ -393,7 +393,7 @@ export function PortalPreview() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <MiniNav icon="tasks" label="Tasks" active />
-          <MiniNav icon="engagements" label="Engagements" count={2} />
+          <MiniNav icon="engagements" label="Clients" count={2} />
           <MiniNav icon="repo" label="Repo" />
           <MiniNav icon="documents" label="Documents" count={5} />
         </div>
@@ -412,7 +412,7 @@ export function PortalPreview() {
             fontSize: 12,
           }}
         >
-          <NavIcon name="plus" size={13} /> New engagement
+          <NavIcon name="plus" size={13} /> New client
         </div>
         <div
           style={{

@@ -33,14 +33,19 @@ export function derivePipeline(input: {
   prds: Pick<Prd, "status">[];
   quotes: Pick<Quote, "status">[];
   contracts: Pick<Contract, "status">[];
-  engagement: Pick<Engagement, "id"> | null;
+  engagement: Pick<Engagement, "id" | "started_at"> | null;
 }): ProjectPipeline {
   const contractStatus = docStageStatus(input.contracts);
+  // The engagement row can exist as a shell (operator accepted a doc) before
+  // the build actually begins — only started_at marks it live. An unstarted
+  // shell keeps this stage "not_started" so the pipeline doesn't claim
+  // "Engagement live" off a PRD acceptance.
+  const engagementStarted = input.engagement?.started_at != null;
   const stages: PipelineStage[] = [
     { key: "prd", label: "PRD", status: docStageStatus(input.prds) },
     { key: "quote", label: "Quote", status: docStageStatus(input.quotes) },
     { key: "contract", label: "Contract", status: contractStatus },
-    { key: "engagement", label: "Engagement", status: input.engagement ? "done" : "not_started" },
+    { key: "engagement", label: "Client", status: engagementStarted ? "done" : "not_started" },
   ];
 
   const current =
@@ -50,6 +55,6 @@ export function derivePipeline(input: {
     stages,
     current,
     contractSigned: contractStatus === "signed",
-    engagementStarted: input.engagement !== null,
+    engagementStarted,
   };
 }

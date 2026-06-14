@@ -19,6 +19,9 @@ export type QuoteGenInput = {
   forceFinal: boolean;
   /** No PRD and no notes — interview broad→specific over more rounds and emit a contextSummary. */
   deepContext?: boolean;
+  /** Builder's default blended rate; calibrates the model's effort sizing and the
+      fallback rate on the returned content. Defaults to DEFAULT_QUOTE_HOURLY_RATE. */
+  hourlyRate?: number;
   /** Today's date as an ISO calendar date (YYYY-MM-DD). */
   currentDate: string;
 };
@@ -46,9 +49,9 @@ const SECTIONS = `The quote uses these JSON keys. Write a polished, client-ready
 11. validityDays (number, optional) — how many days the quote stays valid (e.g. 30).
 12. footerNote (string) — a short closing note, e.g. "Prepared from the product PRD. Pricing is an implementation estimate and may change if scope, integrations, or compliance requirements expand."`;
 
-const PRICING_RULES = `Pricing rules (CRITICAL — price by EFFORT, assuming an AI-assisted builder):
+const pricingRules = (rate: number) => `Pricing rules (CRITICAL — price by EFFORT, assuming an AI-assisted builder):
 - The builder works WITH AI coding agents. Straightforward UI, forms, pages, CRUD, and standard dashboards are largely ONE-SHOT — an agent generates most of it in a single prompt and the builder's real time is review, wiring, and a quick test, NOT hand-coding from scratch. Estimate the builder's actual hours under that reality. Traditional hand-coding estimates (a form = a day) are WRONG here.
-- Price every line item by its realistic builder-HOURS (one builder + agents). The runtime multiplies your hours by $${DEFAULT_QUOTE_HOURLY_RATE}/hr. Output "hours" only; do NOT output dollar amounts, subtotals, costs, or totals — those are computed for you.
+- Price every line item by its realistic builder-HOURS (one builder + agents). The runtime multiplies your hours by $${rate}/hr. Output "hours" only; do NOT output dollar amounts, subtotals, costs, or totals — those are computed for you.
 - Calibration (AI-assisted, the anchors that matter):
   • A basic form, page, CRUD screen, or simple UI an agent one-shots: ~0.5–1.5 hours — NOT half a day. When several such items live in one module they're often built in one agent pass, so size them as that small COMBINED effort; don't price each as if hand-built from scratch.
   • A whole module of standard CRUD/dashboard work: ~2–6 hours total.
@@ -61,9 +64,10 @@ const QUALITY_RULES = `Depth and honesty:
 - Ground every module, line item, and justification in the ACTUAL product (the PRD or notes provided). Never invent features the product doesn't have.
 - You MAY include realistic illustrative line items typical for the product's modules, but keep them plausible for THIS product.
 - Do NOT fabricate client-specific facts (a real signed budget, a real deadline). The quote is an estimate the builder sends to align on price.
-- Write for a non-technical owner: plain language, no jargon in the purpose/description/justification text.`;
+- Write for a non-technical owner: plain language, no jargon in the purpose/description/justification text.
+- If the business context contains a "SOP / Discovery Call Transcript", use it as the raw discovery source for module scope: mine it for what to build, do NOT re-ask in the interview what it already answers, and never paste transcript text verbatim into quote fields.`;
 
-function buildSystemPrompt(forceFinal: boolean, deepContext = false): string {
+function buildSystemPrompt(forceFinal: boolean, rate: number, deepContext = false): string {
   const deepBlock = deepContext
     ? `
 
@@ -78,7 +82,7 @@ Voice: clear, concrete, non-technical. A small-business owner should understand 
 
 ${SECTIONS}
 
-${PRICING_RULES}
+${pricingRules(rate)}
 
 ${QUALITY_RULES}
 
@@ -155,7 +159,8 @@ async function callOpenAI(
 
 export async function generateQuote(input: QuoteGenInput, meta?: AiCallMeta): Promise<QuoteGenResult> {
   const schema = input.forceFinal ? QuoteFinalResult : QuoteGenerationResult;
-  const systemPrompt = buildSystemPrompt(input.forceFinal, input.deepContext);
+  const rate = input.hourlyRate ?? DEFAULT_QUOTE_HOURLY_RATE;
+  const systemPrompt = buildSystemPrompt(input.forceFinal, rate, input.deepContext);
   const userPrompt = buildUserPrompt(input);
   const maxTokens = 16000;
 
@@ -198,7 +203,7 @@ export async function generateQuote(input: QuoteGenInput, meta?: AiCallMeta): Pr
   }
   const content: QuoteContent = {
     ...(data.content as QuoteContent),
-    hourlyRate: (data.content as QuoteContent).hourlyRate ?? DEFAULT_QUOTE_HOURLY_RATE,
+    hourlyRate: (data.content as QuoteContent).hourlyRate ?? rate,
   };
   return { kind: "quote", content, contextSummary: data.contextSummary };
 }
