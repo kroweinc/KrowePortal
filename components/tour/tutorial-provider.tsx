@@ -59,6 +59,9 @@ export function TutorialProvider({
   const tourNavRef = useRef(false); // true while the tour itself is navigating
   const finishedRef = useRef(false); // guards against double status writes
   const autoStartedRef = useRef(false);
+  // Only dismiss on pathname *changes* — the effect also runs after auto-start on
+  // the initial mount, which previously marked the tour dismissed before step 1.
+  const prevPathnameRef = useRef(pathname);
 
   // Records the terminal status once and tears the overlay down. The public
   // driver.destroy() does NOT re-fire onDestroyStarted, so this never recurses.
@@ -158,7 +161,12 @@ export function TutorialProvider({
   // If the user navigates away on their own mid-tour, dismiss it cleanly so no
   // orphaned overlay lingers. Tour-initiated navigations set tourNavRef first.
   useEffect(() => {
-    if (!driverRef.current) return;
+    if (!driverRef.current) {
+      prevPathnameRef.current = pathname;
+      return;
+    }
+    if (prevPathnameRef.current === pathname) return;
+    prevPathnameRef.current = pathname;
     if (tourNavRef.current) {
       tourNavRef.current = false;
       return;
