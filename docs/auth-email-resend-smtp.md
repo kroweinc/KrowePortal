@@ -51,9 +51,11 @@ With Custom SMTP enabled, the "team members only" restriction is lifted.
 
 ### 5. Supabase — confirm the redirect allow-list
 Dashboard → **Authentication → URL Configuration**:
-- **Site URL:** `https://krowe-portal.vercel.app`
+- **Site URL:** `https://krowehub.com`
 - **Redirect URLs** must include:
-  - `https://krowe-portal.vercel.app/**`
+  - `https://krowehub.com/auth/callback`
+  - `https://krowehub.com/auth/callback?*`
+  - `https://kroweportal.vercel.app/**` temporarily during rollout
   - `http://localhost:3030/**`
 
 The app's `emailRedirectTo` values must match an entry here, or Supabase falls

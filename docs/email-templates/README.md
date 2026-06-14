@@ -22,7 +22,7 @@ Supabase renders them and hands the result to Resend over Custom SMTP. See
   to hex, a bulletproof (VML) CTA button for Outlook, hidden preheader text.
 - **Brand:** primary `#f97316`, Instrument Serif headlines (Georgia fallback —
   custom web fonts only render in Apple/iOS Mail), warm neutral palette.
-- **Logo** is loaded from the deployed app: `https://krowe-portal.vercel.app/images/KroweLogo.png`.
+- **Logo** is loaded from the deployed app: `https://krowehub.com/images/KroweLogo.png`.
 
 ## Preview in a real inbox
 

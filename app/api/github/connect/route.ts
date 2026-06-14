@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { randomBytes } from "crypto"
 import { getCurrentProfile } from "@/lib/auth"
+import { getPublicAppOrigin } from "@/lib/app-origin"
 import { getGithubOAuthConfig } from "@/lib/github/oauth-config"
 
 export const GH_OAUTH_STATE_COOKIE = "gh_oauth_state"
@@ -38,7 +39,9 @@ export async function GET(request: Request) {
     })
   }
 
-  const { clientId, redirectUri } = getGithubOAuthConfig(new URL(request.url).origin)
+  const requestOrigin = new URL(request.url).origin
+  const publicOrigin = getPublicAppOrigin(requestOrigin)
+  const { clientId, redirectUri } = getGithubOAuthConfig(publicOrigin)
   if (!clientId || !redirectUri) {
     return NextResponse.json(
       {
