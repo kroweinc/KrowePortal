@@ -66,7 +66,7 @@ export function ContractPublicView({
                 builderName={builderName}
                 action={acceptAndSignContract}
                 onReject={rejectContract}
-                heading="Accept &amp; sign this contract"
+                heading="Accept & sign this contract"
                 consentText="I agree to the terms in this agreement, and consent to sign electronically. This signature executes the agreement with"
                 buttonLabel="Sign contract"
                 isAuthenticated={viewer.isAuthenticated}

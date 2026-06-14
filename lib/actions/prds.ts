@@ -13,6 +13,7 @@ import { generatePrd } from "@/lib/ai/generate-prd";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
+import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
 import { fieldsForSection, refinableSection } from "@/lib/prd/section-fields";
 import type { Question } from "@/lib/ai/schemas";
 import { PrdContentSchema } from "@/lib/ai/schemas";
@@ -369,6 +370,10 @@ export async function sendPrd(id: string): Promise<{ success: true } | { error: 
     .update({ status: "sent", sent_at: now, updated_at: now })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  // Surface the PRD in the client's portal right away when it's unambiguous who
+  // that client is (see connectProjectToClientOnSend).
+  await connectProjectToClientOnSend(before.project_id as string, profile.id);
 
   revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true };

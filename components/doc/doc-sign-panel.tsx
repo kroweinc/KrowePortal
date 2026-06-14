@@ -115,22 +115,26 @@ export function DocSignPanel({
       return;
     }
     startTransition(async () => {
-      const result = await action(token, { signerName: name, consent });
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success("Accepted");
-      if (result.redirectTo) {
-        router.push(result.redirectTo);
-      } else {
-        router.refresh();
+      try {
+        const result = await action(token, { signerName: name, consent });
+        if ("error" in result) {
+          toast.error(result.error);
+          return;
+        }
+        toast.success("Accepted");
+        if (result.redirectTo) {
+          router.push(result.redirectTo);
+        } else {
+          router.refresh();
+        }
+      } catch {
+        toast.error("Couldn't sign this document. Please try again.");
       }
     });
   }
 
   return (
-    <div className="mt-6 rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
+    <div className="doc-sign-panel mb-10 mt-6 rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
       <div className="mb-4 flex items-center gap-2">
         <PenLine className="h-4 w-4 text-neutral-500" />
         <h2 className="text-sm font-semibold text-neutral-900">{heading}</h2>
@@ -155,54 +159,59 @@ export function DocSignPanel({
         </span>
       </label>
 
-      <Button
-        onClick={sign}
-        disabled={isPending}
-        className="mt-8 w-full bg-[#f97316] text-white hover:bg-[#ea580c]"
-      >
-        {isPending ? "Accepting…" : buttonLabel}
-      </Button>
+      {!declining ? (
+        <div className={`doc-sign-panel__actions mt-8 flex gap-3 ${onReject ? "" : "flex-col"}`}>
+          <Button
+            type="button"
+            onClick={sign}
+            disabled={isPending}
+            className={`${onReject ? "flex-1" : "w-full"} bg-[#f97316] text-white hover:bg-[#ea580c]`}
+          >
+            {isPending ? "Accepting…" : buttonLabel}
+          </Button>
+          {onReject && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeclining(true)}
+              disabled={isPending}
+              className="flex-1"
+            >
+              Decline
+            </Button>
+          )}
+        </div>
+      ) : (
+        onReject && (
+          <div className="doc-sign-panel__actions mt-8">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-neutral-900">
+                Reason for declining <span className="font-normal text-neutral-400">(optional)</span>
+              </span>
+              <textarea
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                rows={2}
+                maxLength={2000}
+                placeholder="Let them know what needs to change"
+                className="w-full rounded border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
+              />
+            </label>
+            <div className="mt-3 flex gap-3">
+              <Button type="button" variant="outline" onClick={() => setDeclining(false)} disabled={isPending} className="flex-1">
+                Cancel
+              </Button>
+              <Button type="button" onClick={decline} disabled={isPending} className="flex-1">
+                {isPending ? "Sending…" : "Confirm decline"}
+              </Button>
+            </div>
+          </div>
+        )
+      )}
 
-      <p className="mt-4 text-center text-xs text-neutral-400">
+      <p className="doc-sign-panel__disclaimer">
         Your name, account, the time, and your IP address are recorded as your electronic signature.
       </p>
-
-      {onReject && !declining && (
-        <button
-          type="button"
-          onClick={() => setDeclining(true)}
-          disabled={isPending}
-          className="mt-6 w-full text-center text-xs text-neutral-500 transition-colors hover:text-neutral-800 disabled:opacity-50"
-        >
-          Decline this document
-        </button>
-      )}
-
-      {onReject && declining && (
-        <div className="mt-4 border-t border-neutral-100 pt-4">
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-neutral-900">
-              Reason for declining <span className="font-normal text-neutral-400">(optional)</span>
-            </span>
-            <textarea
-              value={rejectNote}
-              onChange={(e) => setRejectNote(e.target.value)}
-              rows={2}
-              maxLength={2000}
-              placeholder="Let them know what needs to change"
-              className="w-full rounded border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-400"
-            />
-          </label>
-          <div className="mt-3 flex gap-2">
-            <Button variant="ghost" onClick={() => setDeclining(false)} disabled={isPending} className="flex-1">
-              Cancel
-            </Button>
-            <Button variant="outline" onClick={decline} disabled={isPending} className="flex-1">
-              {isPending ? "Sending…" : "Confirm decline"}
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -217,7 +226,7 @@ export function DocSignedBanner({
   signedAt?: string | null;
 }) {
   return (
-    <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 p-5 text-center">
+    <div className="mt-6 ml-auto w-fit rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-4 text-center">
       <p className="text-sm font-medium text-emerald-900">{message}</p>
       {signerName && signedAt && (
         <p className="mt-1 text-xs text-emerald-700">

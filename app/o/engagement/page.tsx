@@ -8,7 +8,10 @@ import {
   type EngagementDocItem,
 } from "@/components/doc/engagement-documents";
 import { getBuilderBasicsForEngagement } from "@/lib/actions/operator-builder";
-import { getSignedDocsForEngagement } from "@/lib/actions/operator-docs";
+import {
+  getSignedDocsForEngagements,
+  getPendingDocsForEngagements,
+} from "@/lib/actions/operator-docs";
 import { docMeta, quoteDocMeta } from "@/lib/doc/doc-summary";
 import type { Engagement } from "@/lib/types";
 
@@ -29,41 +32,89 @@ export default async function OperatorEngagementPage() {
     .eq("operator_id", profile.id)
     .order("created_at", { ascending: false });
 
-  const engagement = ((engagements ?? []) as Engagement[])[0];
+  const engagementList = (engagements ?? []) as Engagement[];
+  const primaryEngagement = engagementList[0];
 
-  // Read-through to the linked project. Both actions authorize engagement
-  // membership and read RLS-restricted project data via the admin client.
-  // Operators see the final, signed documents — the ones they signed follow the
-  // engagement here; drafts stay builder-internal.
-  const builder = engagement ? await getBuilderBasicsForEngagement(engagement) : null;
-  const signed = engagement ? await getSignedDocsForEngagement(engagement) : null;
+  // Read-through to the linked projects. Both actions authorize engagement
+  // membership and read RLS-restricted project data via the admin client, and
+  // aggregate across ALL of the operator's engagements — so a client with a
+  // "Shared space" invite plus one or more project engagements sees every
+  // project's documents, not just the most recent engagement's. Pending
+  // documents are the ones the builder has sent and is waiting on the operator
+  // to sign; signed documents are the finalized ones; drafts stay
+  // builder-internal. Builder basics stay scoped to the primary (newest)
+  // engagement.
+  const builder = primaryEngagement
+    ? await getBuilderBasicsForEngagement(primaryEngagement)
+    : null;
+  const [signed, pending] = engagementList.length
+    ? await Promise.all([
+        getSignedDocsForEngagements(engagementList),
+        getPendingDocsForEngagements(engagementList),
+      ])
+    : [null, null];
+
+  const pendingItems: EngagementDocItem[] = [];
+  for (const prd of pending?.prds ?? []) {
+    if (!prd.token) continue;
+    pendingItems.push({
+      id: prd.id,
+      title: prd.title,
+      status: prd.status,
+      meta: docMeta(prd),
+      href: `/o/prd/${prd.token}`,
+    });
+  }
+  for (const quote of pending?.quotes ?? []) {
+    if (!quote.token) continue;
+    pendingItems.push({
+      id: quote.id,
+      title: quote.title,
+      status: quote.status,
+      meta: quoteDocMeta(quote),
+      href: `/o/quotes/${quote.token}`,
+    });
+  }
+  for (const contract of pending?.contracts ?? []) {
+    if (!contract.token) continue;
+    pendingItems.push({
+      id: contract.id,
+      title: contract.title,
+      status: contract.status,
+      meta: docMeta(contract),
+      href: `/o/contract/${contract.token}`,
+    });
+  }
 
   const docItems: EngagementDocItem[] = [];
-  if (signed?.prd?.token) {
+  for (const prd of signed?.prds ?? []) {
+    if (!prd.token) continue;
     docItems.push({
-      id: signed.prd.id,
-      title: signed.prd.title,
-      status: signed.prd.status,
-      meta: docMeta(signed.prd),
-      href: `/prd/${signed.prd.token}`,
+      id: prd.id,
+      title: prd.title,
+      status: prd.status,
+      meta: docMeta(prd),
+      href: `/o/prd/${prd.token}`,
     });
   }
-  if (signed?.quote?.token) {
+  for (const quote of signed?.quotes ?? []) {
+    if (!quote.token) continue;
     docItems.push({
-      id: signed.quote.id,
-      title: signed.quote.title,
-      status: signed.quote.status,
-      meta: quoteDocMeta(signed.quote),
-      href: `/quotes/${signed.quote.token}`,
+      id: quote.id,
+      title: quote.title,
+      status: quote.status,
+      meta: quoteDocMeta(quote),
+      href: `/o/quotes/${quote.token}`,
     });
   }
-  if (signed?.contract?.token) {
+  for (const contract of signed?.contracts ?? []) {
+    if (!contract.token) continue;
     docItems.push({
-      id: signed.contract.id,
-      title: signed.contract.title,
-      status: signed.contract.status,
-      meta: docMeta(signed.contract),
-      href: `/contract/${signed.contract.token}`,
+      id: contract.id,
+      title: contract.title,
+      status: contract.status,
+      meta: docMeta(contract),
+      href: `/o/contract/${contract.token}`,
     });
   }
 
@@ -77,13 +128,13 @@ export default async function OperatorEngagementPage() {
             </h1>
             <div className="krowe-page-sub">
               <span style={{ fontStyle: "italic", textTransform: "none", letterSpacing: "normal" }}>
-                Who you&apos;re working with and the documents you&apos;ve signed.
+                Who you&apos;re working with and the documents on your engagement.
               </span>
             </div>
           </div>
         </div>
 
-        {engagement ? (
+        {primaryEngagement ? (
           <div className="space-y-5">
             {builder ? (
               <BuilderBasicsCard builder={builder} />
@@ -95,10 +146,31 @@ export default async function OperatorEngagementPage() {
 
             <section className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
               <h2 className="mb-2 text-sm font-semibold text-neutral-900">Documents</h2>
-              <EngagementDocuments
-                items={docItems}
-                emptyLabel="No signed documents yet — they'll appear here once you sign them."
-              />
+              {pendingItems.length === 0 && docItems.length === 0 ? (
+                <EngagementDocuments
+                  items={[]}
+                  emptyLabel="No documents yet — anything your builder sends will show up here to review."
+                />
+              ) : (
+                <div className="space-y-4">
+                  {pendingItems.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                        Awaiting your signature
+                      </h3>
+                      <EngagementDocuments items={pendingItems} />
+                    </div>
+                  )}
+                  {docItems.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                        Signed
+                      </h3>
+                      <EngagementDocuments items={docItems} />
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
           </div>
         ) : (

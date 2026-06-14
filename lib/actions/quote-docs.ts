@@ -10,6 +10,7 @@ import { getProjectMaterials } from "@/lib/actions/project-materials";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
 import { getPrdById } from "@/lib/actions/prds";
+import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
 import { friendlyAiError } from "@/lib/ai/client";
 import { generateQuote } from "@/lib/ai/generate-quote";
 import { assertAiBudget } from "@/lib/ai/usage";
@@ -379,6 +380,10 @@ export async function sendQuote(id: string): Promise<{ success: true } | { error
     .update({ status: "sent", sent_at: now, updated_at: now })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  // Surface the quote in the client's portal right away when it's unambiguous
+  // who that client is (see connectProjectToClientOnSend).
+  await connectProjectToClientOnSend(before.project_id as string, profile.id);
 
   revalidateQuote(before.project_id as string, id, before.token as string | null);
   return { success: true };

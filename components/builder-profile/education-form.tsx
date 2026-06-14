@@ -1,51 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SuggestInput } from "./suggest-input";
-import { updateProfileBasics } from "@/lib/actions/builder-profile";
 import { UNIVERSITY_NAMES, COMMON_MAJORS, findUniversityDomain } from "@/lib/education";
+import { useProfileDraft } from "./profile-draft-context";
 
-interface EducationFormProps {
-  initialSchool: string;
-  initialMajor: string;
-  initialYear: string;
-}
-
-export function EducationForm({ initialSchool, initialMajor, initialYear }: EducationFormProps) {
-  const [school, setSchool] = useState(initialSchool);
-  const [major, setMajor] = useState(initialMajor);
-  const [year, setYear] = useState(initialYear);
-  const [saved, setSaved] = useState({
-    school: initialSchool,
-    major: initialMajor,
-    year: initialYear,
-  });
-  const [isPending, startTransition] = useTransition();
-
-  const dirty =
-    school.trim() !== saved.school.trim() ||
-    major.trim() !== saved.major.trim() ||
-    year.trim() !== saved.year.trim();
-
-  function save() {
-    if (!dirty || isPending) return;
-    startTransition(async () => {
-      const result = await updateProfileBasics({
-        education_school: school.trim(),
-        education_major: major.trim(),
-        education_year: year.trim(),
-      });
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      setSaved({ school, major, year });
-      toast.success("Saved");
-    });
-  }
+// Education editor — bound to the shared draft, autosaved (no Save button).
+export function EducationForm() {
+  const { draft, setField } = useProfileDraft();
 
   return (
     <div className="space-y-4">
@@ -55,8 +17,8 @@ export function EducationForm({ initialSchool, initialMajor, initialYear }: Educ
         </label>
         <SuggestInput
           id="bp-edu-school"
-          value={school}
-          onChange={setSchool}
+          value={draft.educationSchool}
+          onChange={(v) => setField("educationSchool", v)}
           suggestions={UNIVERSITY_NAMES}
           maxLength={120}
           placeholder="e.g. University of Texas at Austin"
@@ -73,8 +35,8 @@ export function EducationForm({ initialSchool, initialMajor, initialYear }: Educ
           </label>
           <SuggestInput
             id="bp-edu-major"
-            value={major}
-            onChange={setMajor}
+            value={draft.educationMajor}
+            onChange={(v) => setField("educationMajor", v)}
             suggestions={COMMON_MAJORS}
             maxLength={120}
             placeholder="e.g. Computer Science"
@@ -87,17 +49,12 @@ export function EducationForm({ initialSchool, initialMajor, initialYear }: Educ
           </label>
           <Input
             id="bp-edu-year"
-            value={year}
-            onChange={(e) => setYear(e.target.value)}
+            value={draft.educationYear}
+            onChange={(e) => setField("educationYear", e.target.value)}
             maxLength={40}
             placeholder="e.g. Class of 2027"
           />
         </div>
-      </div>
-      <div className="flex justify-end">
-        <Button size="sm" onClick={save} disabled={!dirty || isPending}>
-          {isPending ? "Saving…" : "Save"}
-        </Button>
       </div>
     </div>
   );

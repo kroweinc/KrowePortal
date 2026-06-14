@@ -14,6 +14,7 @@ import { exhibitFromQuote } from "@/lib/contract/exhibit";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeSopBlock } from "@/lib/project/business-context";
 import { todayISODate, isISODate } from "@/lib/contract/effective-date";
+import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
 import type { Contract, ContractContent, QuoteContent, PrdContent } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -266,6 +267,10 @@ export async function sendContract(
     .update({ status: "sent", sent_at: now, updated_at: now, content })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  // Surface the contract in the client's portal right away when it's
+  // unambiguous who that client is (see connectProjectToClientOnSend).
+  await connectProjectToClientOnSend(before.project_id as string, profile.id);
 
   revalidateContract(before.project_id as string, id, before.token as string | null);
   return { success: true, effectiveDate };

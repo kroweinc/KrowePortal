@@ -1,37 +1,24 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Sparkles, Wand2, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { updateProfileTags } from "@/lib/actions/builder-profile";
 import { BUILDER_TAG_PRESETS } from "@/lib/types";
+import { useProfileDraft } from "./profile-draft-context";
 
 const MAX_TAGS = 10;
 const MAX_TAG_LENGTH = 40;
 
-interface TagsEditorProps {
-  initialTags: string[];
-  // Badges derived from the rest of the profile. Shown read-only — to change
-  // them the builder edits the matching profile section, not this list.
-  autoTags?: string[];
-}
-
-function sameTags(a: string[], b: string[]) {
-  return a.length === b.length && a.every((t, i) => t === b[i]);
-}
-
-export function TagsEditor({ initialTags, autoTags = [] }: TagsEditorProps) {
-  const [tags, setTags] = useState<string[]>(initialTags);
-  const [saved, setSaved] = useState<string[]>(initialTags);
+// Tags editor — bound to the shared draft. Changes autosave; the auto-derived
+// badges come live from the draft context.
+export function TagsEditor() {
+  const { draft, autoTags, setTags } = useProfileDraft();
+  const tags = draft.tags;
   const [input, setInput] = useState("");
-  const [isPending, startTransition] = useTransition();
 
-  const dirty = !sameTags(tags, saved);
-
-  // Hide any auto tag the builder has since added by hand this session, so it
-  // doesn't appear as both an editable chip and an auto chip.
+  // Hide any auto tag the builder has since added by hand, so it doesn't appear
+  // as both an editable chip and an auto chip.
   const manualKeys = new Set(tags.map((t) => t.toLowerCase()));
   const shownAutoTags = autoTags.filter((t) => !manualKeys.has(t.toLowerCase()));
 
@@ -63,19 +50,6 @@ export function TagsEditor({ initialTags, autoTags = [] }: TagsEditorProps) {
       e.preventDefault();
       addTag(input);
     }
-  }
-
-  function save() {
-    if (!dirty || isPending) return;
-    startTransition(async () => {
-      const result = await updateProfileTags({ tags });
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      setSaved(tags);
-      toast.success("Saved");
-    });
   }
 
   // Don't suggest a preset that's already a manual chip or shown as an auto tag.
@@ -160,12 +134,6 @@ export function TagsEditor({ initialTags, autoTags = [] }: TagsEditorProps) {
           ))}
         </div>
       )}
-
-      <div className="flex justify-end">
-        <Button size="sm" onClick={save} disabled={!dirty || isPending}>
-          {isPending ? "Saving…" : "Save"}
-        </Button>
-      </div>
     </div>
   );
 }

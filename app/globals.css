@@ -2730,3 +2730,234 @@ button.krowe-desc-inline-text:hover {
 .driver-popover.krowe-tour .driver-popover-close-btn:hover {
   color: var(--foreground);
 }
+
+/* ============================================================
+   DOCUMENTS LIST — project pipeline overview (/b/projects)
+   Ported from Claude Design "Documents.html". Comfortable density.
+   Each row is a prospective business with a status, the current
+   pipeline stage (PRD → Quote → Contract → Client), and a mini
+   four-dot pipeline showing how far the docs have progressed.
+   ============================================================ */
+
+/* serif italic quip in the page sub-line */
+.krowe-page-sub .krowe-quip {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 16px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0.01em;
+  color: var(--faint-foreground);
+}
+
+/* "New document" — dark pill with a hover lift */
+.krowe-doc-newbtn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 38px; padding: 0 17px; border-radius: var(--radius-full);
+  border: 1px solid var(--foreground); background: var(--foreground);
+  color: var(--background); font-size: 13px; font-weight: 600;
+  box-shadow: var(--shadow-1); flex-shrink: 0;
+  transition: transform 180ms var(--ease-out-smooth), box-shadow 180ms var(--ease-out-smooth);
+}
+.krowe-doc-newbtn:hover { transform: translateY(-1px); box-shadow: var(--shadow-2); }
+.krowe-doc-newbtn:active { transform: translateY(0) scale(0.98); }
+
+/* Filter bar */
+.krowe-filterbar { display: flex; align-items: center; gap: 6px; margin-bottom: 18px; }
+.krowe-filter {
+  height: 30px; padding: 0 13px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--muted-foreground);
+  font-family: var(--font-sans); font-size: 12.5px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: color 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth), border-color 150ms var(--ease-out-smooth);
+}
+.krowe-filter .fc { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint-foreground); }
+.krowe-filter:hover { color: var(--foreground); border-color: var(--border-strong); }
+.krowe-filter.on { background: var(--foreground); border-color: var(--foreground); color: var(--background); }
+.krowe-filter.on .fc { color: color-mix(in srgb, var(--background) 70%, transparent); }
+.krowe-filterbar .grow { flex: 1; }
+.krowe-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--faint-foreground); }
+
+/* Doc list + cards */
+.krowe-doc-list { display: flex; flex-direction: column; gap: 12px; }
+.krowe-doc-card {
+  position: relative; display: flex; align-items: center; gap: 17px;
+  background: white; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: 17px 20px 17px 17px; box-shadow: var(--shadow-1); cursor: pointer; overflow: hidden;
+  transition: transform 170ms var(--ease-out-smooth), box-shadow 170ms var(--ease-out-smooth), border-color 170ms var(--ease-out-smooth);
+}
+.krowe-doc-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(var(--primary), var(--primary-accent));
+  opacity: 0; transition: opacity 170ms var(--ease-out-smooth);
+}
+.krowe-doc-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); border-color: var(--border-strong); }
+.krowe-doc-card:hover::before { opacity: 1; }
+
+/* logo tile — flat tinted surface, one quiet hue per project; also the canvas
+   for the brand logo fetched from the project's imported website (see below) */
+.krowe-doc-logo {
+  position: relative; overflow: hidden;
+  width: 52px; height: 52px; flex-shrink: 0; border-radius: 13px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 600; letter-spacing: 0.01em;
+  background: var(--surface-sunken); border: 1px solid var(--border); color: var(--muted-foreground);
+  transition: color 170ms var(--ease-out-smooth), border-color 170ms var(--ease-out-smooth);
+}
+.krowe-doc-card:hover .krowe-doc-logo { border-color: var(--border-strong); }
+.krowe-doc-mono { line-height: 1; }
+.krowe-doc-logo.ink   { color: oklch(34% 0.012 60); }
+.krowe-doc-logo.clay  { color: var(--primary); background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 22%, white); }
+.krowe-doc-logo.slate { color: oklch(44% 0.03 250); }
+.krowe-doc-logo.moss  { color: oklch(42% 0.04 150); }
+
+/* Brand fetch: when the real logo resolves from the project website it sits on a
+   clean white tile, contained with a little padding so it has breathing room
+   rather than filling edge-to-edge, and the initials monogram is suppressed.
+   When BrandLogo misses (renders its neutral .brand-logo--fallback span), that
+   span is hidden so the tinted tile + initials show through unchanged. :has()
+   keys off the real <img> only. */
+.krowe-doc-logo:has(img.brand-logo) { background: #fff; }
+.krowe-doc-logo:has(img.brand-logo) .krowe-doc-mono { display: none; }
+.krowe-doc-logo img.brand-logo {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  border: none; border-radius: inherit; padding: 7px;
+  background: #fff; object-fit: contain; box-sizing: border-box;
+}
+.krowe-doc-logo .brand-logo--fallback { display: none; }
+
+.krowe-doc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.krowe-doc-titleline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.krowe-doc-name { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--foreground); white-space: nowrap; }
+.krowe-doc-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--faint-foreground); }
+.krowe-doc-meta .who { display: inline-flex; align-items: center; gap: 6px; }
+.krowe-doc-meta .mini-av { width: 17px; height: 17px; border-radius: 999px; background: var(--surface-sunken); border: 1px solid var(--border); color: var(--muted-foreground); display: inline-flex; align-items: center; justify-content: center; font-size: 8.5px; font-weight: 600; }
+.krowe-doc-meta .dot { width: 3px; height: 3px; border-radius: 999px; background: var(--border-strong); }
+
+/* status badge with a leading dot */
+.krowe-doc-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; letter-spacing: 0.01em; padding: 2px 9px; border-radius: var(--radius-full); border: 1px solid transparent; white-space: nowrap; }
+.krowe-doc-badge .bd { width: 5px; height: 5px; border-radius: 999px; }
+.krowe-doc-badge.active { background: var(--success-soft); color: var(--success); border-color: color-mix(in srgb, var(--success) 22%, white); }
+.krowe-doc-badge.active .bd { background: var(--success); }
+.krowe-doc-badge.won { background: var(--success-soft); color: var(--success); border-color: color-mix(in srgb, var(--success) 22%, white); }
+.krowe-doc-badge.won .bd { background: var(--success); }
+.krowe-doc-badge.cold { background: var(--surface-sunken); color: var(--muted-foreground); border-color: var(--border); }
+.krowe-doc-badge.cold .bd { background: var(--faint-foreground); }
+
+/* stage chip */
+.krowe-doc-stage { display: inline-flex; align-items: center; gap: 0; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.01em; color: var(--muted-foreground); background: var(--surface-subtle); border: 1px solid var(--border); padding: 2px 9px 2px 8px; border-radius: var(--radius-full); white-space: nowrap; }
+.krowe-doc-stage b { color: var(--foreground); font-weight: 600; }
+
+/* mini pipeline */
+.krowe-pipe { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.krowe-pipe .pdot { --c: var(--border-strong); position: relative; width: 26px; height: 5px; border-radius: 999px; background: color-mix(in srgb, var(--c) 28%, var(--surface-sunken)); }
+.krowe-pipe .pdot.fill { background: var(--c); }
+.krowe-pipe .pdot[data-c="draft"]  { --c: var(--warning); }
+.krowe-pipe .pdot[data-c="sent"]   { --c: var(--builder-text); }
+.krowe-pipe .pdot[data-c="signed"] { --c: var(--success); }
+.krowe-pipe .pdot[data-c="live"]   { --c: var(--primary); }
+.krowe-pipe-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; flex-shrink: 0; }
+.krowe-pipe-label { font-family: var(--font-mono); font-size: 10px; color: var(--faint-foreground); letter-spacing: 0.01em; }
+
+.krowe-doc-go { color: var(--faint-foreground); flex-shrink: 0; transition: transform 200ms var(--ease-out-smooth), color 160ms; }
+.krowe-doc-card:hover .krowe-doc-go { color: var(--muted-foreground); transform: translateX(2px); }
+
+/* empty state */
+.krowe-doc-empty { margin-top: 40px; text-align: center; padding: 56px 24px; border: 1px dashed var(--border-strong); border-radius: var(--radius-xl); background: color-mix(in srgb, var(--surface-subtle) 60%, transparent); }
+.krowe-doc-empty .eg { display: block; margin: 0 auto 16px; }
+.krowe-doc-empty p { font-family: var(--font-serif); font-style: italic; font-size: 19px; color: var(--muted-foreground); margin: 0 0 18px; }
+
+@media (max-width: 720px) {
+  .krowe-pipe-wrap { display: none; }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Profile Setup — "Smart Scroll" redesign (direction C) + side live preview.
+   All scoped under .ppsetup so the prototype's generic class names
+   (.ss-*, .medallion, .strength, .saver, …) can't collide with the rest of
+   the app — same convention as .prdnew / .docov above. Tokens are shared, so
+   these are ported verbatim from the design bundle's krowe.css + Smart Scroll.
+   ────────────────────────────────────────────────────────────────────────── */
+.ppsetup { flex: 1; min-width: 0; background:
+  radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--primary) 5%, transparent), transparent 70%),
+  var(--background); }
+
+/* sticky header: strength + autosave + chip nav. Window is the scroll
+   container (the builder topbar is not sticky), so top:0 is correct. */
+.ppsetup .ss-stick { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--background) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+.ppsetup .ss-stick .inner { max-width: 880px; margin: 0 auto; padding: 14px 36px 0; }
+.ppsetup .ss-top { display: flex; align-items: center; gap: 16px; }
+.ppsetup .ss-top .strwrap { flex: 1; min-width: 0; }
+.ppsetup .ss-top .strwrap .lab { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.ppsetup .ss-top .strwrap .lab b { font-size: 13px; font-weight: 600; }
+.ppsetup .ss-top .strwrap .lab .pct { font-family: var(--font-mono); font-size: 12px; color: var(--primary); font-weight: 600; }
+.ppsetup .ss-top .strwrap .lab .s { font-size: 12px; color: var(--muted-foreground); }
+
+.ppsetup .ss-chips { display: flex; gap: 6px; padding: 12px 0; overflow-x: auto; }
+.ppsetup .ss-chips::-webkit-scrollbar { height: 0; }
+.ppsetup .ss-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 13px; border-radius: var(--radius-full); border: 1px solid var(--border); background: white; color: var(--muted-foreground); font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: all 140ms var(--ease-out-smooth); }
+.ppsetup .ss-chip .tk { width: 6px; height: 6px; border-radius: 999px; background: var(--border-strong); }
+.ppsetup .ss-chip .tk.ok { background: var(--success); }
+.ppsetup .ss-chip:hover { border-color: var(--border-strong); color: var(--foreground); }
+.ppsetup .ss-chip.on { background: var(--foreground); border-color: var(--foreground); color: var(--background); }
+.ppsetup .ss-chip.on .tk.ok { background: #fff; }
+
+.ppsetup .ss-page { max-width: 880px; margin: 0 auto; padding: 8px 36px 100px; }
+.ppsetup .ss-hero { padding: 24px 4px 18px; }
+.ppsetup .ss-hero h1 { font-family: var(--font-serif); font-size: 44px; line-height: 1; letter-spacing: -0.015em; margin: 0; display: flex; align-items: center; gap: 14px; color: var(--foreground); }
+.ppsetup .ss-hero .q { margin-top: 12px; font-family: var(--font-serif); font-style: italic; font-size: 17px; color: var(--faint-foreground); }
+
+.ppsetup .ss-share { display: flex; align-items: center; gap: 12px; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 11px 12px 11px 14px; margin-bottom: 26px; }
+.ppsetup .ss-share .live-dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
+.ppsetup .ss-share .live-dot.off { background: var(--faint-foreground); box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint-foreground) 18%, transparent); }
+.ppsetup .ss-share .url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; color: var(--faint-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ppsetup .ss-sec { scroll-margin-top: 124px; margin-bottom: 26px; }
+.ppsetup .ss-sec > .sh { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.ppsetup .ss-sec > .sh .medallion { width: 44px; height: 44px; border-radius: 13px; }
+.ppsetup .ss-sec > .sh .tt { flex: 1; min-width: 0; }
+.ppsetup .ss-sec > .sh .tt h2 { font-family: var(--font-serif); font-size: 27px; line-height: 1; letter-spacing: -0.01em; margin: 0; color: var(--foreground); }
+.ppsetup .ss-sec > .sh .tt p { margin: 5px 0 0; font-size: 12.5px; color: var(--faint-foreground); }
+.ppsetup .ss-sec > .sh .sh-actions { flex-shrink: 0; }
+.ppsetup .ss-card { background: white; border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); padding: 20px; }
+.ppsetup .ss-sec.accent .ss-card { background: color-mix(in srgb, var(--primary-soft) 30%, white); border-color: color-mix(in srgb, var(--primary) 16%, white); }
+
+/* medallion (section glyph) */
+.ppsetup .medallion { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-sunken); border: 1px solid var(--border); color: var(--muted-foreground); }
+.ppsetup .medallion svg { width: 19px; height: 19px; }
+.ppsetup .medallion.clay { background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 22%, white); color: var(--primary); }
+
+/* strength meter (ring + bar) */
+.ppsetup .strength { display: flex; align-items: center; gap: 16px; }
+.ppsetup .strength .pp-ring { position: relative; width: 56px; height: 56px; flex-shrink: 0; }
+.ppsetup .strength .pp-ring svg { transform: rotate(-90deg); }
+.ppsetup .strength .pp-ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--foreground); }
+.ppsetup .strength-bar { height: 7px; border-radius: 999px; background: var(--surface-sunken); overflow: hidden; position: relative; }
+.ppsetup .strength-bar > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, var(--primary), var(--primary-accent)); transition: width 600ms var(--ease-out-smooth); }
+
+/* autosave indicator */
+.ppsetup .saver { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; white-space: nowrap; color: var(--faint-foreground); transition: color 200ms var(--ease-out-smooth); }
+.ppsetup .saver svg { width: 13px; height: 13px; }
+.ppsetup .saver[data-state="saving"] { color: var(--muted-foreground); }
+.ppsetup .saver[data-state="saving"] svg { animation: pp-spin 0.9s linear infinite; }
+.ppsetup .saver[data-state="saved"] { color: var(--success); }
+@keyframes pp-spin { to { transform: rotate(360deg); } }
+
+/* live-preview drawer caption */
+.ppsetup-preview-cap { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint-foreground); }
+
+/* touch 1781474655 */
+
+/* Doc sign panel — spacing scoped so global `p { margin: 0 }` can't collapse it. */
+.doc-sign-panel {
+  padding-bottom: 2.5rem;
+}
+.doc-sign-panel__disclaimer {
+  margin: 1.75rem 0 0;
+  padding-top: 1.25rem;
+  border-top: 1px solid oklch(92% 0.005 60);
+  text-align: center;
+  font-size: 0.75rem;
+  line-height: 1.625;
+  color: oklch(64% 0.008 60);
+}

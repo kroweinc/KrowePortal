@@ -1,91 +1,33 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { importFromPortfolio, updateProfileBasics } from "@/lib/actions/builder-profile";
-import { githubProfileUrl } from "@/lib/project/business-context";
+import { importFromPortfolio } from "@/lib/actions/builder-profile";
+import { useProfileDraft } from "./profile-draft-context";
 
-interface BasicsFormProps {
-  initialDisplayName: string;
-  accountName: string;
-  initialHeadline: string;
-  initialBio: string;
-  initialLinkedinUrl: string;
-  initialGithubUrl: string;
-  initialPortfolioUrl: string;
-}
-
-export function BasicsForm({
-  initialDisplayName,
-  accountName,
-  initialHeadline,
-  initialBio,
-  initialLinkedinUrl,
-  initialGithubUrl,
-  initialPortfolioUrl,
-}: BasicsFormProps) {
-  const [displayName, setDisplayName] = useState(initialDisplayName);
-  const [headline, setHeadline] = useState(initialHeadline);
-  const [bio, setBio] = useState(initialBio);
-  const [linkedinUrl, setLinkedinUrl] = useState(initialLinkedinUrl);
-  const [githubUrl, setGithubUrl] = useState(initialGithubUrl);
-  const [portfolioUrl, setPortfolioUrl] = useState(initialPortfolioUrl);
-  const [saved, setSaved] = useState({
-    displayName: initialDisplayName,
-    headline: initialHeadline,
-    bio: initialBio,
-    linkedinUrl: initialLinkedinUrl,
-    githubUrl: initialGithubUrl,
-    portfolioUrl: initialPortfolioUrl,
-  });
-  const [isPending, startTransition] = useTransition();
+// Basics editor — bound to the shared draft. No Save button: text fields
+// autosave (debounced) and URL fields flush on blur via the draft context.
+export function BasicsForm() {
+  const { draft, accountDisplayName, setField, commitUrls } = useProfileDraft();
   const [isImporting, startImport] = useTransition();
   const router = useRouter();
 
-  const dirty =
-    displayName.trim() !== saved.displayName.trim() ||
-    headline.trim() !== saved.headline.trim() ||
-    bio.trim() !== saved.bio.trim() ||
-    linkedinUrl.trim() !== saved.linkedinUrl.trim() ||
-    githubUrl.trim() !== saved.githubUrl.trim() ||
-    portfolioUrl.trim() !== saved.portfolioUrl.trim();
-
-  function save() {
-    if (!dirty || isPending) return;
-    startTransition(async () => {
-      const result = await updateProfileBasics({
-        display_name: displayName.trim(),
-        headline: headline.trim(),
-        bio: bio.trim(),
-        linkedin_url: linkedinUrl.trim() || null,
-        github_url: githubUrl.trim() || null,
-        portfolio_url: portfolioUrl.trim() || null,
-      });
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      setSaved({ displayName, headline, bio, linkedinUrl, githubUrl, portfolioUrl });
-      toast.success("Saved");
-    });
-  }
-
   function importFromSite() {
-    if (!portfolioUrl.trim()) {
+    const url = draft.portfolioUrl.trim();
+    if (!url) {
       toast.error("Enter your portfolio URL first.");
       return;
     }
     startImport(async () => {
-      const result = await importFromPortfolio({ url: portfolioUrl.trim() });
+      const result = await importFromPortfolio({ url });
       if (result.error) {
         toast.error(result.error);
         return;
       }
-      setSaved((s) => ({ ...s, portfolioUrl }));
       const parts: string[] = [];
       if (result.experienceImported) {
         parts.push(
@@ -102,6 +44,7 @@ export function BasicsForm({
       toast.success(
         parts.length > 0 ? `Imported from portfolio: ${parts.join(", ")}.` : "Profile updated from portfolio."
       );
+      // Server changed text + collections; the draft merges them on refresh.
       router.refresh();
     });
   }
@@ -114,10 +57,10 @@ export function BasicsForm({
         </label>
         <Input
           id="bp-display-name"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
+          value={draft.displayName}
+          onChange={(e) => setField("displayName", e.target.value)}
           maxLength={80}
-          placeholder={accountName}
+          placeholder={accountDisplayName}
         />
         <p className="text-[11px] text-neutral-400">
           Shown on your public profile. Leave blank to use your account name.
@@ -129,8 +72,8 @@ export function BasicsForm({
         </label>
         <Input
           id="bp-headline"
-          value={headline}
-          onChange={(e) => setHeadline(e.target.value)}
+          value={draft.headline}
+          onChange={(e) => setField("headline", e.target.value)}
           maxLength={120}
           placeholder="e.g. Full-stack builder — Next.js, Supabase, AI products"
         />
@@ -141,13 +84,16 @@ export function BasicsForm({
         </label>
         <textarea
           id="bp-bio"
-          value={bio}
-          onChange={(e) => setBio(e.target.value)}
+          value={draft.bio}
+          onChange={(e) => setField("bio", e.target.value)}
           maxLength={2000}
           rows={4}
           placeholder="A short intro clients will read first."
           className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-400"
         />
+        <p className="text-[11px] italic text-neutral-400">
+          Don&apos;t overthink it. A sentence or two is fine.
+        </p>
       </div>
       <div className="space-y-1.5">
         <label htmlFor="bp-linkedin" className="block text-xs font-medium text-neutral-700">
@@ -155,8 +101,9 @@ export function BasicsForm({
         </label>
         <Input
           id="bp-linkedin"
-          value={linkedinUrl}
-          onChange={(e) => setLinkedinUrl(e.target.value)}
+          value={draft.linkedinUrl}
+          onChange={(e) => setField("linkedinUrl", e.target.value)}
+          onBlur={commitUrls}
           maxLength={500}
           placeholder="https://linkedin.com/in/you"
         />
@@ -167,9 +114,9 @@ export function BasicsForm({
         </label>
         <Input
           id="bp-github"
-          value={githubUrl}
-          onChange={(e) => setGithubUrl(e.target.value)}
-          onBlur={() => setGithubUrl((v) => githubProfileUrl(v) || v.trim())}
+          value={draft.githubUrl}
+          onChange={(e) => setField("githubUrl", e.target.value)}
+          onBlur={commitUrls}
           maxLength={500}
           placeholder="username or https://github.com/you"
         />
@@ -184,8 +131,9 @@ export function BasicsForm({
         <div className="flex flex-wrap items-center gap-2">
           <Input
             id="bp-portfolio"
-            value={portfolioUrl}
-            onChange={(e) => setPortfolioUrl(e.target.value)}
+            value={draft.portfolioUrl}
+            onChange={(e) => setField("portfolioUrl", e.target.value)}
+            onBlur={commitUrls}
             maxLength={500}
             placeholder="https://yoursite.com"
             disabled={isImporting}
@@ -199,11 +147,6 @@ export function BasicsForm({
         <p className="text-[11px] text-neutral-400">
           Shown on your profile — we can also autofill your profile from it.
         </p>
-      </div>
-      <div className="flex justify-end">
-        <Button size="sm" onClick={save} disabled={!dirty || isPending}>
-          {isPending ? "Saving…" : "Save"}
-        </Button>
       </div>
     </div>
   );

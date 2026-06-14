@@ -26,7 +26,7 @@ export default async function ProjectPrdPage({
   return (
     <main className="krowe-page">
       <div className="krowe-page-inner">
-        <BusinessContactCard contact={project} label="Prepared for" variant="card" className="mb-6" />
+        <BusinessContactCard contact={project} label="Prepared for" variant="card" className="mb-6 prd-print-hide" />
         <PrdDashboard
           prd={prd}
           backHref={`/b/projects/${id}`}

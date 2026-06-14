@@ -176,7 +176,7 @@ export async function acceptAndSignQuote(token: string, input: AcceptInput): Pro
 
   const ip = await clientIp();
   const now = new Date().toISOString();
-  const { error } = await admin
+  const { data: signedRows, error } = await admin
     .from("quotes")
     .update({
       status: "signed",
@@ -189,10 +189,13 @@ export async function acceptAndSignQuote(token: string, input: AcceptInput): Pro
       updated_at: now,
     })
     .eq("token", token)
-    .eq("status", "sent");
+    .eq("status", "sent")
+    .select("id");
   if (error) return { error: error.message };
+  if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
 
   revalidatePath(`/quotes/${token}`);
+  revalidatePath(`/o/quotes/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
   revalidatePath(`/b/projects/${projectId}/quotes/${docId}`);
   revalidatePath("/o/project");
@@ -206,7 +209,7 @@ export async function acceptAndSignContract(token: string, input: AcceptInput): 
 
   const ip = await clientIp();
   const now = new Date().toISOString();
-  const { error } = await admin
+  const { data: signedRows, error } = await admin
     .from("contracts")
     .update({
       status: "signed",
@@ -218,8 +221,10 @@ export async function acceptAndSignContract(token: string, input: AcceptInput): 
       updated_at: now,
     })
     .eq("token", token)
-    .eq("status", "sent");
+    .eq("status", "sent")
+    .select("id");
   if (error) return { error: error.message };
+  if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
 
   // A signed contract means the deal is won — only flip active projects.
   await admin
@@ -238,6 +243,7 @@ export async function acceptAndSignContract(token: string, input: AcceptInput): 
     .is("started_at", null);
 
   revalidatePath(`/contract/${token}`);
+  revalidatePath(`/o/contract/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
   revalidatePath(`/b/projects/${projectId}/contract/${docId}`);
   revalidatePath("/o/project");
@@ -251,7 +257,7 @@ export async function acceptAndSignPrd(token: string, input: AcceptInput): Promi
 
   const ip = await clientIp();
   const now = new Date().toISOString();
-  const { error } = await admin
+  const { data: signedRows, error } = await admin
     .from("prds")
     .update({
       status: "signed",
@@ -263,10 +269,13 @@ export async function acceptAndSignPrd(token: string, input: AcceptInput): Promi
       updated_at: now,
     })
     .eq("token", token)
-    .eq("status", "sent");
+    .eq("status", "sent")
+    .select("id");
   if (error) return { error: error.message };
+  if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
 
   revalidatePath(`/prd/${token}`);
+  revalidatePath(`/o/prd/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
   revalidatePath(`/b/projects/${projectId}/prd/${docId}`);
   revalidatePath("/o/project");
@@ -342,6 +351,7 @@ async function rejectDoc(
   if (error) return { error: error.message };
 
   revalidatePath(`${publicPathPrefix}/${token}`);
+  revalidatePath(`/o${publicPathPrefix}/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
   revalidatePath(`/b/projects/${projectId}/${builderDocSegment}/${docId}`);
   revalidatePath("/o/project");

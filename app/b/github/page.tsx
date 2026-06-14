@@ -239,6 +239,7 @@ export default async function ProjectProfilePage({
           repoUrl={repoUrl}
           builderName={operatorName ? `for ${operatorName}` : profile.display_name}
           startedAt={engagement?.created_at ?? new Date().toISOString()}
+          settingsHref="/b/github/settings"
         />
 
         <Suspense fallback={<OverviewCardSkeleton />}>

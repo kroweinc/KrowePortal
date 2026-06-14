@@ -10,6 +10,8 @@ interface ProjectHeaderProps {
   repoUrl: string | null;
   builderName: string | null;
   startedAt: string;
+  /** When set, renders a Settings button linking to repo/GitHub settings. */
+  settingsHref?: string;
 }
 
 function formatDate(iso: string): string {
@@ -31,6 +33,7 @@ export function ProjectHeader({
   repoUrl,
   builderName,
   startedAt,
+  settingsHref,
 }: ProjectHeaderProps) {
   const fallbackTagline = builderName
     ? `Built by ${builderName} · started ${formatDate(startedAt)}`
@@ -161,10 +164,12 @@ export function ProjectHeader({
             View on GitHub
             <Icon name="external" size={12} color="var(--muted-foreground)" />
           </a>
-          <Link href="/o" className="k-btn">
-            <Icon name="settings" size={14} />
-            Settings
-          </Link>
+          {settingsHref ? (
+            <Link href={settingsHref} className="k-btn">
+              <Icon name="settings" size={14} />
+              Settings
+            </Link>
+          ) : null}
         </div>
       ) : null}
     </header>

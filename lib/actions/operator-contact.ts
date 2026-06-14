@@ -14,7 +14,7 @@ export type BusinessContact = Pick<
  * project. The projects table is RLS-restricted to the project's builder
  * (owner_id = auth.uid()), so the operator reads it through the admin client
  * after we verify they own the engagement — the same pattern as
- * getSignedDocsForEngagement in operator-docs.ts.
+ * getSignedDocsForEngagements in operator-docs.ts.
  */
 export async function getBusinessContactForEngagement(
   engagement: Pick<Engagement, "id" | "project_id" | "operator_id">
