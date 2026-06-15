@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import Image from "next/image";
+import { assetUrl } from "@/lib/asset-url";
 
 /* ============================================================
    Shared brand primitives (Krowe design system)
@@ -29,8 +29,11 @@ export function EmberGlyph({ size = 14 }: { size?: number }) {
 
 export function BrandMark({ size = 26 }: { size?: number }) {
   return (
-    <Image
-      src="/KroweIcon.png"
+    // Plain <img> + assetUrl: load from the portal origin so it survives the
+    // krowehub.com path proxy (next/image's optimizer can't, see lib/asset-url).
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={assetUrl("/KroweIcon.png")}
       alt=""
       aria-hidden
       width={size}

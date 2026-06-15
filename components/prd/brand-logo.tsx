@@ -12,6 +12,7 @@
    monogram tile so the row's alignment stays consistent. */
 
 import { useEffect, useState } from "react";
+import { assetUrl } from "@/lib/asset-url";
 
 /** Built-in name → official-website-host directory for the common stack/SaaS
     choices. Keys are lowercase; matching is done against the normalized name and
@@ -209,7 +210,7 @@ export function BrandLogo({
     <img
       key={src}
       className={plain ? "brand-logo brand-logo--plain" : "brand-logo"}
-      src={src}
+      src={assetUrl(src)}
       alt=""
       width={size}
       height={size}
