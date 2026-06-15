@@ -26,6 +26,7 @@ import type {
 } from "@/lib/types";
 import { ContractDocument } from "@/components/contract/contract-document";
 import { useTodayISODate } from "@/lib/contract/use-today";
+import { formatEffectiveDate } from "@/lib/contract/effective-date";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
 import { EditContext, InlineText } from "@/components/prd/dashboard/inline-edit";
 import { EditorSection, TextField, StringListEditor } from "@/components/doc/editor-primitives";
@@ -304,7 +305,7 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
                     <PartyField label="Client" value={content.parties?.client} onChange={(v) => patchParties({ client: v })} />
                     <ReadOnlyField
                       label="Effective date"
-                      value={effectiveDate}
+                      value={formatEffectiveDate(effectiveDate)}
                       hint={isDraft ? "Set to today — locks when sent." : "Locked on send."}
                     />
                   </div>

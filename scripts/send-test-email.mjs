@@ -61,12 +61,12 @@ if (!apiKey) {
 
 // Render: replace Supabase template vars with realistic test values.
 const testConfirmationURL =
-  "https://krowe-portal.vercel.app/auth/callback?code=TEST-LINK-PREVIEW-ONLY&next=%2F";
+  "https://krowehub.com/auth/callback?code=TEST-LINK-PREVIEW-ONLY&next=%2F";
 
 let html = readFileSync(join(root, tpl.file), "utf8");
 html = html
   .replaceAll("{{ .ConfirmationURL }}", testConfirmationURL)
-  .replaceAll("{{ .SiteURL }}", "https://krowe-portal.vercel.app")
+  .replaceAll("{{ .SiteURL }}", "https://krowehub.com")
   .replaceAll("{{ .Email }}", recipient);
 
 const res = await fetch("https://api.resend.com/emails", {

@@ -7,6 +7,7 @@
 import type { ReactNode } from "react";
 import type { ContractContent } from "@/lib/types";
 import { formatUSD } from "@/lib/quote/format";
+import { formatEffectiveDate } from "@/lib/contract/effective-date";
 import "@/components/prd/prd-document.css";
 import "@/components/quote/quote.css";
 
@@ -84,7 +85,7 @@ export function ContractDocument({
             )}
             {shownEffectiveDate && (
               <div>
-                <span className="doc-muted">Effective date:</span> {shownEffectiveDate}
+                <span className="doc-muted">Effective date:</span> {formatEffectiveDate(shownEffectiveDate)}
               </div>
             )}
           </div>
