@@ -55,8 +55,10 @@ Dashboard → **Authentication → URL Configuration**:
 - **Redirect URLs** must include:
   - `https://krowehub.com/auth/callback`
   - `https://krowehub.com/auth/callback?*`
-  - `https://kroweportal.vercel.app/**` temporarily during rollout
   - `http://localhost:3030/**`
+
+Only keep a `*.vercel.app` redirect URL if you intentionally test auth from a
+Vercel preview deployment.
 
 The app's `emailRedirectTo` values must match an entry here, or Supabase falls
 back to Site URL and confirmation links can break.

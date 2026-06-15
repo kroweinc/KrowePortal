@@ -16,3 +16,11 @@ export function todayISODate(date: Date = new Date()): string {
 export function isISODate(value: unknown): value is string {
   return typeof value === "string" && ISO_DATE_RE.test(value);
 }
+
+// Display form: `YYYY-MM-DD` (the stored/canonical shape) → `MM-DD-YYYY`.
+// Leaves anything that isn't an ISO date untouched.
+export function formatEffectiveDate(value: string | null | undefined): string {
+  if (!isISODate(value)) return value ?? "";
+  const [y, m, d] = value.split("-");
+  return `${m}-${d}-${y}`;
+}
