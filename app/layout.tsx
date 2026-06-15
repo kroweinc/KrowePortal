@@ -24,7 +24,7 @@ export const metadata: Metadata = {
         url: assetUrl("/opengraph-image.png"),
         width: 1200,
         height: 630,
-        alt: "Krowe — manage every operator-client in one workspace.",
+        alt: "Krowe",
       },
     ],
   },
