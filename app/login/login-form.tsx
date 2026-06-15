@@ -3,6 +3,12 @@
 import { useState, useTransition, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { GoogleSignInButton } from "./google-signin-button";
+
+// When set, Google sign-in uses the ID-token flow (Google Identity Services →
+// signInWithIdToken), so the consent screen shows our own domain instead of the
+// Supabase project URL. When unset, we fall back to the redirect OAuth flow.
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth_failed: "Sign-in failed. Please try again.",
@@ -283,15 +289,19 @@ export function LoginForm() {
             <span className="h-px flex-1 bg-[var(--border)]" />
           </div>
 
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={isPending}
-            className="flex h-[46px] w-full cursor-pointer items-center justify-center gap-3 whitespace-nowrap rounded-[var(--radius-full)] border border-[var(--border)] bg-[var(--background)] text-[14.5px] font-medium text-[var(--foreground)] transition-[border-color,box-shadow,background-color] duration-[var(--duration-fast)] ease-[var(--ease-out-smooth)] hover:border-[color-mix(in_oklch,var(--foreground)_22%,var(--border))] hover:bg-[var(--surface-subtle)] hover:shadow-[var(--shadow-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--primary)_35%,transparent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <GoogleIcon />
-            Continue with Google
-          </button>
+          {GOOGLE_CLIENT_ID ? (
+            <GoogleSignInButton nextPath={nextPath()} onError={setFormError} />
+          ) : (
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={isPending}
+              className="flex h-[46px] w-full cursor-pointer items-center justify-center gap-3 whitespace-nowrap rounded-[var(--radius-full)] border border-[var(--border)] bg-[var(--background)] text-[14.5px] font-medium text-[var(--foreground)] transition-[border-color,box-shadow,background-color] duration-[var(--duration-fast)] ease-[var(--ease-out-smooth)] hover:border-[color-mix(in_oklch,var(--foreground)_22%,var(--border))] hover:bg-[var(--surface-subtle)] hover:shadow-[var(--shadow-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--primary)_35%,transparent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <GoogleIcon />
+              Continue with Google
+            </button>
+          )}
         </>
       )}
 
