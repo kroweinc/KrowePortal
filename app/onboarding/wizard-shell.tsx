@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties, type ReactNode } from "react";
+import { assetUrl } from "@/lib/asset-url";
 
 /* ============================================================
    KROWE ONBOARDING — editorial shell + primitives
@@ -44,7 +45,7 @@ export function WzWordmark({ ember = false }: { ember?: boolean }) {
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/KroweIcon.png"
+        src={assetUrl("/KroweIcon.png")}
         alt=""
         aria-hidden="true"
         width={22}

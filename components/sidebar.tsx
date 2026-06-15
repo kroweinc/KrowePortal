@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FeedbackDialog } from "@/components/feedback-dialog";
+import { assetUrl } from "@/lib/asset-url";
 import {
   ListChecks,
   Briefcase,
@@ -76,7 +77,7 @@ export function Sidebar({ tabs, basePath }: SidebarProps) {
     <aside className="krowe-sidebar">
       <div className="krowe-sidebar-brand">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/KroweIcon.png" alt="Krowe" />
+        <img src={assetUrl("/KroweIcon.png")} alt="Krowe" />
         <span className="krowe-sidebar-word">Krowe</span>
       </div>
 
