@@ -63,6 +63,12 @@ type Props = {
   onError: (message: string) => void;
 };
 
+/** FedCM + One Tap need extra Google Console origins and are flaky on localhost. */
+function isLocalDevHost(): boolean {
+  const host = window.location.hostname;
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+}
+
 /**
  * "Sign in with Google" using Google Identity Services directly, then exchanging
  * the resulting Google ID token with Supabase via signInWithIdToken().
@@ -107,11 +113,15 @@ export function GoogleSignInButton({ nextPath, onError }: Props) {
       if (cancelled) return;
       rawNonceRef.current = raw;
 
+      const localDev = isLocalDevHost();
+
       gid.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: handleCredential,
         nonce: hashed,
-        use_fedcm_for_prompt: true,
+        // FedCM One Tap on localhost needs http://localhost (no port) in Google
+        // Console and still often fails — keep the button flow only in dev.
+        use_fedcm_for_prompt: !localDev,
       });
       gid.renderButton(parent, {
         type: "standard",
@@ -122,8 +132,8 @@ export function GoogleSignInButton({ nextPath, onError }: Props) {
         logo_alignment: "left",
         width: Math.min(parent.offsetWidth || 360, 400),
       });
-      // One Tap prompt — bonus UX. Fails silently if unsupported/declined.
-      gid.prompt();
+      // One Tap — bonus UX in prod; skip locally to avoid FedCM console noise.
+      if (!localDev) gid.prompt();
     })();
 
     return () => {
