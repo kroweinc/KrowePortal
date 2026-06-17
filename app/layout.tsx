@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Toaster } from "sonner";
 import { assetUrl } from "@/lib/asset-url";
 import "./globals.css";
@@ -72,6 +73,7 @@ export default function RootLayout({
             the app (save confirmations, AI errors, etc.) is a silent no-op. */}
         <Toaster richColors closeButton position="top-center" />
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
