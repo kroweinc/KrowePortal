@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { notifyUser, docSignedEmail } from "@/lib/email/notify";
 import type { Engagement } from "@/lib/types";
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
@@ -194,6 +195,10 @@ export async function acceptAndSignQuote(token: string, input: AcceptInput): Pro
   if (error) return { error: error.message };
   if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
 
+  // Notify the builder (project owner) their quote was signed — fire-and-forget.
+  const quoteEmail = docSignedEmail({ docKind: "quote", signerName, projectName: prep.project.name, projectId });
+  void notifyUser({ userId: prep.project.owner_id, type: "doc_signed", ...quoteEmail });
+
   revalidatePath(`/quotes/${token}`);
   revalidatePath(`/o/quotes/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
@@ -242,6 +247,9 @@ export async function acceptAndSignContract(token: string, input: AcceptInput): 
     .eq("project_id", projectId)
     .is("started_at", null);
 
+  const contractEmail = docSignedEmail({ docKind: "contract", signerName, projectName: prep.project.name, projectId });
+  void notifyUser({ userId: prep.project.owner_id, type: "doc_signed", ...contractEmail });
+
   revalidatePath(`/contract/${token}`);
   revalidatePath(`/o/contract/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
@@ -273,6 +281,9 @@ export async function acceptAndSignPrd(token: string, input: AcceptInput): Promi
     .select("id");
   if (error) return { error: error.message };
   if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
+
+  const prdEmail = docSignedEmail({ docKind: "prd", signerName, projectName: prep.project.name, projectId });
+  void notifyUser({ userId: prep.project.owner_id, type: "doc_signed", ...prdEmail });
 
   revalidatePath(`/prd/${token}`);
   revalidatePath(`/o/prd/${token}`);

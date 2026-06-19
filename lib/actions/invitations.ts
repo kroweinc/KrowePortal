@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { notifyUser, inviteAcceptedEmail } from "@/lib/email/notify";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -358,6 +359,7 @@ export async function acceptInvitation(
     id: string;
     builder_id: string;
     operator_id: string | null;
+    title: string;
   };
 
   if (engagement.operator_id) return { error: "This invite has already been used." };
@@ -407,6 +409,14 @@ export async function acceptInvitation(
     .from("invitations")
     .update({ status: "accepted", accepted_at: new Date().toISOString() })
     .eq("id", invitation.id);
+
+  // Notify the builder their invite was accepted — fire-and-forget.
+  const inviteEmail = inviteAcceptedEmail({
+    operatorName: name,
+    engagementTitle: engagement.title ?? "your client",
+    engagementId: engagement.id,
+  });
+  void notifyUser({ userId: engagement.builder_id, type: "invite_accepted", ...inviteEmail });
 
   // Clear the pending invite cookie now that it's been consumed
   try {

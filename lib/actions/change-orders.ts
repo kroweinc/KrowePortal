@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { notifyUser, changeOrderSignedEmail } from "@/lib/email/notify";
 import type { ChangeOrder, ChangeOrderContent } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -180,7 +181,7 @@ export async function signChangeOrder(
   const supabase = await getClient(profile.id);
   const { data: co } = await supabase
     .from("change_orders")
-    .select("id, status, title, content, delta_amount")
+    .select("id, status, title, content, delta_amount, engagement_id")
     .eq("id", id)
     .single();
   if (!co) return { error: "Change order not found." };
@@ -203,6 +204,24 @@ export async function signChangeOrder(
     p_delta_amount: (co.delta_amount as number | null) ?? content.total ?? 0,
   });
   if (error) return { error: error.message };
+
+  // Notify the builder their change order was signed. Look up the engagement's
+  // builder via the admin client (recipient ≠ actor — the operator signed).
+  const engagementId = co.engagement_id as string;
+  const admin = createAdminClient();
+  const { data: eng } = await admin
+    .from("engagements")
+    .select("builder_id")
+    .eq("id", engagementId)
+    .maybeSingle();
+  if (eng?.builder_id) {
+    const coEmail = changeOrderSignedEmail({
+      title: co.title as string,
+      signerName: parsed.data.signerName,
+      engagementId,
+    });
+    void notifyUser({ userId: eng.builder_id as string, type: "change_order", ...coEmail });
+  }
 
   revalidatePath("/o/project");
   revalidatePath("/b/engagements");

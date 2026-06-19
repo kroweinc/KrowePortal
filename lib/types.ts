@@ -48,6 +48,17 @@ export interface Profile {
   tour_status: TourStatus;
 }
 
+/** Per-user email notification toggles (one row per user, see migration 0059).
+    A missing row means all-on — keep these keys in sync with the migration
+    columns and the NotifyType map in lib/email/notify.ts. */
+export interface NotificationPreferences {
+  user_id: string;
+  notify_doc_signed: boolean;
+  notify_change_order: boolean;
+  notify_invite_accepted: boolean;
+  updated_at: string;
+}
+
 export interface Engagement {
   id: string;
   operator_id: string | null;
