@@ -1,4 +1,4 @@
-import { openai, runChat, AI_MODEL } from "./client";
+import { openai, runChat, AI_MODEL, AI_REASONING_EFFORT } from "./client";
 import { recordAiUsage, type AiCallMeta } from "./usage";
 import { PrdGenerationResult, PrdFinalResult } from "./schemas";
 import type { Question } from "./schemas";
@@ -192,6 +192,7 @@ async function callOpenAIWithResearch(
       tools: [{ type: "web_search" }],
       text: { format: { type: "json_object" } },
       max_output_tokens: maxTokens,
+      ...(AI_REASONING_EFFORT ? { reasoning: { effort: AI_REASONING_EFFORT } } : {}),
     });
     // The Responses API reports usage as input/output tokens — map onto the
     // shared prompt/completion ledger shape.

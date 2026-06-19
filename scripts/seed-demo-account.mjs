@@ -222,10 +222,397 @@ if (taskErr) throw new Error(`tasks: ${taskErr.message}`);
 const byStatus = insertedTasks.reduce((a, t) => ((a[t.status] = (a[t.status] || 0) + 1), a), {});
 console.log(`  ✓ ${insertedTasks.length} tasks (${Object.entries(byStatus).map(([k, v]) => `${v} ${k}`).join(", ")})`);
 
+// ============================================================================
+// 4: rich document/profile data — so EVERY screen shows real, coherent content
+//    instead of empty states. One "Krowe Internal" story across the portal:
+//      • a published builder profile (bio, skills, links, experience, pricing)
+//      • a signed PRD, an accepted Quote, and a sent (awaiting-signature) Contract
+//      • a pasted discovery-call transcript (SOP)
+//    Project docs cascade-delete with the project (recreated above), so this is
+//    idempotent; profile children are explicitly cleared before re-insert.
+// ============================================================================
+const sentAtIso = new Date(Date.now() - 6 * 86400000).toISOString(); // ~6 days ago
+const signedAtIso = new Date(Date.now() - 2 * 86400000).toISOString(); // ~2 days ago
+const SIGNER_IP = "203.0.113.42"; // TEST-NET-3 placeholder
+const OPERATOR_SIGNER = OPERATOR.name; // "Krowe Team" — the client who signed
+
+console.log("\nBuilder profile:");
+const { data: profile, error: profErr } = await admin
+  .from("builder_profiles")
+  .upsert(
+    {
+      user_id: builderId,
+      display_name: BUILDER.name,
+      headline: "AI-native product engineer — full-stack MVPs, shipped in weeks",
+      bio:
+        "I build production web apps end-to-end. The last year I've been heads-down on Krowe — " +
+        "the operator–builder portal you're looking at — taking it from an empty repo to a live " +
+        "platform with auth, an AI document pipeline, and billing. I work solo with Claude Code and " +
+        "ship fast without cutting corners.",
+      linkedin_url: "https://www.linkedin.com/in/krowe-demo",
+      github_url: "https://github.com/krowehub",
+      portfolio_url: "https://krowehub.com",
+      education_school: "University of Texas at Austin",
+      education_major: "Computer Science",
+      education_year: "Class of 2021",
+      tags: ["Technical Co-Founder", "Full-Stack Developer", "AI / ML Engineer", "Shipped a Product"],
+      is_published: true,
+      default_hourly_rate: 95,
+      payment_terms_preset: "50_25_25",
+      design_system_mode: "included",
+      design_fixed_cost: 0,
+    },
+    { onConflict: "user_id" }
+  )
+  .select("id, token")
+  .single();
+if (profErr) throw new Error(`builder_profile: ${profErr.message}`);
+const profileId = profile.id;
+console.log(`  ✓ builder profile published (token ${profile.token.slice(0, 8)}…)`);
+
+// Clear + reseed profile children (the profile row itself persists across runs).
+await admin.from("builder_profile_experience").delete().eq("builder_profile_id", profileId);
+await admin.from("builder_profile_coding_tools").delete().eq("builder_profile_id", profileId);
+await admin.from("builder_profile_projects").delete().eq("builder_profile_id", profileId);
+
+const experience = [
+  {
+    role: "Founder & Lead Engineer",
+    company: "Krowe",
+    company_domain: "krowehub.com",
+    start_label: "2025",
+    end_label: null,
+    description:
+      "Building the operator–builder portal end-to-end — Next.js, Supabase, and an AI document pipeline that turns a discovery call into a signed PRD, quote, and contract.",
+    display_order: 0,
+  },
+  {
+    role: "Senior Full-Stack Engineer",
+    company: "Freelance",
+    company_domain: null,
+    start_label: "2021",
+    end_label: "2025",
+    description: "Shipped SaaS and e-commerce MVPs for early-stage startups, solo and as a tech lead.",
+    display_order: 1,
+  },
+  {
+    role: "Software Engineer",
+    company: "Patel Gaines",
+    company_domain: "patelgaines.com",
+    start_label: "2019",
+    end_label: "2021",
+    description: "Internal tooling and client-facing web apps on a small product team.",
+    display_order: 2,
+  },
+].map((e) => ({ builder_profile_id: profileId, ...e }));
+await admin.from("builder_profile_experience").insert(experience);
+
+const codingTools = [
+  { name: "Claude Code", category: "AI Assistant", url: "https://claude.com/claude-code" },
+  { name: "GitHub Copilot", category: "AI Assistant", url: "https://github.com/features/copilot" },
+  { name: "Cursor", category: "Editor / IDE", url: "https://cursor.com" },
+  { name: "VS Code", category: "Editor / IDE", url: "https://code.visualstudio.com" },
+  { name: "Vercel", category: "DevOps / Cloud", url: "https://vercel.com" },
+  { name: "Supabase", category: "DevOps / Cloud", url: "https://supabase.com" },
+  { name: "Figma", category: "Design", url: "https://figma.com" },
+  { name: "Linear", category: "Productivity", url: "https://linear.app" },
+].map((t, i) => ({ builder_profile_id: profileId, display_order: i, ...t }));
+await admin.from("builder_profile_coding_tools").insert(codingTools);
+
+const profileProjects = [
+  {
+    source: "manual",
+    name: "Krowe Portal",
+    description: "Operator–builder portal with an AI document pipeline (PRD → Quote → Contract) and e-signatures.",
+    url: "https://krowehub.com",
+    live_url: "https://krowehub.com",
+    tech: ["Next.js", "Supabase", "TypeScript", "OpenAI"],
+    display_order: 0,
+  },
+  {
+    source: "manual",
+    name: "KroweSignup",
+    description: "AI-powered business signup that generates a tailored MVP build report from a few questions.",
+    url: "https://krowehub.com",
+    live_url: null,
+    tech: ["Next.js", "OpenAI", "Supabase"],
+    display_order: 1,
+  },
+].map((p) => ({ builder_profile_id: profileId, ...p }));
+await admin.from("builder_profile_projects").insert(profileProjects);
+console.log(`  ✓ ${experience.length} roles · ${codingTools.length} tools · ${profileProjects.length} projects`);
+
+// ---- SOP / discovery transcript on the project ------------------------------
+console.log("\nProject documents:");
+await admin.from("project_sop_transcripts").delete().eq("project_id", project.id);
+const sopContent =
+  "Discovery call — Krowe Internal\n\n" +
+  "Krowe: We're building the platform that operators and builders both live in. Right now the flow " +
+  "is held together with Google Docs, spreadsheets, and email attachments. We want one place that " +
+  "takes a prospect from the first call all the way to a signed contract, then runs the actual build " +
+  "as a shared task board.\n\n" +
+  "Builder: So the must-haves are the document pipeline — PRD, quote, contract with e-sign — and the " +
+  "task board both sides can see. What about billing?\n\n" +
+  "Krowe: Billing is phase two but it has to be in the plan: Stripe subscriptions plus a clean " +
+  "investor-facing data room. Onboarding also matters — we lose people at the skills step today.\n\n" +
+  "Builder: Got it. I'll draft the PRD around portal core, the document pipeline, onboarding/auth, " +
+  "and billing + investor surfaces, then price it from there.";
+const { error: sopErr } = await admin.from("project_sop_transcripts").insert({
+  project_id: project.id,
+  uploaded_by: builderId,
+  label: "Discovery call — Krowe Internal",
+  source_type: "paste",
+  content: sopContent,
+  char_count: sopContent.length,
+});
+if (sopErr) throw new Error(`sop: ${sopErr.message}`);
+console.log(`  ✓ SOP transcript (${sopContent.length} chars)`);
+
+// ---- PRD (signed) -----------------------------------------------------------
+const prdContent = {
+  overview:
+    "Krowe is the operator–builder portal that turns a discovery call into a signed PRD, quote, and " +
+    "contract, then runs the build as a shared task board. This internal build-out is Krowe dogfooding " +
+    "Krowe — the same flow we sell, used to ship our own platform.",
+  goals: [
+    "Take a prospect from discovery call to signed contract without leaving the portal.",
+    "Give operators a live view of build progress, documents, and spend in one place.",
+    "Cut the time from 'yes' to first task shipped to under a week.",
+  ],
+  successMetrics: [
+    "80% of new engagements complete PRD → Quote → Contract in-portal.",
+    "Operators open the build board at least twice a week.",
+  ],
+  users: [
+    {
+      role: "Builder",
+      description: "The engineer running the engagement.",
+      authLevel: "Owner",
+      permissions: ["Create projects & documents", "Manage tasks", "Invite operators"],
+    },
+    {
+      role: "Operator (Client)",
+      description: "The business owner the work is for.",
+      authLevel: "Member",
+      permissions: ["Review & sign documents", "Request tasks", "Track progress"],
+    },
+  ],
+  features: [
+    {
+      title: "Build board",
+      description: "A kanban of tasks across every engagement.",
+      priority: "must",
+      details: ["Inbox / In progress / Blocked / Done", "Operator-requested vs builder-added", "Per-engagement filter"],
+    },
+    {
+      title: "Document pipeline",
+      description: "PRD, Quote, and Contract with public e-sign links.",
+      priority: "must",
+      details: ["AI-assisted drafting", "Token-based public viewer", "Recorded e-signatures"],
+    },
+    { title: "GitHub repo view", description: "Tech stack, commits, and branches for the linked repo.", priority: "should" },
+    { title: "Onboarding wizard", description: "Guided setup from signup to first task.", priority: "should" },
+  ],
+  pagesScreens: [
+    { name: "Build Board", description: "Task kanban for the engagement.", displays: ["Tasks by status", "Engagement filter"] },
+    { name: "Documents", description: "Project pipeline overview.", displays: ["Projects", "PRD / Quote / Contract status"] },
+    { name: "Engagement", description: "The client workspace.", displays: ["Builder info", "Documents", "Linked repo"] },
+  ],
+  techStack: [
+    { name: "Next.js", category: "Framework", layer: "frontend", provider: "Vercel", domain: "nextjs.org", includes: ["App Router", "Server Actions"] },
+    { name: "Supabase", category: "Database & Auth", layer: "database", provider: "Supabase", domain: "supabase.com", includes: ["Postgres", "Row-level security", "Auth"] },
+    { name: "OpenAI", category: "AI", layer: "backend", domain: "openai.com", includes: ["Document drafting"] },
+    { name: "Stripe", category: "Billing", layer: "backend", domain: "stripe.com", includes: ["Subscriptions", "Metered billing"] },
+  ],
+  milestoneList: [
+    { label: "Portal core + task board" },
+    { label: "Document pipeline + e-sign" },
+    { label: "Billing + investor surfaces" },
+  ],
+  assumptions: ["Client provides brand assets and production Stripe keys."],
+  risks: ["Stripe production approval may gate go-live."],
+};
+const { data: prd, error: prdErr } = await admin
+  .from("prds")
+  .insert({
+    project_id: project.id,
+    created_by: builderId,
+    title: "Krowe Internal — Product Requirements",
+    status: "signed",
+    content: prdContent,
+    source_notes: "Drafted from the Krowe Internal discovery transcript.",
+    sent_at: sentAtIso,
+    signed_by_name: OPERATOR_SIGNER,
+    signed_at: signedAtIso,
+    signer_ip: SIGNER_IP,
+    signature_consent: true,
+  })
+  .select("id, token")
+  .single();
+if (prdErr) throw new Error(`prd: ${prdErr.message}`);
+console.log(`  ✓ PRD (signed) — token ${prd.token.slice(0, 8)}…`);
+
+// ---- Quote (accepted) — priced from the PRD ---------------------------------
+const quoteContent = {
+  companyName: "Krowe",
+  clientName: "Krowe",
+  productSubtitle: "Operator–Builder Portal",
+  scopeSummary:
+    "Design, build, and ship the Krowe portal: a shared task board, the PRD/Quote/Contract document " +
+    "pipeline with e-sign, onboarding & auth, and the billing + investor surfaces. Built on Next.js and Supabase.",
+  modules: [
+    {
+      id: "m1",
+      title: "Portal core",
+      purpose: "Task board, engagements, projects",
+      cost: 28000,
+      lineItems: [
+        { label: "Build board + task model", amount: 14000 },
+        { label: "Engagements & projects", amount: 9000 },
+        { label: "Operator / builder dashboards", amount: 5000 },
+      ],
+      subtotal: 28000,
+    },
+    {
+      id: "m2",
+      title: "Document pipeline",
+      purpose: "PRD, Quote, Contract + e-sign",
+      cost: 16000,
+      lineItems: [
+        { label: "AI drafting + document editors", amount: 9000 },
+        { label: "Public token viewers + e-signature", amount: 7000 },
+      ],
+      subtotal: 16000,
+    },
+    {
+      id: "m3",
+      title: "Onboarding & auth",
+      purpose: "Signup to first task",
+      cost: 9000,
+      lineItems: [
+        { label: "Supabase auth + row-level security", amount: 5000 },
+        { label: "Onboarding wizard", amount: 4000 },
+      ],
+      subtotal: 9000,
+    },
+    {
+      id: "m4",
+      title: "Billing & investor surfaces",
+      purpose: "Stripe + investor data room",
+      cost: 7000,
+      lineItems: [
+        { label: "Stripe subscriptions", amount: 4500 },
+        { label: "Investor data room", amount: 2500 },
+      ],
+      subtotal: 7000,
+    },
+  ],
+  extraCosts: [],
+  designSystem: [
+    { component: "Design system & component library", included: true },
+    { component: "Responsive layouts", included: true },
+    { component: "Dark mode", included: false, notes: "Out of scope for v1" },
+  ],
+  paymentMilestones: [
+    { label: "Deposit", amount: 30000, percent: 50 },
+    { label: "Midpoint", amount: 15000, percent: 25 },
+    { label: "On delivery", amount: 15000, percent: 25 },
+  ],
+  justification: [
+    "Senior full-stack delivery at AI-native velocity — one builder, no agency overhead.",
+    "Fixed scope with milestone-based payment protection.",
+  ],
+  scopeProtection: ["Native mobile apps", "Integrations beyond Stripe and GitHub", "Content / data migration"],
+  totals: { grand: 60000, modulesTotal: 60000, extrasTotal: 0, paymentTotal: 60000 },
+  hourlyRate: 95,
+  showHours: false,
+  validityDays: 30,
+  footerNote: "Prepared from the Krowe Internal PRD. Pricing is an estimate valid for 30 days.",
+};
+const { data: quote, error: quoteErr } = await admin
+  .from("quotes")
+  .insert({
+    project_id: project.id,
+    created_by: builderId,
+    title: "Krowe Internal — Project Quote",
+    status: "accepted",
+    content: quoteContent,
+    source_notes: "Priced from the Krowe Internal PRD.",
+    source_prd_id: prd.id,
+    sent_at: sentAtIso,
+    signed_by_name: OPERATOR_SIGNER,
+    signed_at: signedAtIso,
+    signer_ip: SIGNER_IP,
+    signature_consent: true,
+    accepted_at: signedAtIso,
+  })
+  .select("id, token")
+  .single();
+if (quoteErr) throw new Error(`quote: ${quoteErr.message}`);
+console.log(`  ✓ Quote (accepted, $60,000) — token ${quote.token.slice(0, 8)}…`);
+
+// ---- Contract (sent — awaiting the operator's signature) --------------------
+const contractContent = {
+  parties: { provider: BUILDER.name, client: "Krowe" },
+  effectiveDate: nowIso.slice(0, 10),
+  scopeOfServices:
+    "Provider will design, build, and deploy the Krowe operator–builder portal for Client, including " +
+    "the shared task board, the document pipeline with e-signature, onboarding & auth, and the billing / " +
+    "investor surfaces, as detailed in Exhibit A.",
+  deliverables: [
+    "Operator–builder portal (task board, engagements, projects).",
+    "PRD / Quote / Contract pipeline with public e-sign.",
+    "Onboarding wizard and Supabase auth.",
+    "Stripe billing and investor data room.",
+  ],
+  fees: "Total project fee of $60,000, billed per the schedule in Exhibit B.",
+  paymentTerms: "50% deposit, 25% at midpoint, 25% on delivery.",
+  ipOwnership:
+    "Upon receipt of full payment, Client owns all custom code, designs, and content created under this " +
+    "agreement. Provider may display the work in their portfolio.",
+  governingLaw:
+    "This agreement is governed by the laws of the State of Texas. Any disputes will be resolved in the " +
+    "courts of Travis County, Texas.",
+  quoteTotal: 60000,
+  scopeItems: [
+    { title: "Portal core", purpose: "Task board, engagements, projects", cost: 28000 },
+    { title: "Document pipeline", purpose: "PRD, Quote, Contract + e-sign", cost: 16000 },
+    { title: "Onboarding & auth", purpose: "Signup to first task", cost: 9000 },
+    { title: "Billing & investor surfaces", purpose: "Stripe + investor data room", cost: 7000 },
+  ],
+  paymentSchedule: [
+    { label: "Deposit", amount: 30000, percent: 50 },
+    { label: "Midpoint", amount: 15000, percent: 25 },
+    { label: "On delivery", amount: 15000, percent: 25 },
+  ],
+};
+const { data: contract, error: contractErr } = await admin
+  .from("contracts")
+  .insert({
+    project_id: project.id,
+    created_by: builderId,
+    title: "Krowe Internal — Services Agreement",
+    status: "sent",
+    content: contractContent,
+    source_notes: "Drafted from the Krowe Internal quote.",
+    sent_at: nowIso,
+  })
+  .select("id, token")
+  .single();
+if (contractErr) throw new Error(`contract: ${contractErr.message}`);
+console.log(`  ✓ Contract (sent, awaiting signature) — token ${contract.token.slice(0, 8)}…`);
+
 // ---- summary ----------------------------------------------------------------
 console.log("\n────────────────────────────────────────────");
 console.log("DEMO ACCOUNT READY");
 console.log("  Builder login : investinkrowe@krowehub.com   /  500kPlease@   → lands on /b");
 console.log("  Client login  : krowe.internal@krowehub.com  /  500kPlease@   → operator side (optional)");
 console.log("  Both emails are force-verified (email_confirm).");
+console.log("  ----------------------------------------------------------");
+console.log("  Project    : Krowe Internal  (1 project · 1 live engagement · 7 tasks)");
+console.log("  Documents  : PRD signed · Quote accepted ($60,000) · Contract sent");
+console.log(`  PRD token      : ${prd.token}`);
+console.log(`  Quote token    : ${quote.token}`);
+console.log(`  Contract token : ${contract.token}`);
+console.log(`  Profile token  : ${profile.token}`);
 console.log("────────────────────────────────────────────");

@@ -174,39 +174,80 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
   );
 }
 
-// Full-screen "putting it together" panel, shown in the right sheet while the
-// next round (or the final PRD) generates so the left draft stays visible.
-function WizLoading({ label }: { label: string }) {
-  const lines = ["Reading your answers", "Sizing the market", "Drafting requirements", "Writing the verdict"];
-  const [step, setStep] = useState(0);
+// Expected generation durations (ms) driving the progress estimate. The bar eases
+// toward an asymptote, so finishing early just snaps to done — these are generous
+// upper-ish guesses, deliberately set so the estimate under-promises. Tune by
+// timing a few real runs once reasoning-effort tuning is live.
+const EXPECTED_FIRST_MS = 9000; // round 0: reading notes / preparing questions
+const EXPECTED_GENERATE_MS = 22000; // later rounds: may be the full PRD (the long one)
+
+const PROGRESS_PHASES = ["Reading your answers", "Sizing the scope", "Writing requirements", "Finalizing"];
+
+// m:ss for a duration in ms.
+function fmtClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// "Putting it together" panel with an estimated time-progress bar. Shown in the
+// right sheet (or the first-load spinner spot) while a round generates. The fill
+// eases toward a 92% cap so it never sits at 100% before the server responds; the
+// parent redirects/unmounts the instant generation resolves, which reads as done.
+function WizLoading({ label, expectedMs }: { label: string; expectedMs: number }) {
+  const [elapsed, setElapsed] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
   useEffect(() => {
-    const reduce =
-      typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) return;
-    const t = setInterval(() => setStep((s) => (s + 1) % lines.length), 900);
+    setReduceMotion(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const ratio = elapsed / expectedMs;
+  const pct = Math.min(92, (1 - Math.exp(-1.6 * ratio)) * 92);
+  const over = elapsed >= expectedMs;
+  // Phase thresholds: ≤25 / ≤55 / ≤85 / >85.
+  const phaseIdx = pct <= 25 ? 0 : pct <= 55 ? 1 : pct <= 85 ? 2 : 3;
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 16,
-        minHeight: 360,
-        textAlign: "center",
-      }}
-    >
+    <div className="prd-progress">
       <Ember size={40} />
-      <p style={{ fontFamily: "var(--font-serif)", fontSize: 26, letterSpacing: "-0.01em", color: "var(--foreground)" }}>
-        {label}
-      </p>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--muted-foreground)", fontSize: 13.5 }}>
-        <Loader2 size={16} className="animate-spin" style={{ color: "var(--primary)" }} />
-        {lines[step]}…
+      <p className="prd-progress-title">{label}</p>
+
+      <div
+        className="prd-progress-bar"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
+        <span className={`prd-progress-fill ${reduceMotion ? "" : "shimmer"}`} style={{ width: `${pct}%` }} />
       </div>
+
+      <div className="prd-progress-meta">
+        <span>{fmtClock(elapsed)} elapsed</span>
+        <span>{over ? "Taking a little longer than usual…" : `~${fmtClock(expectedMs - elapsed)} left`}</span>
+      </div>
+
+      <ul className="prd-progress-steps">
+        {PROGRESS_PHASES.map((p, i) => {
+          const status = i < phaseIdx ? "done" : i === phaseIdx ? "cur" : "pending";
+          return (
+            <li key={p} className={`prd-progress-step ${status}`}>
+              <span className="prd-progress-ic">
+                {status === "done" ? (
+                  <Check size={12} strokeWidth={3} />
+                ) : status === "cur" ? (
+                  <Loader2 size={12} className={reduceMotion ? "" : "animate-spin"} />
+                ) : null}
+              </span>
+              {p}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -337,20 +378,26 @@ export function PrdWizard({
       }
 
       if (result.kind === "questions") {
+        // The model often reuses question ids ("q1", "q2") across rounds — and
+        // occasionally within one round — which collides React keys and the
+        // id-keyed selection/answer state (answering one question would bleed
+        // into another). Reassign a globally-unique id per question; the id is
+        // cosmetic (the server keys answers off question TEXT, not id).
+        const items = result.items.map((q, i) => ({ ...q, id: `r${nextRound}q${i}` }));
         setState({
           kind: "questions",
-          items: result.items,
+          items,
           // Pre-select the AI's recommended option (when it matches a real
           // option) so the builder just confirms; fully overridable.
           selections: Object.fromEntries(
-            result.items.map((q) => [
+            items.map((q) => [
               q.id,
               q.recommended && q.options.some((o) => matchesRecommended(o, q.recommended))
                 ? [q.recommended]
                 : ([] as string[]),
             ])
           ),
-          otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
+          otherText: Object.fromEntries(items.map((q) => [q.id, ""])),
           cursor: 0,
         });
         return;
@@ -771,18 +818,15 @@ export function PrdWizard({
             <section className="ed-sheet">
               <div className="ed-sheet-body">
                 <div className="ed-sheet-inner">
-                  <WizLoading label={state.label} />
+                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} />
                 </div>
               </div>
             </section>
           </div>
         ) : (
-          // First load (no answers yet): simple in-page spinner.
+          // First load (no answers yet): in-page progress meter.
           <div className="prd-loading">
-            <span className="spin">
-              <Loader2 size={22} />
-            </span>
-            <p>{state.label}</p>
+            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} />
           </div>
         ))}
 

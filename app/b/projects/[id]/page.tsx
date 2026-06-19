@@ -32,7 +32,7 @@ import { PipelineStepper } from "./pipeline-stepper";
 import { BeginEngagementDialog } from "./begin-engagement-dialog";
 import type { Quote, DocStatus, Engagement } from "@/lib/types";
 
-export const metadata = { title: "Project" };
+export const metadata = { title: "Project Docs" };
 
 export default async function ProjectDetailPage({
   params,

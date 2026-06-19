@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, BookOpen, Briefcase, FileText, Github, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Github, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getMyPendingInvites } from "@/lib/actions/invitations";
@@ -12,9 +12,7 @@ import { EngagementSettingsCard } from "@/components/engagement-admin/engagement
 import { DeleteEngagementCard } from "@/components/engagement-admin/delete-engagement-card";
 import { RepoSelector } from "@/components/github/repo-selector";
 import { BusinessContactCard } from "@/components/doc/business-contact-card";
-import { BusinessContextCard } from "@/components/dashboard/business-context-card";
 import { BusinessLinksEditor } from "@/components/engagement/business-links-editor";
-import { getBusinessContext } from "@/lib/actions/engagement";
 import { DetailHero } from "@/components/engagement/detail-hero";
 import { EngagementSection } from "@/components/engagement/engagement-section";
 import type { EngagementStatusKind } from "@/components/engagement/engagement-status";
@@ -59,7 +57,7 @@ export default async function BuilderEngagementPage({
   if (!data) notFound();
   const engagement = data as Engagement;
 
-  const [pendingInvites, ghConnection, identity, taskRows, businessContext] = await Promise.all([
+  const [pendingInvites, ghConnection, identity, taskRows] = await Promise.all([
     getMyPendingInvites(),
     supabase
       .from("github_connections")
@@ -73,7 +71,6 @@ export default async function BuilderEngagementPage({
       .select("status")
       .eq("engagement_id", id)
       .then(({ data }) => data ?? []),
-    getBusinessContext(id),
   ]);
 
   const operatorName = engagement.operator?.display_name ?? null;
@@ -179,19 +176,6 @@ export default async function BuilderEngagementPage({
           </EngagementSection>
 
           <EngagementSection
-            icon={<BookOpen size={19} strokeWidth={1.75} />}
-            title="Business context"
-            hint="How the business works today and the problem you're solving — context for the build."
-          >
-            <BusinessContextCard
-              engagementId={engagement.id}
-              cards={businessContext}
-              canEdit
-              variant="bare"
-            />
-          </EngagementSection>
-
-          <EngagementSection
             icon={<FileText size={19} strokeWidth={1.75} />}
             title="Documents"
             hint="The PRD, quote, and contract from the project this client came from."
@@ -230,7 +214,7 @@ export default async function BuilderEngagementPage({
             ) : (
               <p className="text-sm text-neutral-500">
                 <Link
-                  href="/b/github/settings"
+                  href="/b/settings/github"
                   className="text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
                 >
                   Connect GitHub
