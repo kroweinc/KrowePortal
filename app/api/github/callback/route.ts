@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   // Failures land on the GitHub settings page (which renders an error banner)
   // unless a caller-provided returnTo handles its own errors (e.g. onboarding).
   const errorRedirect = (codeName: string) =>
-    NextResponse.redirect(`${publicOrigin}${returnTo ?? "/b/github/settings"}?error=${codeName}`)
+    NextResponse.redirect(`${publicOrigin}${returnTo ?? "/b/settings/github"}?error=${codeName}`)
 
   if (!code || !state || !expectedState || state !== expectedState) {
     return errorRedirect("github_denied")
@@ -91,6 +91,6 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.redirect(
-    `${publicOrigin}${returnTo ?? "/b/github/settings?github=connected"}`
+    `${publicOrigin}${returnTo ?? "/b/settings/github?github=connected"}`
   )
 }

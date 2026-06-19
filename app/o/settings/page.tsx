@@ -4,7 +4,7 @@ import { SettingsHeader } from "@/components/settings/settings-section";
 
 export const metadata = { title: "Account · Settings" };
 
-export default async function BuilderAccountPage() {
+export default async function OperatorAccountPage() {
   const { profile, email, isDevProfile } = await getAccountContext();
 
   return (
