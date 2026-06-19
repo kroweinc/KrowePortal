@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ExternalLink, Link2, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { regenerateShareToken, setProfilePublished } from "@/lib/actions/builder-profile";
 import { useProfileDraft } from "./profile-draft-context";
 
@@ -18,6 +19,7 @@ export function ProfileShareStrip() {
   const [token, setToken] = useState(draft.token);
   const [origin, setOrigin] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   useEffect(() => setOrigin(window.location.origin), []);
   // Keep in step if a refresh changes either value (e.g. token regenerated).
@@ -71,8 +73,18 @@ export function ProfileShareStrip() {
     });
   }
 
-  function regenerate() {
-    if (!confirm("Generate a new link? Anyone using the old link will lose access.")) return;
+  async function regenerate() {
+    if (
+      !(await confirm({
+        title: "Generate a new share link?",
+        description: "Anyone using the old link will lose access. You’ll get a fresh link to share.",
+        confirmText: "Generate new link",
+        cancelText: "Keep current link",
+        icon: RotateCw,
+        tone: "danger",
+      }))
+    )
+      return;
     startTransition(async () => {
       const result = await regenerateShareToken();
       if (result.error || !result.token) {
@@ -111,6 +123,7 @@ export function ProfileShareStrip() {
       >
         <RotateCw className="h-3.5 w-3.5" />
       </Button>
+      {confirmDialog}
     </div>
   );
 }

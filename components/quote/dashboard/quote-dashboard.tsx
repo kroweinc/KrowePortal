@@ -10,7 +10,7 @@
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Sparkles, Check, Link2 } from "lucide-react";
+import { Send, Sparkles, Check, Link2, Trash2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updateQuoteContent, sendQuote, deleteQuote } from "@/lib/actions/quote-docs";
 import type { Quote, QuoteContent } from "@/lib/types";
@@ -22,6 +22,7 @@ import { QuoteStatStrip } from "./quote-stat-strip";
 import { QuoteRail } from "./quote-rail";
 import { QuoteIdentity } from "./quote-sections";
 import { RefineSectionDialog } from "./refine-section-dialog";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import "@/components/prd/dashboard/prd-dashboard.css";
 import "@/components/quote/quote.css";
 
@@ -52,6 +53,7 @@ interface QuoteDashboardProps {
 export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   const isDraft = quote.status === "draft";
   const [mode, setMode] = useState<"edit" | "preview">("edit");
@@ -155,8 +157,18 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
     return true;
   }
 
-  function send() {
-    if (!confirm("Send this quote to the client? You can still edit it afterward.")) return;
+  async function send() {
+    if (
+      !(await confirm({
+        title: "Send this quote to the client?",
+        description:
+          "They’ll get a link to the live document. You can still edit it afterward — changes appear instantly.",
+        confirmText: "Send to client",
+        icon: Send,
+        tone: "brand",
+      }))
+    )
+      return;
     startTransition(async () => {
       if (!(await publish())) return;
       toast.success("Quote sent");
@@ -164,8 +176,19 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
     });
   }
 
-  function copyLink() {
-    if (isDraft && !confirm("Sharing a link makes this quote visible to the client. Continue?")) return;
+  async function copyLink() {
+    if (
+      isDraft &&
+      !(await confirm({
+        title: "Share this quote with the client?",
+        description:
+          "Copying the link publishes this draft so the client can open it. You can keep editing afterward.",
+        confirmText: "Copy share link",
+        icon: Link2,
+        tone: "brand",
+      }))
+    )
+      return;
     const wasDraft = isDraft;
     startTransition(async () => {
       if (!(await publish())) return;
@@ -180,8 +203,18 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
     });
   }
 
-  function remove() {
-    if (!confirm("Delete this draft? This cannot be undone.")) return;
+  async function remove() {
+    if (
+      !(await confirm({
+        title: "Delete this draft?",
+        description: "This permanently removes the quote. This can’t be undone.",
+        confirmText: "Delete draft",
+        cancelText: "Keep draft",
+        icon: Trash2,
+        tone: "danger",
+      }))
+    )
+      return;
     startTransition(async () => {
       const result = await deleteQuote(quote.id);
       if ("error" in result) {
@@ -304,6 +337,8 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
           currentContent={content}
           onApply={(p) => patch(p)}
         />
+
+        {confirmDialog}
       </div>
 
       {/* Print-only canonical document — surfaced on Download PDF so the PDF

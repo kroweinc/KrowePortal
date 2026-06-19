@@ -3,8 +3,10 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Ban, UserMinus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   createInvitation,
   renameEngagement,
@@ -23,6 +25,7 @@ export function EngagementSettingsCard({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   const [title, setTitle] = useState(engagement.title);
   const [token, setToken] = useState<string | null>(pendingInvite?.token ?? null);
@@ -48,10 +51,16 @@ export function EngagementSettingsCard({
     });
   }
 
-  function handleRemoveOperator() {
-    const confirmed = window.confirm(
-      `Remove ${operatorName ?? "the operator"} from this client? They'll lose access to its dashboard, but their tasks and materials are kept. You can invite someone new afterward.`
-    );
+  async function handleRemoveOperator() {
+    const confirmed = await confirm({
+      title: `Remove ${operatorName ?? "the operator"}?`,
+      description:
+        "They’ll lose access to this client’s dashboard, but their tasks and materials are kept. You can invite someone new afterward.",
+      confirmText: "Remove operator",
+      cancelText: "Cancel",
+      icon: UserMinus,
+      tone: "danger",
+    });
     if (!confirmed) return;
     startTransition(async () => {
       const result = await removeOperator(engagement.id);
@@ -83,8 +92,16 @@ export function EngagementSettingsCard({
     });
   }
 
-  function handleRevoke() {
-    if (!window.confirm("Revoke this invite link? Anyone holding it won't be able to join.")) return;
+  async function handleRevoke() {
+    const ok = await confirm({
+      title: "Revoke this invite link?",
+      description: "Anyone holding the current link won’t be able to join. You can create a new link afterward.",
+      confirmText: "Revoke link",
+      cancelText: "Keep link",
+      icon: Ban,
+      tone: "danger",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await revokeInvitation(engagement.id);
       if ("error" in result) {
@@ -173,6 +190,7 @@ export function EngagementSettingsCard({
           </div>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }

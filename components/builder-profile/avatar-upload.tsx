@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Camera, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { uploadAvatar, deleteAvatar } from "@/lib/actions/builder-profile";
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
@@ -18,6 +19,7 @@ export function AvatarUpload({ avatarUrl, displayName }: AvatarUploadProps) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   const initials =
     displayName
@@ -77,8 +79,18 @@ export function AvatarUpload({ avatarUrl, displayName }: AvatarUploadProps) {
     submitFile(file);
   }
 
-  function remove() {
-    if (!confirm("Remove your profile photo?")) return;
+  async function remove() {
+    if (
+      !(await confirm({
+        title: "Remove your profile photo?",
+        description: "Your avatar will revert to your initials. You can upload a new one anytime.",
+        confirmText: "Remove photo",
+        cancelText: "Cancel",
+        icon: Trash2,
+        tone: "danger",
+      }))
+    )
+      return;
     startTransition(async () => {
       const result = await deleteAvatar();
       if (result.error) {
@@ -134,6 +146,7 @@ export function AvatarUpload({ avatarUrl, displayName }: AvatarUploadProps) {
           Or copy an image and paste it here (Ctrl/Cmd+V).
         </p>
       </div>
+      {confirmDialog}
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Pencil } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import {
   Dialog,
   DialogTrigger,
@@ -13,6 +13,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,6 +33,7 @@ export function EditProjectDialog({ project }: { project: Project }) {
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [isDeleting, startDelete] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   const [name, setName] = useState(project.name);
   const [status, setStatus] = useState<ProjectStatus>(project.status);
@@ -81,14 +83,17 @@ export function EditProjectDialog({ project }: { project: Project }) {
     });
   }
 
-  function onDelete() {
-    if (
-      !window.confirm(
-        `Delete "${project.name}"? This permanently removes the document and all of its PRDs, quotes, and contracts. This cannot be undone.`,
-      )
-    ) {
-      return;
-    }
+  async function onDelete() {
+    const ok = await confirm({
+      title: `Delete “${project.name}”?`,
+      description:
+        "This permanently removes the document and all of its PRDs, quotes, and contracts. This can’t be undone.",
+      confirmText: "Delete document",
+      cancelText: "Keep document",
+      icon: Trash2,
+      tone: "danger",
+    });
+    if (!ok) return;
     startDelete(async () => {
       const result = await deleteProject(project.id);
       if ("error" in result) {
@@ -102,6 +107,7 @@ export function EditProjectDialog({ project }: { project: Project }) {
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <button type="button" className="edit-btn">
@@ -216,6 +222,8 @@ export function EditProjectDialog({ project }: { project: Project }) {
         </form>
       </DialogContent>
     </Dialog>
+    {confirmDialog}
+    </>
   );
 }
 

@@ -12,6 +12,26 @@
   .animate-urgent-pulse { animation: none; }
 }
 
+/* ── Route-loading skeleton (used by loading.tsx boundaries) ── */
+@keyframes krowe-skeleton-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.krowe-skel {
+  border-radius: 10px;
+  background: linear-gradient(
+    90deg,
+    oklch(96.5% 0.006 60) 25%,
+    oklch(93% 0.006 60) 37%,
+    oklch(96.5% 0.006 60) 63%
+  );
+  background-size: 200% 100%;
+  animation: krowe-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-skel { animation: none; }
+}
+
 /* ============================================================
    KROWE DESIGN SYSTEM — Foundations
    ============================================================ */
@@ -52,10 +72,12 @@
   /* Shadow tint — warm near-black w/ 8% orange */
   --shadow-tint: color-mix(in oklch, var(--primary) 8%, oklch(10% 0 0));
 
-  /* Typography */
-  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
-  --font-sans:  "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono:  "Geist Mono", "Monaco", "Courier New", monospace;
+  /* Typography — primary families come from next/font (self-hosted) via the
+     --font-* variables set on <html> in app/layout.tsx; literal names + system
+     stacks remain as fallbacks. */
+  --font-serif: var(--font-instrument-serif), "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans:  var(--font-geist), "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:  var(--font-geist-mono), "Geist Mono", "Monaco", "Courier New", monospace;
 
   /* Spacing (4pt grid) */
   --spacing-xs:  2px;
@@ -405,6 +427,43 @@ button:focus-visible {
 @media (max-width: 860px) {
   .krowe-sidebar { width: 216px; }
 }
+
+/* ── Settings (top-tab sub-route layout) ── */
+.krowe-settings-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.krowe-settings-nav {
+  display: flex; flex-direction: row; flex-wrap: nowrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.krowe-settings-nav-link {
+  display: flex; align-items: center; gap: 8px;
+  flex: 0 0 auto;
+  height: 40px; padding: 0 14px;
+  border: none; border-bottom: 2px solid transparent;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: none; text-align: left;
+  font-family: var(--font-sans); font-size: 13.5px; font-weight: 500;
+  color: var(--muted-foreground); white-space: nowrap; text-decoration: none;
+  margin-bottom: -1px;
+  transition: background 150ms var(--ease-out-smooth),
+              color 150ms var(--ease-out-smooth),
+              border-color 150ms var(--ease-out-smooth);
+}
+.krowe-settings-nav-ic { color: var(--faint-foreground); display: inline-flex; transition: color 150ms; }
+.krowe-settings-nav-link:hover { background: color-mix(in srgb, var(--foreground) 4%, transparent); color: var(--foreground); }
+.krowe-settings-nav-link:hover .krowe-settings-nav-ic { color: var(--muted-foreground); }
+.krowe-settings-nav-link.active {
+  color: var(--foreground); font-weight: 600;
+  border-bottom-color: var(--primary);
+}
+.krowe-settings-nav-link.active .krowe-settings-nav-ic { color: var(--primary); }
+.krowe-settings-content { min-width: 0; }
 
 /* ── Page ── */
 .krowe-page {
@@ -2506,6 +2565,32 @@ button.krowe-desc-inline-text:hover {
 .prdnew .prd-loading p { font-size: 14px; color: var(--muted-foreground); }
 @keyframes prd-spin { to { transform: rotate(360deg); } }
 
+/* Estimated time-progress meter (WizLoading): eased fill bar + live elapsed
+   readout + phase checklist. Sits in both the editorial right sheet and the
+   first-load .prd-loading spot. */
+.prdnew .prd-progress { width: 100%; max-width: 340px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 15px; text-align: center; }
+.prdnew .prd-progress-title { font-family: var(--font-serif); font-size: 26px; letter-spacing: -0.01em; color: var(--foreground); }
+.prdnew .prd-progress-bar { position: relative; width: 100%; height: 6px; border-radius: var(--radius-full); background: var(--border); overflow: hidden; }
+.prdnew .prd-progress-fill { position: absolute; top: 0; left: 0; bottom: 0; border-radius: var(--radius-full); background: linear-gradient(135deg, var(--primary) 0%, var(--primary-accent) 100%); transition: width 300ms var(--ease-out-smooth); }
+.prdnew .prd-progress-meta { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground); }
+.prdnew .prd-progress-steps { list-style: none; margin: 5px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; align-items: flex-start; align-self: center; }
+.prdnew .prd-progress-step { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--faint-foreground); }
+.prdnew .prd-progress-ic { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); background: var(--surface-subtle); color: var(--faint-foreground); }
+.prdnew .prd-progress-step.done { color: var(--muted-foreground); }
+.prdnew .prd-progress-step.done .prd-progress-ic { background: var(--success-soft); color: var(--success); border-color: color-mix(in srgb, var(--success) 26%, transparent); }
+.prdnew .prd-progress-step.cur { color: var(--foreground); font-weight: 500; }
+.prdnew .prd-progress-step.cur .prd-progress-ic { background: var(--primary-soft); color: var(--primary); border-color: color-mix(in srgb, var(--primary) 34%, transparent); }
+
+/* Fill shimmer — motion only when the user allows it. */
+@media (prefers-reduced-motion: no-preference) {
+  .prdnew .prd-progress-fill.shimmer::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, white 45%, transparent), transparent);
+    transform: translateX(-100%); animation: prd-progress-shimmer 1.5s ease-in-out infinite;
+  }
+  @keyframes prd-progress-shimmer { to { transform: translateX(100%); } }
+}
+
 /* Questions round */
 .prdnew .round-banner {
   margin-top: 26px; padding: 14px 16px; border-radius: var(--radius-lg);
@@ -2945,6 +3030,79 @@ button.krowe-desc-inline-text:hover {
 
 /* live-preview drawer caption */
 .ppsetup-preview-cap { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint-foreground); }
+
+/* ── Coding tools: section grid + "Add coding tools" picker ──────────────────
+   Ported from the Krowe Design handoff (Profile Setup · Smart Scroll). The
+   picker modal renders in a Radix portal (outside .ppsetup), so these classes
+   are intentionally unscoped. Brand logos come from <BrandLogo>, so the
+   prototype's flat colored monogram tile (.g) is dropped here. */
+.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 540px) { .tool-grid { grid-template-columns: 1fr; } }
+
+/* one tool in the section grid */
+.tool-tile { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; background: white; }
+.tool-tile .info { flex: 1; min-width: 0; }
+.tool-tile .nm { font-size: 13px; font-weight: 600; line-height: 1.25; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-tile .ct { font-size: 10.5px; color: var(--faint-foreground); margin-top: 1px; }
+.tool-rm { width: 26px; height: 26px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); border: 1px solid var(--border); background: white; color: var(--muted-foreground); transition: all 150ms var(--ease-out-smooth); }
+.tool-rm:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); background: var(--danger-soft); }
+.tool-rm svg { width: 13px; height: 13px; }
+.tool-empty { border: 1px dashed var(--border-strong); border-radius: var(--radius-md); padding: 22px 16px; text-align: center; font-size: 13px; color: var(--faint-foreground); }
+
+/* picker modal (mounted inside a Radix DialogContent shell) */
+.ctm-head, .ctm-cats, .ctm-foot { flex-shrink: 0; }
+.ctm-head { padding: 20px 22px 16px; border-bottom: 1px solid var(--border); }
+.ctm-head .row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ctm-head h3 { margin: 0; font-family: var(--font-serif); font-size: 24px; line-height: 1; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; color: var(--foreground); }
+.ctm-head h3 .ember { width: 13px; height: 13px; display: inline-flex; position: relative; top: 1px; }
+.ctm-head h3 .ember svg { width: 100%; height: 100%; display: block; }
+.ctm-head p { margin: 7px 0 0; font-size: 12.5px; color: var(--muted-foreground); }
+.ctm-search { position: relative; margin-top: 15px; }
+.ctm-search > svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--faint-foreground); pointer-events: none; }
+
+.ctm-cats { display: flex; gap: 6px; padding: 12px 22px; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--surface-subtle); }
+.ctm-cats::-webkit-scrollbar { height: 0; }
+.ctm-cat { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: var(--radius-full); border: 1px solid var(--border); background: white; color: var(--muted-foreground); font-size: 12px; font-weight: 500; white-space: nowrap; transition: all 140ms var(--ease-out-smooth); }
+.ctm-cat .n { font-family: var(--font-mono); font-size: 10px; color: var(--faint-foreground); }
+.ctm-cat:hover { border-color: var(--border-strong); color: var(--foreground); }
+.ctm-cat.on { background: var(--foreground); border-color: var(--foreground); color: var(--background); }
+.ctm-cat.on .n { color: color-mix(in srgb, var(--background) 65%, transparent); }
+
+.ctm-body { padding: 16px 22px 18px; overflow-y: auto; flex: 1; }
+.ctm-catlabel { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.11em; color: var(--faint-foreground); margin: 0 0 9px; }
+.ctm-catlabel:not(:first-child) { margin-top: 18px; }
+.ctm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.ctm-tile { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: var(--radius-md); border: 1.5px solid var(--border); background: white; text-align: left; transition: all 150ms var(--ease-out-smooth); position: relative; }
+.ctm-tile:hover:not(.added) { border-color: var(--border-strong); box-shadow: var(--shadow-1); }
+.ctm-tile .nm { display: block; font-size: 13px; font-weight: 600; line-height: 1.2; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctm-tile .ct { display: block; font-size: 10.5px; color: var(--faint-foreground); margin-top: 2px; }
+.ctm-tile .info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ctm-tile .check { width: 20px; height: 20px; border-radius: 999px; border: 1.5px solid var(--border-strong); flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: transparent; background: white; transition: all 150ms var(--ease-out-smooth); }
+.ctm-tile .check svg { width: 12px; height: 12px; }
+.ctm-tile.sel { border-color: var(--primary); background: var(--primary-soft); }
+.ctm-tile.sel .check { background: var(--primary); border-color: var(--primary); color: #fff; }
+.ctm-tile.added { background: var(--surface-subtle); border-color: var(--border); border-style: dashed; cursor: default; }
+.ctm-tile.added .nm, .ctm-tile.added .ct { color: var(--faint-foreground); }
+.ctm-tile.added .brand-logo { opacity: 0.55; }
+.ctm-tile .added-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; color: var(--success); flex-shrink: 0; }
+.ctm-tile .added-pill svg { width: 12px; height: 12px; }
+.ctm-empty { text-align: center; padding: 28px 12px; color: var(--faint-foreground); font-size: 13px; }
+
+/* custom tool builder */
+.ctm-custom { margin-top: 20px; border-top: 1px dashed var(--border-strong); padding-top: 18px; }
+.ctm-custom .lab { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--faint-foreground); margin-bottom: 12px; }
+.ctm-custom .lab::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.ctm-cform { display: flex; gap: 10px; align-items: flex-start; }
+.ctm-cfields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.ctm-cfields .two { display: grid; grid-template-columns: 1fr 150px; gap: 8px; }
+.ctm-sel { width: 100%; height: 36px; border: 1px solid var(--border); border-radius: var(--radius-md); background: white; padding: 0 12px; font-size: 13px; color: var(--foreground); appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; }
+.ctm-sel:focus { outline: none; border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent); }
+
+.ctm-foot { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 14px; background: var(--surface-subtle); }
+.ctm-count { font-size: 12.5px; color: var(--muted-foreground); }
+.ctm-count b { color: var(--foreground); font-weight: 600; }
+.ctm-foot .acts { display: flex; gap: 10px; }
 
 /* Doc sign panel — spacing scoped so global `p { margin: 0 }` can't collapse it. */
 .doc-sign-panel {

@@ -14,11 +14,14 @@ import {
   updateProfileProject,
 } from "@/lib/actions/builder-profile";
 import { safeExternalHref } from "@/lib/project/business-context";
+import { useConfirm, usePrompt } from "@/components/ui/confirm-dialog";
 import type { BuilderProfileProject } from "@/lib/types";
 
 export function ProjectList({ projects }: { projects: BuilderProfileProject[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
+  const [prompt, promptDialog] = usePrompt();
 
   function move(index: number, dir: -1 | 1) {
     const next = [...projects];
@@ -37,11 +40,15 @@ export function ProjectList({ projects }: { projects: BuilderProfileProject[] })
 
   // Manual projects edit their live link in the edit dialog; GitHub rows are
   // otherwise read-only, so this is their only affordance for setting one.
-  function setLiveLink(project: BuilderProfileProject) {
-    const value = prompt(
-      "Live demo URL — where viewers can interact with the work (leave empty to remove):",
-      project.live_url ?? ""
-    );
+  async function setLiveLink(project: BuilderProfileProject) {
+    const value = await prompt({
+      title: "Set live demo link",
+      description: "Where viewers can interact with the work. Leave empty to remove.",
+      placeholder: "https://your-demo.com",
+      defaultValue: project.live_url ?? "",
+      confirmText: "Save link",
+      cancelText: "Cancel",
+    });
     if (value === null) return;
     startTransition(async () => {
       const result = await updateProfileProject(project.id, { liveUrl: value.trim() });
@@ -54,12 +61,22 @@ export function ProjectList({ projects }: { projects: BuilderProfileProject[] })
     });
   }
 
-  function remove(project: BuilderProfileProject) {
-    const note =
-      project.source === "github"
-        ? "Remove this repo from your profile? You can re-add it from the picker."
-        : "Delete this project? This cannot be undone.";
-    if (!confirm(note)) return;
+  async function remove(project: BuilderProfileProject) {
+    const isGithub = project.source === "github";
+    const note = isGithub
+      ? "You can re-add it from the picker anytime."
+      : "This cannot be undone.";
+    if (
+      !(await confirm({
+        title: isGithub ? "Remove this repo?" : "Remove this project?",
+        description: note,
+        confirmText: "Remove",
+        cancelText: "Cancel",
+        tone: "danger",
+        icon: Trash2,
+      }))
+    )
+      return;
     startTransition(async () => {
       const result = await deleteProfileProject(project.id);
       if (result.error) {
@@ -79,6 +96,7 @@ export function ProjectList({ projects }: { projects: BuilderProfileProject[] })
   }
 
   return (
+    <>
     <ul className="space-y-3">
       {projects.map((project, index) => (
         <li
@@ -207,5 +225,8 @@ export function ProjectList({ projects }: { projects: BuilderProfileProject[] })
         </li>
       ))}
     </ul>
+    {confirmDialog}
+    {promptDialog}
+    </>
   );
 }
