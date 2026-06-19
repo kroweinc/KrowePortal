@@ -38,7 +38,7 @@ export function NotConnected() {
       icon={<Github className="h-6 w-6" aria-hidden />}
       title="Connect GitHub to see your project"
       message="Link your GitHub account so the project profile can pull in your repo's overview, recent commits, and structure."
-      ctaHref="/b/github/settings"
+      ctaHref="/b/settings/github"
       ctaLabel="Go to GitHub settings"
     />
   );
@@ -50,7 +50,7 @@ export function NoRepoSelected() {
       icon={<GitBranch className="h-6 w-6" aria-hidden />}
       title="Pick a default repository"
       message="You're connected to GitHub, but haven't selected a repo yet. Choose one and the profile will appear here."
-      ctaHref="/b/github/settings"
+      ctaHref="/b/settings/github"
       ctaLabel="Select a repository"
     />
   );
@@ -75,7 +75,7 @@ export function RepoFetchError({ repoFullName }: { repoFullName?: string }) {
           )}
         </p>
         <Link
-          href="/b/github/settings"
+          href="/b/settings/github"
           className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:border-neutral-300 hover:text-neutral-900"
         >
           Pick a different repo

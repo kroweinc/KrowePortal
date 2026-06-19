@@ -74,7 +74,11 @@ export async function updateProfile(input: {
 
   if (error) return { error: error.message };
 
+  // Display name shows in Settings (both roles) and in the Nav, which renders
+  // inside each role's layout — revalidate both layouts so it refreshes live.
   revalidatePath("/b/settings");
-  revalidatePath("/b", "layout"); // Nav (components/nav.tsx) renders display_name
+  revalidatePath("/o/settings");
+  revalidatePath("/b", "layout");
+  revalidatePath("/o", "layout");
   return { success: true };
 }
