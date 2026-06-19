@@ -319,6 +319,7 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   }
 
   revalidatePath("/b");
+  revalidatePath("/o");
   return { success: true };
 }
 
