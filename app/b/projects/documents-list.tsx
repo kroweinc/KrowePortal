@@ -59,7 +59,7 @@ export function DocumentsList({
       <div className="krowe-page-head">
         <div>
           <h1 className="krowe-page-title">
-            <Ember size={22} /> Documents
+            <Ember size={22} /> Document Projects
           </h1>
           <div className="krowe-page-sub">
             <span>
@@ -72,7 +72,7 @@ export function DocumentsList({
           </div>
         </div>
         <Link href="/b/projects/new" data-tour="new-document" className="krowe-doc-newbtn">
-          <Plus width={16} height={16} /> New document
+          <Plus width={16} height={16} /> New project
         </Link>
       </div>
 
