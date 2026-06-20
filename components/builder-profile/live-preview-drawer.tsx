@@ -15,8 +15,8 @@ export function LivePreviewDrawer({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { draft, autoTags, accountDisplayName } = useProfileDraft();
-  const data = draftToPublicProfile(draft, autoTags, accountDisplayName);
+  const { draft, accountDisplayName } = useProfileDraft();
+  const data = draftToPublicProfile(draft, accountDisplayName);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>

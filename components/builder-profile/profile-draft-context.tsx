@@ -405,15 +405,12 @@ export function ProfileDraftProvider({
 
 // Maps the live draft into the exact PublicBuilderProfile shape the public page
 // (and the preview drawer) render, so the mirror can never drift from the real
-// thing. Manual tags first, then derived, deduped — matching the server.
+// thing. Only the builder's added tags show — recommendations stay in the editor.
 export function draftToPublicProfile(
   draft: ProfileDraft,
-  autoTags: string[],
   accountDisplayName: string
 ): PublicBuilderProfile {
-  const seen = new Set(draft.tags.map((t) => t.toLowerCase()));
-  const derived = autoTags.filter((t) => !seen.has(t.toLowerCase()));
-  const tags = [...draft.tags, ...derived].slice(0, 14);
+  const tags = draft.tags.slice(0, 14);
   return {
     displayName: draft.displayName.trim() || accountDisplayName || "Builder",
     headline: draft.headline.trim() || null,

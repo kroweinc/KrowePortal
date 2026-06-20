@@ -2,7 +2,6 @@
 
 import { createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/auth";
-import { deriveProfileTags } from "@/lib/builder-profile/derive-tags";
 import type {
   BuilderProfileCodingTool,
   BuilderProfileExperience,
@@ -11,8 +10,8 @@ import type {
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
 
-// Manual + derived badges, manual first, deduped case-insensitively. Capped so
-// a rich profile can't produce an unbounded badge row.
+// Builder-added badges, capped so a rich profile can't produce an unbounded
+// badge row.
 const MAX_DISPLAY_TAGS = 14;
 
 export interface PublicBuilderProfile {
@@ -127,20 +126,9 @@ async function assemblePublicProfile(
   const experienceList = (experience ?? []) as BuilderProfileExperience[];
   const codingToolList = (codingTools ?? []) as BuilderProfileCodingTool[];
 
-  // Show manual badges plus any derived from the rest of the profile.
-  const manualTags = (data.tags ?? []) as string[];
-  const seenTags = new Set(manualTags.map((t) => t.toLowerCase()));
-  const derivedTags = deriveProfileTags({
-    headline: data.headline ?? null,
-    bio: data.bio ?? null,
-    educationSchool: data.education_school ?? null,
-    educationMajor: data.education_major ?? null,
-    educationYear: data.education_year ?? null,
-    experience: experienceList,
-    projects: projectList,
-    codingTools: codingToolList,
-  }).filter((t) => !seenTags.has(t.toLowerCase()));
-  const tags = [...manualTags, ...derivedTags].slice(0, MAX_DISPLAY_TAGS);
+  // Show only the badges the builder has added. Derived badges are surfaced as
+  // recommendations in the editor; they appear here only once the builder adds them.
+  const tags = ((data.tags ?? []) as string[]).slice(0, MAX_DISPLAY_TAGS);
 
   return {
     // Profile-level override wins; otherwise fall back to the account name.
