@@ -2580,6 +2580,8 @@ button.krowe-desc-inline-text:hover {
 .prdnew .prd-progress-step.done .prd-progress-ic { background: var(--success-soft); color: var(--success); border-color: color-mix(in srgb, var(--success) 26%, transparent); }
 .prdnew .prd-progress-step.cur { color: var(--foreground); font-weight: 500; }
 .prdnew .prd-progress-step.cur .prd-progress-ic { background: var(--primary-soft); color: var(--primary); border-color: color-mix(in srgb, var(--primary) 34%, transparent); }
+.prdnew .prd-progress-cancel { margin-top: 8px; background: none; border: none; padding: 5px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em; color: var(--muted-foreground); cursor: pointer; transition: color 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth); }
+.prdnew .prd-progress-cancel:hover { color: var(--foreground); background: var(--surface-subtle); }
 
 /* Fill shimmer — motion only when the user allows it. */
 @media (prefers-reduced-motion: no-preference) {
@@ -2697,6 +2699,13 @@ button.krowe-desc-inline-text:hover {
 .prdnew .ed-opt-why .qi { color: var(--primary); flex-shrink: 0; margin-top: 1px; }
 .prdnew .ed-other-area { margin-top: 9px; width: 100%; min-height: 60px; padding: 11px 13px; resize: vertical; border: 1.5px solid var(--primary); border-radius: var(--radius-md); background: white; font-family: var(--font-sans); font-size: 14px; line-height: 1.5; color: var(--foreground); box-shadow: var(--shadow-1); }
 .prdnew .ed-other-area::placeholder { color: var(--faint-foreground); }
+
+/* Exact-date question: a monospaced MM/DD/YYYY entry instead of a pick-list. */
+.prdnew .ed-date { display: flex; flex-direction: column; }
+.prdnew .ed-date-input { width: 100%; max-width: 280px; padding: 14px 16px; border: 1.5px solid var(--primary); border-radius: var(--radius-md); background: white; font-family: var(--font-mono); font-size: 18px; letter-spacing: 0.06em; color: var(--foreground); box-shadow: var(--shadow-1); }
+.prdnew .ed-date-input::placeholder { color: var(--faint-foreground); letter-spacing: 0.06em; }
+.prdnew .ed-date-input:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent), var(--shadow-1); }
+.prdnew .ed-date-hint { margin-top: 10px; font-size: 12.5px; color: var(--muted-foreground); }
 
 /* visually-hidden native input — kept focusable + in the a11y tree (radio
    grouping, screen-reader checked state); the visual control is .ed-radio. */

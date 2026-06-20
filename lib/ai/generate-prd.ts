@@ -2,6 +2,7 @@ import { openai, runChat, AI_MODEL, AI_REASONING_EFFORT } from "./client";
 import { recordAiUsage, type AiCallMeta } from "./usage";
 import { PrdGenerationResult, PrdFinalResult } from "./schemas";
 import type { Question } from "./schemas";
+import { SCOPE_STAGE_COUNT, stageForRound } from "@/lib/prd/scope-stages";
 import type { PrdContent } from "@/lib/types";
 
 export type PrdAnswer = { question: string; answer: string };
@@ -13,8 +14,10 @@ export type PrdGenInput = {
   answers?: PrdAnswer[];
   /** When true, the model must return a finished PRD and may NOT ask more questions. */
   forceFinal: boolean;
-  /** No written notes were given — interview broad→specific over more rounds and emit a contextSummary. */
+  /** No written notes were given — run the staged scope intake and emit a contextSummary. */
   deepContext?: boolean;
+  /** Deep mode only: which fixed scope stage this round covers (0-based; maps to SCOPE_STAGES). */
+  stageIndex?: number;
   /** Today's date as an ISO calendar date (YYYY-MM-DD). Anchors the back-planned timeline. */
   currentDate: string;
 };
@@ -83,13 +86,25 @@ const CONDITIONAL_RULES = `Depth and examples:
 - Never include a project price or payment terms anywhere in the PRD — those live in the separate quote.
 - The finished PRD must contain NO open questions — every unknown should have been resolved by asking. If you are forced to finalize and a minor detail is still unknown, make a sensible, clearly-stated assumption and record it under "assumptions" (e.g. "Assumes Stripe for payments unless told otherwise"). Leave openQuestions empty.`;
 
-function buildSystemPrompt(forceFinal: boolean, deepContext = false): string {
-  const deepBlock = deepContext
+function buildStagedBlock(stageIndex: number): string {
+  const stage = stageForRound(stageIndex);
+  const stepNum = Math.min(Math.max(stageIndex, 0), SCOPE_STAGE_COUNT - 1) + 1;
+  const opener = stage.opener
+    ? ` Because this is the opening step, make your FIRST question an OPEN-ENDED free-text prompt (set "inputType":"text", "options":[], "multiSelect":false) worded like "In a sentence or two, what's your idea?", then add 1–3 broad framing multiple-choice questions (e.g. what kind of product this is, who it is mainly for, the single most important outcome).`
+    : "";
+  return `
+
+Staged scope interview — you are running a FIXED step-by-step intake, ONE step per round. This round is STEP ${stepNum} of ${SCOPE_STAGE_COUNT}: "${stage.label}". Ask ONLY about: ${stage.focus}. Do NOT jump ahead to later steps' topics — keep every question in this round on this step. Return 2–4 questions for this step (this overrides the 2–5 guidance above).${opener}`;
+}
+
+function buildSystemPrompt(forceFinal: boolean, deepContext = false, stageIndex?: number): string {
+  // Deep "no-context" mode always asks the model to synthesize a reusable
+  // business-context narrative when it finalizes the PRD (both the staged
+  // question rounds and the forced final share this).
+  const contextSummaryBlock = deepContext
     ? `
 
-No-context mode (the builder provided NO written notes):
-- Sequence your questions foundational → specific. On the FIRST round (no answers yet) ask ONLY broad foundational questions — what the business does, the core problem this product solves, who the users are, the single most important outcome, and the rough scope/scale. Do NOT open with detailed per-field questions. As answers accumulate across rounds, progressively drill into the per-section specifics (features and their fields, pages/screens, data, integrations, and the exact deadline).
-- Whenever you return the finished PRD (kind:"prd"), ALSO include a top-level "contextSummary": a concise 1–2 paragraph business-context narrative (what the business does, the problem being solved, who the users are, and the goal) synthesized from the answers, written so it can be saved and reused as the starting context for future documents about this client.`
+No-context mode (the builder provided NO written notes): whenever you return the finished PRD (kind:"prd"), ALSO include a top-level "contextSummary" — a concise 1–2 paragraph business-context narrative (what the business does, the problem being solved, who the users are, and the goal) synthesized from the answers, written so it can be saved and reused as the starting context for future documents about this client.`
     : "";
 
   const base = `You are drafting an OUTBOUND Product Requirements Document (PRD) for a prospective software product, working from a builder's notes about a client they are pitching, plus answers the builder gave to your clarifying questions. The builder refines it and sends it to the prospect to align on scope before any contract. There is no existing codebase.
@@ -102,9 +117,14 @@ ${COST_RULES}
 
 ${STACK_RULES}
 
-${CONDITIONAL_RULES}${deepBlock}
+${CONDITIONAL_RULES}${contextSummaryBlock}
 
 Output ONLY valid JSON.`;
+
+  // While still interviewing in deep mode, drive the fixed step-by-step scope
+  // backbone (idea → users → flows → security) — appended last so its per-step
+  // focus overrides the generic interview guidance.
+  const staged = deepContext && stageIndex != null ? buildStagedBlock(stageIndex) : "";
 
   if (forceFinal) {
     return `${base}
@@ -120,12 +140,13 @@ Your goal is to interview the builder until you can fill EVERY section richly wi
 - BEFORE asking anything, mine the business context (especially any "SOP / Discovery Call Transcript"), the builder's notes, and the answers so far for facts already stated. NEVER ask a question whose answer is already given there or can be reasonably inferred from it — treat it as known and write it straight into the PRD. Re-asking something discovery already captured is a failure. Example: if the SOP says "mainly me, the front desk, and our instructors — I'd want admin access and instructors should add notes and update cases," the staff roles ARE established → do NOT ask "which staff roles should have accounts." When a topic is only PARTIALLY answered, ask ONLY about the missing slice (e.g. the front desk's exact permissions), never the part already answered.
 - If ANY section still has a GENUINE unknown (not answered by the SOP/notes/answers), ask about it. Return 2–5 concrete multiple-choice questions per round that close the remaining gaps (each offers 3–5 options, ranked most→least likely; the builder can also type their own):
   { "kind": "questions", "items": [ { "id": "q1", "text": "…", "options": ["…","…","…"], "multiSelect": false, "recommended": "…", "recommendation": "Best for you because …" } ] }
+  (Omit "inputType" on normal pick-list questions — it defaults to "choice". Use "inputType": "date" only for the exact go-live date question described below.)
 - For EACH question, set "multiSelect": true when the builder could legitimately choose more than one option (e.g. which integrations are needed, which data sources feed the product, which user roles exist, which platforms to support). Set "multiSelect": false for single-answer questions (e.g. the primary deadline, the main budget tier, the single most important goal). Always include the multiSelect field.
 - For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the strings in "options"), and set "recommendation" to one short, plain-language sentence telling a non-technical builder WHY it is the best default for THIS product (tie it to their notes/answers — not generic advice). Choose the option you genuinely judge best, not always the first. For technical/implementation questions (e.g. how to connect an AI phone assistant to a phone line, which auth method, which hosting), reason about the best real-world method and recommend a concrete, proven default. For multi-select questions, set "recommended" to the single option most worth including. Omit both fields only if no option is meaningfully better than the others.
-- You MUST capture the client's EXACT target launch / go-live DATE before finalizing — it drives the entire delivery timeline. Ask a single-select ("multiSelect": false) question for it (e.g. "What is the client's exact target go-live date?") and tell the builder to enter the precise calendar date. You may offer example timeframe options, but make clear they should type the exact date in MM/DD/YYYY format in their own answer. Do not finalize the PRD with only a vague deadline if you have not yet asked for the exact date.
+- You MUST capture the client's EXACT target launch / go-live DATE before finalizing — it drives the entire delivery timeline. Ask for it as a dedicated DATE question so the builder types the precise calendar date: set "inputType": "date", "multiSelect": false, and "options": [] (the builder gets an MM/DD/YYYY input — do NOT offer timeframe options for this one). Example: { "id": "qN", "text": "What is the client's exact target go-live date?", "inputType": "date", "multiSelect": false, "options": [] }. Do not finalize the PRD with only a vague deadline if you have not yet asked for the exact date.
 - Only return the finished PRD once every section can be filled from the notes + answers and you have NO questions left to ask:
   { "kind": "prd", "content": { ...the full section object, openQuestions empty... } }
-Prioritize questions that unlock DEPTH on what is still genuinely unknown after mining the SOP / notes / answers — especially: the named user groups and their permissions (§3); the per-feature specifics needed to write mini-specs (the exact form fields, table columns, email contents, and status values for §5); the pages/screens (§7); data/integrations/tech stack (§12–14); and hard constraints (§17). Ask for the concrete specifics that let you write deep feature mini-specs rather than guessing them as facts. Prefer asking over guessing.`;
+Prioritize questions that unlock DEPTH on what is still genuinely unknown after mining the SOP / notes / answers — especially: the named user groups and their permissions (§3); the per-feature specifics needed to write mini-specs (the exact form fields, table columns, email contents, and status values for §5); the pages/screens (§7); data/integrations/tech stack (§12–14); and hard constraints (§17). Ask for the concrete specifics that let you write deep feature mini-specs rather than guessing them as facts. Prefer asking over guessing.${staged}`;
 }
 
 function buildUserPrompt(input: PrdGenInput): string {
@@ -214,7 +235,7 @@ async function callOpenAIWithResearch(
 
 export async function generatePrd(input: PrdGenInput, meta?: AiCallMeta): Promise<PrdGenResult> {
   const schema = input.forceFinal ? PrdFinalResult : PrdGenerationResult;
-  const systemPrompt = buildSystemPrompt(input.forceFinal, input.deepContext);
+  const systemPrompt = buildSystemPrompt(input.forceFinal, input.deepContext, input.stageIndex);
   const userPrompt = buildUserPrompt(input);
   // The final PRD is now far richer (deep feature mini-specs, examples, more
   // sections); 6000 truncated the JSON and silently fell back to an empty PRD.

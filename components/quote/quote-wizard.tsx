@@ -7,7 +7,7 @@
    After the path, it mirrors the PRD wizard's question loop (recommended option
    pre-selected, multi-select, "Other"), then redirects to the quote dashboard. */
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -67,8 +67,18 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
   const [round, setRound] = useState(0);
   const [answers, setAnswers] = useState<AnswerEntry[]>([]);
   const [state, setState] = useState<WizardState>(initialPrdId ? { kind: "prd" } : { kind: "path" });
+  // Always points at the latest state so the Escape handler cancels the live round.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  // Generation token: bumping it abandons the in-flight draft so a cancelled
+  // round can't navigate away or overwrite the screen when it finally resolves.
+  const genId = useRef(0);
+  // Snapshot of the screen (and answers) to restore when the user cancels.
+  const restoreRef = useRef<{ state: WizardState; answers: AnswerEntry[]; round: number } | null>(null);
 
   function run(src: Source, srcPrdId: string | null, nextAnswers: AnswerEntry[], nextRound: number, label: string) {
+    const myGen = ++genId.current;
+    restoreRef.current = { state: stateRef.current, answers, round };
     setState({ kind: "loading", label });
     const payload: DraftQuoteInput = {
       projectId,
@@ -86,6 +96,7 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
     startTransition(async () => {
       try {
         const result = await draftQuote(payload);
+        if (myGen !== genId.current) return; // cancelled — abandon the result
 
         if ("error" in result) {
           toast.error(result.error);
@@ -110,6 +121,7 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
 
         router.push(`${backHref}/quotes/${result.quoteId}`);
       } catch (err) {
+        if (myGen !== genId.current) return; // cancelled — abandon the result
         // A thrown/rejected server action (network drop, timeout) must never
         // leave the wizard stuck on the spinner with no feedback or escape.
         toast.error(err instanceof Error ? err.message : "Something went wrong generating the quote.");
@@ -117,6 +129,35 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
       }
     });
   }
+
+  // Cancel an in-progress generation: abandon the draft and return to the
+  // screen the round was launched from, with any answers rolled back.
+  function cancelLoading() {
+    if (stateRef.current.kind !== "loading") return;
+    genId.current += 1;
+    const r = restoreRef.current;
+    if (r) {
+      setAnswers(r.answers);
+      setRound(r.round);
+      setState(r.state);
+    } else {
+      setState({ kind: "path" });
+    }
+  }
+
+  // Esc cancels an in-progress generation, mirroring the on-screen Cancel button.
+  useEffect(() => {
+    if (state.kind !== "loading") return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelLoading();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.kind]);
 
   function startPath(src: Source, srcPrdId?: string | null) {
     if (!title.trim()) {
@@ -314,6 +355,13 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
         <div className="flex flex-col items-center justify-center gap-3 py-20">
           <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
           <p className="text-sm text-neutral-500">{state.label}</p>
+          <button
+            type="button"
+            onClick={cancelLoading}
+            className="mt-1 text-xs text-neutral-400 underline-offset-2 transition hover:text-neutral-700 hover:underline"
+          >
+            Cancel · Esc
+          </button>
         </div>
       )}
 

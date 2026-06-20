@@ -29,6 +29,7 @@ import {
   deleteSopTranscript,
 } from "@/lib/actions/project-sop";
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
+import { SCOPE_STAGE_COUNT, stageForRound } from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
 import type { ProjectSopTranscript } from "@/lib/types";
 
@@ -47,6 +48,26 @@ const isRealOption = (opt: string) => {
 // badge — never an error — so a stray value can't break the round.
 const matchesRecommended = (opt: string, rec?: string) =>
   !!rec && opt.trim().toLowerCase() === rec.trim().toLowerCase();
+
+// Mask free typing into MM/DD/YYYY: digits only, slashes auto-inserted as the
+// builder types so they never have to enter the separators themselves.
+function maskDate(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  const segs = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean);
+  return segs.join("/");
+}
+
+// Strict MM/DD/YYYY check: a real calendar date with a 4-digit year. Gates the
+// Next button on a "date" question so partial/invalid dates can't be submitted.
+function isValidDate(s: string): boolean {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s.trim());
+  if (!m) return false;
+  const mm = +m[1];
+  const dd = +m[2];
+  const yyyy = +m[3];
+  const d = new Date(yyyy, mm - 1, dd);
+  return d.getMonth() === mm - 1 && d.getDate() === dd && d.getFullYear() === yyyy;
+}
 
 type AnswerEntry = { questionId: string; question: string; answer: string };
 
@@ -193,7 +214,15 @@ function fmtClock(ms: number): string {
 // right sheet (or the first-load spinner spot) while a round generates. The fill
 // eases toward a 92% cap so it never sits at 100% before the server responds; the
 // parent redirects/unmounts the instant generation resolves, which reads as done.
-function WizLoading({ label, expectedMs }: { label: string; expectedMs: number }) {
+function WizLoading({
+  label,
+  expectedMs,
+  onCancel,
+}: {
+  label: string;
+  expectedMs: number;
+  onCancel?: () => void;
+}) {
   const [elapsed, setElapsed] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
 
@@ -248,6 +277,12 @@ function WizLoading({ label, expectedMs }: { label: string; expectedMs: number }
           );
         })}
       </ul>
+
+      {onCancel && (
+        <button type="button" className="prd-progress-cancel" onClick={onCancel}>
+          Cancel · Esc
+        </button>
+      )}
     </div>
   );
 }
@@ -279,6 +314,11 @@ export function PrdWizard({
   // global keydown handler read fresh selections/cursor, never a stale closure.
   const stateRef = useRef(state);
   stateRef.current = state;
+  // Generation token: bumping it abandons the in-flight draft so a cancelled
+  // round can't navigate away or overwrite the screen when it finally resolves.
+  const genId = useRef(0);
+  // Snapshot of the screen (and answers) to restore when the user cancels.
+  const restoreRef = useRef<{ state: WizardState; answers: AnswerEntry[]; round: number } | null>(null);
   // Pending single-select auto-advance timer.
   const advTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Cosmetic only — the server decides behavior from the (empty) notes each round.
@@ -360,6 +400,8 @@ export function PrdWizard({
   }
 
   function run(nextAnswers: AnswerEntry[], nextRound: number, label: string) {
+    const myGen = ++genId.current;
+    restoreRef.current = { state: stateRef.current, answers, round };
     setState({ kind: "loading", label });
     startTransition(async () => {
       const result = await draftPrd({
@@ -369,6 +411,7 @@ export function PrdWizard({
         answers: nextAnswers,
         round: nextRound,
       });
+      if (myGen !== genId.current) return; // cancelled — abandon the result
 
       if ("error" in result) {
         toast.error(result.error);
@@ -408,11 +451,38 @@ export function PrdWizard({
     });
   }
 
-  function start() {
-    if (!title.trim()) {
-      toast.error("Give the PRD a title first.");
-      return;
+  // Cancel an in-progress generation: abandon the draft and return to the
+  // screen the round was launched from, with any answers rolled back.
+  function cancelLoading() {
+    if (stateRef.current.kind !== "loading") return;
+    genId.current += 1;
+    const r = restoreRef.current;
+    if (r) {
+      setAnswers(r.answers);
+      setRound(r.round);
+      setState(r.state);
+    } else {
+      setState({ kind: "intro" });
     }
+  }
+
+  // Esc cancels an in-progress generation, mirroring the on-screen Cancel button.
+  useEffect(() => {
+    if (state.kind !== "loading") return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelLoading();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.kind]);
+
+  function start() {
+    // No title needed to begin — an empty title falls back to the project name in
+    // run(), so a no-notes builder can start straight from "what's your idea?".
     setDeepMode(!notes.trim());
     setAnswers([]);
     setRound(0);
@@ -420,6 +490,8 @@ export function PrdWizard({
   }
 
   function answerFor(q: Question, selections: Record<string, string[]>, otherText: Record<string, string>): string {
+    // Date and free-text questions store the typed value in otherText (no options).
+    if (q.inputType === "date" || q.inputType === "text") return (otherText[q.id] ?? "").trim();
     const sel = selections[q.id] ?? [];
     const parts: string[] = [];
     for (const s of sel) {
@@ -431,6 +503,13 @@ export function PrdWizard({
       }
     }
     return parts.join(", ");
+  }
+
+  // Whether the question has a usable answer. A date question requires a complete,
+  // valid MM/DD/YYYY; a free-text or choice question just needs a non-empty answer.
+  function isAnswered(q: Question, selections: Record<string, string[]>, otherText: Record<string, string>): boolean {
+    if (q.inputType === "date") return isValidDate(otherText[q.id] ?? "");
+    return answerFor(q, selections, otherText).length > 0;
   }
 
   function toggleOption(qId: string, opt: string, multi: boolean) {
@@ -528,6 +607,20 @@ export function PrdWizard({
       if (s.kind !== "questions") return;
       const q = s.items[s.cursor];
       if (!q) return;
+      // Date and free-text questions have no numbered options. Date advances on
+      // Enter; free-text leaves Enter to the textarea (newlines) and advances via
+      // the Next button. ← goes back for both. Typing itself is handled by each
+      // field's own element, since the guard above already ignores text inputs.
+      if (q.inputType === "date" || q.inputType === "text") {
+        if (q.inputType === "date" && e.key === "Enter" && isAnswered(q, s.selections, s.otherText)) {
+          e.preventDefault();
+          goToNext();
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          goToPrev();
+        }
+        return;
+      }
       const opts = [...q.options.filter(isRealOption), OTHER];
       const n = parseInt(e.key, 10);
       if (!Number.isNaN(n) && n >= 1 && n <= opts.length) {
@@ -536,7 +629,7 @@ export function PrdWizard({
         if (opt === OTHER) toggleOption(q.id, OTHER, q.multiSelect);
         else pickOption(opt);
       } else if (e.key === "Enter") {
-        if (answerFor(q, s.selections, s.otherText).length > 0) {
+        if (isAnswered(q, s.selections, s.otherText)) {
           e.preventDefault();
           goToNext();
         }
@@ -818,7 +911,7 @@ export function PrdWizard({
             <section className="ed-sheet">
               <div className="ed-sheet-body">
                 <div className="ed-sheet-inner">
-                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} />
+                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} />
                 </div>
               </div>
             </section>
@@ -826,7 +919,7 @@ export function PrdWizard({
         ) : (
           // First load (no answers yet): in-page progress meter.
           <div className="prd-loading">
-            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} />
+            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} />
           </div>
         ))}
 
@@ -838,8 +931,16 @@ export function PrdWizard({
           const selected = state.selections[q.id] ?? [];
           const otherOn = selected.includes(OTHER);
           const isLast = state.cursor === total - 1;
-          const answered = answerFor(q, state.selections, state.otherText).length > 0;
+          const answered = isAnswered(q, state.selections, state.otherText);
+          const isDate = q.inputType === "date";
+          const isText = q.inputType === "text";
           const optList = [...q.options.filter(isRealOption), OTHER];
+          // No-notes flow runs the fixed scope backbone — label the current stage
+          // ("Step 2 of 4 · Users & roles"); `round` equals the displayed stage's index.
+          const stage = deepMode ? stageForRound(round) : null;
+          const progressLabel = stage
+            ? `Step ${Math.min(round, SCOPE_STAGE_COUNT - 1) + 1} of ${SCOPE_STAGE_COUNT} · ${stage.label}`
+            : "Sharpening the PRD";
 
           // Left "draft" doc grows across rounds: answered facts from prior
           // rounds (always done) + this round's questions (active/done/pending).
@@ -881,17 +982,60 @@ export function PrdWizard({
 
                 <div className="ed-sheet-body">
                   <div key={state.cursor} className="ed-sheet-inner ed-anim">
-                    <WzProgress
-                      label={deepMode ? "Building the context" : "Sharpening the PRD"}
-                      index={state.cursor}
-                      total={total}
-                    />
+                    <WzProgress label={progressLabel} index={state.cursor} total={total} />
                     <h1 className="ed-q-text">
                       {q.text}
                       {q.multiSelect && <span className="ed-q-multi">— all that apply</span>}
                     </h1>
                     <div className="ed-opts">
-                      {optList.map((opt) => {
+                      {isDate ? (
+                        <div className="ed-date">
+                          <input
+                            className="ed-date-input"
+                            type="text"
+                            inputMode="numeric"
+                            autoFocus
+                            maxLength={10}
+                            placeholder="MM/DD/YYYY"
+                            value={state.otherText[q.id] ?? ""}
+                            onChange={(e) =>
+                              setState((prev) =>
+                                prev.kind === "questions"
+                                  ? {
+                                      ...prev,
+                                      otherText: { ...prev.otherText, [q.id]: maskDate(e.target.value) },
+                                    }
+                                  : prev
+                              )
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && answered) {
+                                e.preventDefault();
+                                goToNext();
+                              }
+                            }}
+                          />
+                          <span className="ed-date-hint">
+                            Type the exact date — e.g. 09/15/2026
+                          </span>
+                        </div>
+                      ) : isText ? (
+                        <textarea
+                          className="ed-other-area"
+                          autoFocus
+                          value={state.otherText[q.id] ?? ""}
+                          onChange={(e) =>
+                            setState((prev) =>
+                              prev.kind === "questions"
+                                ? { ...prev, otherText: { ...prev.otherText, [q.id]: e.target.value } }
+                                : prev
+                            )
+                          }
+                          placeholder="Describe it in your own words — a sentence or two is plenty…"
+                        />
+                      ) : (
+                        <>
+                          {optList.map((opt) => {
                         const on = selected.includes(opt);
                         const isOther = opt === OTHER;
                         const isRecommended = matchesRecommended(opt, q.recommended);
@@ -947,13 +1091,25 @@ export function PrdWizard({
                           placeholder="Type the answer in your own words…"
                         />
                       )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="ed-sheet-foot">
                   <span className="foot-hint">
-                    <span className="ed-kbd">1–{optList.length}</span>&nbsp;to pick
+                    {isDate ? (
+                      <>
+                        <span className="ed-kbd">↵</span>&nbsp;to continue
+                      </>
+                    ) : isText ? (
+                      <>type your answer, then&nbsp;Next</>
+                    ) : (
+                      <>
+                        <span className="ed-kbd">1–{optList.length}</span>&nbsp;to pick
+                      </>
+                    )}
                   </span>
                   <button className="btn-primary" disabled={!answered} onClick={goToNext}>
                     {isLast ? "Generate my report" : "Next question"}

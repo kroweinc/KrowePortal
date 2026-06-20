@@ -85,7 +85,7 @@ const createSchema = z.object({
 
 export async function createContractDraft(
   formData: FormData
-): Promise<{ error: string } | void> {
+): Promise<{ error: string } | { contractId: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only builders can create contracts." };
@@ -143,7 +143,9 @@ export async function createContractDraft(
   if (error || !data) return { error: error?.message ?? "Failed to create contract." };
 
   revalidatePath(`/b/projects/${parsed.data.projectId}`);
-  redirect(`/b/projects/${parsed.data.projectId}/contract/${data.id as string}`);
+  // Return the id and let the client navigate, so a builder who cancels the
+  // generation (Esc / Cancel) isn't yanked into the draft by a server redirect.
+  return { contractId: data.id as string };
 }
 
 export async function regenerateContract(

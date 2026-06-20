@@ -16,6 +16,7 @@ import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
 import { fieldsForSection, refinableSection } from "@/lib/prd/section-fields";
+import { SCOPE_STAGE_COUNT } from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
 import { PrdContentSchema } from "@/lib/ai/schemas";
 import type { Prd, PrdContent } from "@/lib/types";
@@ -23,8 +24,8 @@ import type { Prd, PrdContent } from "@/lib/types";
 /** Hard cap on adaptive question rounds before a PRD is forced. */
 const MAX_PRD_ROUNDS = 5;
 
-/** Raised cap for the no-notes "deep context" path: interview broad→specific over more rounds. */
-const MAX_PRD_ROUNDS_DEEP = 8;
+/** No-notes "deep context" path: one round per fixed scope stage, then force the PRD. */
+const MAX_PRD_ROUNDS_DEEP = SCOPE_STAGE_COUNT;
 
 /** Hard cap on refine question rounds before a section patch is forced. */
 const MAX_REFINE_ROUNDS = 2;
@@ -113,10 +114,12 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   ]);
   if (!budget.ok) return { error: budget.error };
 
-  // No written notes ⇒ deep context-gathering mode: more rounds, broad→specific
-  // questions, and a synthesized context summary saved back to the project.
+  // No written notes ⇒ deep context-gathering mode: a fixed step-by-step scope
+  // intake (one stage per round), then a synthesized context summary saved back
+  // to the project. `stageIndex` maps the current round to its scope stage.
   const deepContext = !(notes && notes.trim().length > 0);
   const forceFinal = round >= (deepContext ? MAX_PRD_ROUNDS_DEEP : MAX_PRD_ROUNDS);
+  const stageIndex = deepContext ? Math.min(round, SCOPE_STAGE_COUNT - 1) : undefined;
 
   let result;
   try {
@@ -128,6 +131,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
         answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
         forceFinal,
         deepContext,
+        stageIndex,
         currentDate: new Date().toISOString().slice(0, 10),
       },
       { userId: profile.id, operation: "generate_prd" }
