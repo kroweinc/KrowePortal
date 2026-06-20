@@ -1,0 +1,81 @@
+/* Right-click context menu + ⋯ kebab trigger.
+   Sits at z-index 70: above page chrome (40–45) and overlays (60–61), below the
+   sonner toaster (80) so action toasts render over a just-closed menu. */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 184px;
+  padding: 6px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+  animation: ctx-pop 140ms var(--ease-out-smooth);
+}
+
+@keyframes ctx-pop {
+  from { opacity: 0; transform: scale(0.97) translateY(-3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.2;
+  color: var(--foreground);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.ctx-item:hover:not(:disabled) { background: var(--surface-subtle); }
+.ctx-item:disabled { opacity: 0.45; cursor: default; }
+.ctx-item.is-destructive { color: var(--danger); }
+.ctx-item.is-destructive:hover:not(:disabled) { background: var(--danger-soft); }
+
+.ctx-ico { display: inline-flex; color: var(--muted-foreground); flex-shrink: 0; }
+.ctx-item.is-destructive .ctx-ico { color: var(--danger); }
+
+.ctx-sep { height: 1px; margin: 5px 6px; background: var(--border); }
+
+/* ── ⋯ kebab trigger ──────────────────────────────────────────────────
+   Always visible (touch users can't hover) but low-emphasis until hover. */
+.ctx-kebab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--faint-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.ctx-kebab:hover { background: var(--surface-subtle); color: var(--foreground); }
+
+/* Overlay variant: a relatively-positioned host wraps a full-row <a>, and the
+   kebab floats over its right edge — keeps the native link clickable across the
+   whole row without nesting a <button> inside the <a>. */
+.ctx-host { position: relative; }
+.ctx-kebab--overlay {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  z-index: 1;
+  background: color-mix(in srgb, white 80%, transparent);
+  backdrop-filter: blur(2px);
+}

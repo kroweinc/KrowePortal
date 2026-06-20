@@ -108,6 +108,8 @@ export default async function BuilderEngagementPage({
         status: p.status,
         meta: docMeta(p),
         href: `/b/projects/${projectId}/prd/${p.id}`,
+        docKind: "prd" as const,
+        token: p.token,
       })),
       ...quotes.map((q) => ({
         id: q.id,
@@ -115,6 +117,8 @@ export default async function BuilderEngagementPage({
         status: q.status,
         meta: quoteDocMeta(q),
         href: `/b/projects/${projectId}/quotes/${q.id}`,
+        docKind: "quote" as const,
+        token: q.token,
       })),
       ...contracts.map((c) => ({
         id: c.id,
@@ -122,6 +126,8 @@ export default async function BuilderEngagementPage({
         status: c.status,
         meta: docMeta(c),
         href: `/b/projects/${projectId}/contract/${c.id}`,
+        docKind: "contract" as const,
+        token: c.token,
       })),
     ];
   }

@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import {
@@ -7,7 +6,6 @@ import {
   FileText,
   Receipt,
   FileSignature,
-  ChevronRight,
   Hammer,
   Rocket,
   Plus,
@@ -25,14 +23,15 @@ import { countSeedItems } from "@/lib/project/seed-from-quote";
 import { safeExternalHref } from "@/lib/project/business-context";
 import { docMeta, quoteDocMeta } from "@/lib/doc/doc-summary";
 import { Button } from "@/components/ui/button";
+import { DocRow } from "@/components/doc/doc-row";
 import { EditProjectDialog } from "./edit-project-dialog";
 import { ProjectMaterials } from "./project-materials";
 import { ProjectSop } from "./project-sop";
 import { PipelineStepper } from "./pipeline-stepper";
 import { BeginEngagementDialog } from "./begin-engagement-dialog";
-import type { Quote, DocStatus, Engagement } from "@/lib/types";
+import type { Engagement } from "@/lib/types";
 
-export const metadata = { title: "Project Docs" };
+export const metadata = { title: "Project" };
 
 export default async function ProjectDetailPage({
   params,
@@ -133,6 +132,9 @@ export default async function ProjectDetailPage({
           {prds.map((p) => (
             <DocRow
               key={p.id}
+              docKind="prd"
+              id={p.id}
+              token={p.token}
               href={`/b/projects/${id}/prd/${p.id}`}
               icon={<FileText size={17} strokeWidth={1.9} />}
               title={p.title}
@@ -153,6 +155,9 @@ export default async function ProjectDetailPage({
           {quoteDocs.map((q) => (
             <DocRow
               key={q.id}
+              docKind="quote"
+              id={q.id}
+              token={q.token}
               href={`/b/projects/${id}/quotes/${q.id}`}
               icon={<Receipt size={17} strokeWidth={1.9} />}
               title={q.title}
@@ -173,6 +178,9 @@ export default async function ProjectDetailPage({
           {contracts.map((c) => (
             <DocRow
               key={c.id}
+              docKind="contract"
+              id={c.id}
+              token={c.token}
               href={`/b/projects/${id}/contract/${c.id}`}
               icon={<FileSignature size={17} strokeWidth={1.9} />}
               title={c.title}
@@ -221,73 +229,6 @@ export default async function ProjectDetailPage({
         </section>
       </div>
     </main>
-  );
-}
-
-function Chip({ status }: { status: DocStatus | Quote["status"] }) {
-  const tone =
-    status === "signed" || status === "accepted"
-      ? "signed"
-      : status === "sent"
-        ? "sent"
-        : status === "rejected"
-          ? "rejected"
-          : "draft";
-  const label: Record<DocStatus | Quote["status"], string> = {
-    draft: "Draft",
-    sent: "Sent",
-    signed: "Signed",
-    accepted: "Accepted",
-    rejected: "Rejected",
-  };
-  return (
-    <span className={`chip chip-${tone}`}>
-      <span className="cd" />
-      {label[status]}
-    </span>
-  );
-}
-
-// Renders a " · "-joined doc-summary string as separator dots, styling any
-// currency part (e.g. "$45,000") as a mono amount — matching the design.
-function renderMeta(meta: string) {
-  return meta.split(" · ").map((part, i) => (
-    <Fragment key={i}>
-      {i > 0 && <span className="sep" />}
-      {part.startsWith("$") ? (
-        <span className="amount">{part}</span>
-      ) : (
-        <span>{part}</span>
-      )}
-    </Fragment>
-  ));
-}
-
-function DocRow({
-  href,
-  icon,
-  title,
-  status,
-  meta,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  title: string;
-  status: DocStatus | Quote["status"];
-  meta: string;
-}) {
-  return (
-    <Link href={href} className="row">
-      <span className="row-ico">{icon}</span>
-      <div className="row-main">
-        <div className="row-titleline">
-          <span className="row-name">{title}</span>
-          <Chip status={status} />
-        </div>
-        <div className="row-sub">{renderMeta(meta)}</div>
-      </div>
-      <span className="row-go"><ChevronRight size={17} strokeWidth={2} /></span>
-    </Link>
   );
 }
 
