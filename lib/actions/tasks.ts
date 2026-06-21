@@ -3,6 +3,7 @@
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
@@ -57,16 +58,22 @@ export async function createTask(formData: FormData) {
     },
   });
 
-  await estimateAndSaveTaskHours({
-    taskId: data.id as string,
-    title: parsed.data.title,
-    description: parsed.data.description ?? null,
-    priority: parsed.data.priority,
-    userId: profile.id,
-  });
+  // The AI hours estimate is a 1-3s OpenAI round-trip that self-persists to the
+  // task row. Defer it past the response with after() so "Add task" returns
+  // instantly; the estimate fills in on the next revalidation/navigation.
+  const taskId = data.id as string;
+  after(() =>
+    estimateAndSaveTaskHours({
+      taskId,
+      title: parsed.data.title,
+      description: parsed.data.description ?? null,
+      priority: parsed.data.priority,
+      userId: profile.id,
+    })
+  );
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
-  return { success: true, taskId: data.id as string };
+  return { success: true, taskId };
 }
 
 const updateTaskSchema = z.object({
@@ -108,18 +115,23 @@ export async function updateTask(formData: FormData) {
   if (error) return { error: error.message };
 
   if (before) {
-    for (const [field, newValue] of Object.entries(updates)) {
-      const oldValue = (before as Record<string, unknown>)[field];
-      if (oldValue === newValue) continue;
-      await writeAuditEntry({
-        taskId: id,
-        actorId: profile.id,
-        action: "task.field_changed",
-        field,
-        oldValue,
-        newValue,
-      });
-    }
+    // Write one audit entry per changed field — in parallel, not a serial loop,
+    // so a multi-field edit doesn't stack several DB round-trips before returning.
+    const changed = Object.entries(updates).filter(
+      ([field, newValue]) => (before as Record<string, unknown>)[field] !== newValue
+    );
+    await Promise.all(
+      changed.map(([field, newValue]) =>
+        writeAuditEntry({
+          taskId: id,
+          actorId: profile.id,
+          action: "task.field_changed",
+          field,
+          oldValue: (before as Record<string, unknown>)[field],
+          newValue,
+        })
+      )
+    );
   }
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");

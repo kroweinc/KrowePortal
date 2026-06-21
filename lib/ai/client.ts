@@ -7,6 +7,10 @@ if (!process.env.OPENAI_API_KEY) {
 
 export const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  // Hang-guard only. The long PRD/quote/contract generations legitimately run
+  // 10-30s+ on the reasoning model, so a tight (e.g. 15s) timeout would abort
+  // real work — 120s bounds a truly stuck connection without killing them.
+  timeout: 120_000,
 });
 
 export const AI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
