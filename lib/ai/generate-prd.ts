@@ -276,8 +276,12 @@ export async function generatePrd(input: PrdGenInput, meta?: AiCallMeta): Promis
 
   if (!result.success) {
     // Last-resort: never throw on the question path — fall through to an empty PRD
-    // so the wizard can still hand the builder an editable draft.
-    if (input.forceFinal) return { kind: "prd", content: {} };
+    // so the wizard can still hand the builder an editable draft. Warn so the
+    // (otherwise silent) blank-draft fallback is visible in logs.
+    if (input.forceFinal) {
+      console.warn("[generatePrd] schema validation failed after retry; returning empty PRD draft");
+      return { kind: "prd", content: {} };
+    }
     throw new Error("AI response validation failed");
   }
 

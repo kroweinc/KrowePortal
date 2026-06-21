@@ -193,8 +193,12 @@ export async function generateQuote(input: QuoteGenInput, meta?: AiCallMeta): Pr
 
   if (!result.success) {
     // Last-resort: never throw on the question path — fall through to an empty
-    // quote so the wizard can still hand the builder an editable draft.
-    if (input.forceFinal) return { kind: "quote", content: {} };
+    // quote so the wizard can still hand the builder an editable draft. Warn so
+    // the (otherwise silent) blank-draft fallback is visible in logs.
+    if (input.forceFinal) {
+      console.warn("[generateQuote] schema validation failed after retry; returning empty quote draft");
+      return { kind: "quote", content: {} };
+    }
     throw new Error("AI response validation failed");
   }
 
