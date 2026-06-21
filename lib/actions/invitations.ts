@@ -15,8 +15,11 @@ async function getClient(profileId: string) {
 }
 
 // Creates an engagement for this builder (with backfill of existing personal tasks) if none exists.
-// Uses admin client unconditionally — we've already verified the caller's identity via getCurrentProfile().
-export async function getOrCreateEngagement(profileId: string): Promise<Engagement> {
+// Uses admin client unconditionally and trusts the caller-supplied profileId, so this MUST stay a
+// module-internal helper — never export it. Exporting it from a "use server" file would expose it as
+// an unauthenticated RPC endpoint that any client could call with an arbitrary profile id (IDOR).
+// Its only caller, createInvitation below, derives the id from getCurrentProfile() first.
+async function getOrCreateEngagement(profileId: string): Promise<Engagement> {
   const admin = createAdminClient();
 
   const { data: existingRows } = await admin

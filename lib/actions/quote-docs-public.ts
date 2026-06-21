@@ -19,9 +19,14 @@ export async function getQuoteByToken(token: string): Promise<PublicQuote | null
   if (!TOKEN_RE.test(token)) return null;
 
   const admin = createAdminClient();
+  // Explicit allow-list, NOT select("*"): the public page must never receive
+  // signer_ip (third-party PII), signed_by_user_id, created_by, or source_notes
+  // (builder-internal AI notes). source_prd_id is also internal so it's omitted.
   const { data } = await admin
     .from("quotes")
-    .select("*, project:projects(name, owner_id, owner:profiles!owner_id(display_name))")
+    .select(
+      "id, project_id, title, status, content, token, sent_at, signed_by_name, signed_at, signature_consent, accepted_at, rejected_at, rejection_note, created_at, updated_at, project:projects(name, owner_id, owner:profiles!owner_id(display_name))"
+    )
     .eq("token", token)
     .maybeSingle();
 
