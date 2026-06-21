@@ -70,8 +70,13 @@ export async function assertAiBudget(
         error: "You've reached today's AI usage limit. Please try again tomorrow.",
       };
     }
-  } catch {
-    // Fail open.
+  } catch (err) {
+    // Fail open so a ledger hiccup never blocks legitimate work — but warn so the
+    // outage (and the fact the cap isn't being enforced) is visible.
+    console.warn(
+      "[assertAiBudget] usage ledger read failed; allowing request (cap not enforced)",
+      err instanceof Error ? err.message : err
+    );
   }
   return { ok: true };
 }
