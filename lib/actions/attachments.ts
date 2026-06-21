@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { TaskAttachment } from "@/lib/types";
 import { MAX_ATTACHMENT_SIZE, ALLOWED_ATTACHMENT_EXTENSIONS } from "@/lib/attachments-constants";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { isTaskMember, isAttachmentMember } from "@/lib/actions/task-access";
 
 const MAX_SIZE = MAX_ATTACHMENT_SIZE;
 const ALLOWED_EXTENSIONS = ALLOWED_ATTACHMENT_EXTENSIONS;
@@ -34,6 +35,8 @@ export async function uploadAttachment(formData: FormData): Promise<{ success?: 
     is_deliverable: formData.get("is_deliverable") ?? "false",
   });
   if (!parsed.success) return { error: "Invalid task ID" };
+  if (!(await isTaskMember(parsed.data.task_id, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const file = formData.get("file");
   if (!(file instanceof File)) return { error: "No file provided" };
@@ -105,6 +108,8 @@ export async function addLinkAttachment(
 
   const parsed = linkSchema.safeParse({ task_id: taskId, url, label });
   if (!parsed.success) return { error: parsed.error.flatten().formErrors[0] ?? "Invalid input" };
+  if (!(await isTaskMember(parsed.data.task_id, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
   const { data, error: dbError } = await supabase
@@ -154,6 +159,8 @@ export async function addTextAttachment(
 
   const parsed = textSchema.safeParse({ task_id: taskId, content });
   if (!parsed.success) return { error: parsed.error.flatten().formErrors[0] ?? "Invalid input" };
+  if (!(await isTaskMember(parsed.data.task_id, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
   const { data, error: dbError } = await supabase
@@ -196,6 +203,8 @@ export async function deleteAttachment(attachmentId: string): Promise<{ success?
 
   const parsed = deleteSchema.safeParse({ id: attachmentId });
   if (!parsed.success) return { error: "Invalid ID" };
+  if (!(await isAttachmentMember(parsed.data.id, profile.id)))
+    return { error: "You don't have access to this attachment." };
 
   const supabase = await getClient(profile.id);
 
@@ -238,6 +247,8 @@ export async function deleteAttachment(attachmentId: string): Promise<{ success?
 export async function getAttachmentSignedUrl(attachmentId: string): Promise<{ url?: string; error?: string }> {
   const profile = await getCurrentProfile();
   if (!profile) return { error: "Unauthorized" };
+  if (!(await isAttachmentMember(attachmentId, profile.id)))
+    return { error: "You don't have access to this attachment." };
 
   const supabase = await getClient(profile.id);
   const { data: attachment } = await supabase

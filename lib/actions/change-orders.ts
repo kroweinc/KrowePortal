@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { notifyUser, changeOrderSignedEmail } from "@/lib/email/notify";
+import { isEngagementMember } from "@/lib/actions/task-access";
 import type { ChangeOrder, ChangeOrderContent } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -27,6 +28,7 @@ function computeTotal(content: ChangeOrderContent): number {
 export async function getChangeOrders(engagementId: string): Promise<ChangeOrder[]> {
   const profile = await getCurrentProfile();
   if (!profile) return [];
+  if (!(await isEngagementMember(engagementId, profile.id))) return [];
   const supabase = await getClient(profile.id);
   const { data } = await supabase
     .from("change_orders")
@@ -65,6 +67,8 @@ export async function createChangeOrder(
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only the builder can create change orders." };
+  if (!(await isEngagementMember(engagementId, profile.id)))
+    return { error: "You don't have access to this client." };
   const parsed = createSchema.safeParse(input);
   if (!parsed.success) return { error: "Invalid change order." };
 
@@ -102,6 +106,7 @@ export async function updateChangeOrder(
     .eq("id", id)
     .single();
   if (!before) return { error: "Change order not found." };
+  if (before.created_by !== profile.id) return { error: "Not your change order." };
   if (before.status !== "draft") return { error: "Only drafts can be edited." };
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -122,8 +127,13 @@ export async function sendChangeOrder(id: string): Promise<{ success: true } | {
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only the builder can send change orders." };
   const supabase = await getClient(profile.id);
-  const { data: before } = await supabase.from("change_orders").select("status").eq("id", id).single();
+  const { data: before } = await supabase
+    .from("change_orders")
+    .select("status, created_by")
+    .eq("id", id)
+    .single();
   if (!before) return { error: "Change order not found." };
+  if (before.created_by !== profile.id) return { error: "Not your change order." };
   if (before.status !== "draft") return { error: "Only drafts can be sent." };
   const { error } = await supabase
     .from("change_orders")
@@ -143,8 +153,14 @@ export async function rejectChangeOrder(
   if (!profile) redirect("/login");
   if (profile.role !== "operator") return { error: "Only the operator can reject change orders." };
   const supabase = await getClient(profile.id);
-  const { data: before } = await supabase.from("change_orders").select("status").eq("id", id).single();
+  const { data: before } = await supabase
+    .from("change_orders")
+    .select("status, engagement_id")
+    .eq("id", id)
+    .single();
   if (!before) return { error: "Change order not found." };
+  if (!(await isEngagementMember(before.engagement_id as string, profile.id)))
+    return { error: "You don't have access to this change order." };
   if (before.status !== "sent") return { error: "Change order is not awaiting a decision." };
   const { error } = await supabase
     .from("change_orders")
@@ -185,6 +201,8 @@ export async function signChangeOrder(
     .eq("id", id)
     .single();
   if (!co) return { error: "Change order not found." };
+  if (!(await isEngagementMember(co.engagement_id as string, profile.id)))
+    return { error: "You don't have access to this change order." };
   if (co.status !== "sent") return { error: "Change order is not awaiting signature." };
 
   const content = (co.content ?? {}) as ChangeOrderContent;

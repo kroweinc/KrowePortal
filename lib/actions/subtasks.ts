@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { isTaskMember, isSubtaskMember } from "@/lib/actions/task-access";
 import type { Subtask } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -20,6 +21,8 @@ export async function createSubtask(
 ): Promise<{ subtask?: Subtask; error?: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const parsedTitle = titleSchema.safeParse(title.trim());
   if (!parsedTitle.success) return { error: "Title is required (max 300 chars)" };
@@ -68,6 +71,8 @@ export async function toggleSubtask(
 ): Promise<{ error?: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isSubtaskMember(id, profile.id)))
+    return { error: "You don't have access to this subtask." };
 
   const supabase = await getClient(profile.id);
 
@@ -102,6 +107,9 @@ export async function updateSubtaskTitle(
 ): Promise<{ error?: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+
+  if (!(await isSubtaskMember(id, profile.id)))
+    return { error: "You don't have access to this subtask." };
 
   const parsedTitle = titleSchema.safeParse(title.trim());
   if (!parsedTitle.success) return { error: "Title is required (max 300 chars)" };
@@ -141,6 +149,8 @@ export async function deleteSubtask(
 ): Promise<{ error?: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -171,6 +181,8 @@ export async function reorderSubtasks(
 ): Promise<{ error?: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (updates.length && !(await isSubtaskMember(updates[0].id, profile.id)))
+    return { error: "You don't have access to these subtasks." };
 
   const supabase = await getClient(profile.id);
   const results = await Promise.all(

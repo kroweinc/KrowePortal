@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { isTaskMember } from "@/lib/actions/task-access";
 import type { TaskStatus, TaskPriority } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -100,6 +101,8 @@ export async function updateTask(formData: FormData) {
 
   const supabase = await getClient(profile.id);
   const { id, ...updates } = parsed.data;
+  if (!(await isTaskMember(id, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const { data: before } = await supabase
     .from("tasks")
@@ -153,6 +156,8 @@ export async function markTaskDone(
 
   const parsed = markDoneSchema.safeParse({ taskId, ...payload });
   if (!parsed.success) return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -214,6 +219,8 @@ export async function markTaskForApproval(
 
   const parsed = markForApprovalSchema.safeParse({ taskId, ...payload });
   if (!parsed.success) return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const now = new Date().toISOString();
   const updates: Record<string, string | null> = {
@@ -268,6 +275,8 @@ export async function approveTask(
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "operator") return { error: "Only operators can approve tasks." };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -303,6 +312,8 @@ export async function approveTask(
 export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -338,6 +349,8 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
 export async function reorderTask(taskId: string, sortOrder: number) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
   const { error } = await supabase
@@ -353,6 +366,8 @@ export async function reorderTask(taskId: string, sortOrder: number) {
 export async function deleteTask(taskId: string) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
