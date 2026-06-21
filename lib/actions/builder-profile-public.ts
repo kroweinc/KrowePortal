@@ -50,6 +50,9 @@ export async function getBuilderProfileByToken(
     .maybeSingle();
 
   if (!data || !data.is_published) return null;
+  // Reject revoked or expired share links (see migration 0062).
+  if (data.token_revoked_at) return null;
+  if (data.token_expires_at && new Date(data.token_expires_at as string) < new Date()) return null;
 
   return assemblePublicProfile(admin, data);
 }
@@ -163,12 +166,19 @@ export async function getPublicResumeUrl(
   const admin = createAdminClient();
   const { data } = await admin
     .from("builder_profiles")
-    .select("is_published, resume_storage_path, user_id")
+    .select("is_published, resume_storage_path, user_id, token_expires_at, token_revoked_at")
     .eq("token", token)
     .maybeSingle();
 
   if (!data || !data.resume_storage_path) {
     return { error: "Resume not available." };
+  }
+  // Reject revoked or expired share links (see migration 0062).
+  if (
+    data.token_revoked_at ||
+    (data.token_expires_at && new Date(data.token_expires_at as string) < new Date())
+  ) {
+    return { error: "This link has expired." };
   }
 
   // Unpublished resumes are visible only to the owner (profile preview).

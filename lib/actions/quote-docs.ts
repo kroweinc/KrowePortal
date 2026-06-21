@@ -412,6 +412,35 @@ export async function deleteQuote(id: string): Promise<{ success: true } | { err
   return { success: true };
 }
 
+// Revokes the public share link — the public lookup rejects a revoked row
+// (migration 0062), killing access via any already-shared link.
+export async function revokeQuoteShareLink(
+  id: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can revoke a link." };
+
+  const supabase = await getClient(profile.id);
+  const { data: before } = await supabase
+    .from("quotes")
+    .select("created_by, project_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!before) return { error: "Quote not found." };
+  if (before.created_by !== profile.id) return { error: "Not your quote." };
+
+  const { error } = await supabase
+    .from("quotes")
+    .update({ token_revoked_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/b/projects/${before.project_id as string}`);
+  return { success: true };
+}
+
 export async function getQuotesByProject(projectId: string): Promise<Quote[]> {
   const profile = await getCurrentProfile();
   if (!profile) return [];

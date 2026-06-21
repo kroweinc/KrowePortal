@@ -363,6 +363,26 @@ export async function updateProfileTags(input: {
   return { success: true };
 }
 
+// Revokes the public profile share link — the public lookup (and resume URL)
+// reject a revoked row (migration 0062), killing access via any shared link.
+export async function revokeProfileShareLink(): Promise<{ success?: boolean; error?: string }> {
+  const { profile, error: roleError } = await requireBuilder();
+  if (!profile) return { error: roleError! };
+
+  const row = await getOwnedProfile(profile.id);
+  if (!row) return { error: "Profile not found." };
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("builder_profiles")
+    .update({ token_revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", row.id);
+  if (error) return { error: error.message };
+
+  revalidateProfile(row.token);
+  return { success: true };
+}
+
 // ============================================================
 // GitHub showcase
 // ============================================================

@@ -436,6 +436,35 @@ export async function deletePrd(id: string): Promise<{ success: true } | { error
   return { success: true };
 }
 
+// Revokes the public share link — the public lookup rejects a revoked row
+// (migration 0062), killing access via any already-shared link.
+export async function revokePrdShareLink(
+  id: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can revoke a link." };
+
+  const supabase = await getClient(profile.id);
+  const { data: before } = await supabase
+    .from("prds")
+    .select("created_by, project_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!before) return { error: "PRD not found." };
+  if (before.created_by !== profile.id) return { error: "Not your PRD." };
+
+  const { error } = await supabase
+    .from("prds")
+    .update({ token_revoked_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/b/projects/${before.project_id as string}`);
+  return { success: true };
+}
+
 export async function getPrdsByProject(projectId: string): Promise<Prd[]> {
   const profile = await getCurrentProfile();
   if (!profile) return [];

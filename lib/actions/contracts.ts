@@ -301,6 +301,36 @@ export async function deleteContract(id: string): Promise<{ success: true } | { 
   return { success: true };
 }
 
+// Revokes the public share link. The token stays in place but the public lookup
+// rejects a revoked row (migration 0062), immediately killing access via any
+// already-shared/leaked link. (Reissuing a fresh link is a follow-up; no UI yet.)
+export async function revokeContractShareLink(
+  id: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can revoke a link." };
+
+  const supabase = await getClient(profile.id);
+  const { data: before } = await supabase
+    .from("contracts")
+    .select("created_by, project_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!before) return { error: "Contract not found." };
+  if (before.created_by !== profile.id) return { error: "Not your contract." };
+
+  const { error } = await supabase
+    .from("contracts")
+    .update({ token_revoked_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePath(`/b/projects/${before.project_id as string}`);
+  return { success: true };
+}
+
 export async function getContractsByProject(projectId: string): Promise<Contract[]> {
   const profile = await getCurrentProfile();
   if (!profile) return [];

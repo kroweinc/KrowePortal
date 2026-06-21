@@ -25,7 +25,7 @@ export async function getContractByToken(token: string): Promise<PublicContract 
   const { data } = await admin
     .from("contracts")
     .select(
-      "id, project_id, title, status, content, token, sent_at, signed_by_name, signed_at, signature_consent, rejected_at, rejection_note, created_at, updated_at, project:projects(name, owner_id, owner:profiles!owner_id(display_name))"
+      "id, project_id, title, status, content, token, token_expires_at, token_revoked_at, sent_at, signed_by_name, signed_at, signature_consent, rejected_at, rejection_note, created_at, updated_at, project:projects(name, owner_id, owner:profiles!owner_id(display_name))"
     )
     .eq("token", token)
     .maybeSingle();
@@ -40,11 +40,14 @@ export async function getContractByToken(token: string): Promise<PublicContract 
     } | null;
   };
   if (row.status === "draft" || row.status === "rejected") return null;
+  // Reject revoked or expired share links (see migration 0062).
+  if (row.token_revoked_at) return null;
+  if (row.token_expires_at && new Date(row.token_expires_at as string) < new Date()) return null;
 
   const builderName = row.project?.owner?.display_name ?? "Your builder";
   const projectName = row.project?.name ?? null;
   const builder = await getBuilderIdentityForOwner(admin, row.project?.owner_id, builderName);
 
-  const { project: _p, ...contractRow } = row;
+  const { project: _p, token_expires_at: _te, token_revoked_at: _tr, ...contractRow } = row;
   return { contract: contractRow as unknown as Contract, builderName, projectName, builder };
 }
