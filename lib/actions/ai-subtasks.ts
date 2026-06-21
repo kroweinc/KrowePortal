@@ -80,7 +80,7 @@ export async function acceptGeneratedSubtasks(
     .eq("task_id", taskId)
     .order("position", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   const start = (maxRow?.position ?? -1) + 1;
 

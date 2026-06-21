@@ -26,7 +26,20 @@ export async function estimateTask(input: EstimateInput, meta?: AiCallMeta): Pro
     ],
   }, meta);
 
+  // Defensive parse: content can be "" or truncated at the 800-token cap, which
+  // would make a bare JSON.parse throw a raw SyntaxError, and a malformed object
+  // would throw a ZodError. Surface a clear error instead (the caller,
+  // estimateAndSaveTaskHours, catches and degrades to "no estimate saved").
   const raw = response.choices[0]?.message?.content ?? "";
-  const parsed = JSON.parse(raw);
-  return TaskEstimateResult.parse(parsed);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Task estimate response was not valid JSON.");
+  }
+  const result = TaskEstimateResult.safeParse(parsed);
+  if (!result.success) {
+    throw new Error("Task estimate response did not match the expected shape.");
+  }
+  return result.data;
 }

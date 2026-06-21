@@ -54,7 +54,18 @@ export async function generateProjectProfile(
     ...result.telemetry,
   });
 
-  const parsed = JSON.parse(result.content);
-  const profile = ProjectProfileResult.parse(parsed);
-  return { profile, telemetry: result.telemetry, signals, model: AI_MODEL };
+  // Defensive parse: tool-loop content can be "" (capped at 900 tokens after up
+  // to MAX_ROUNDS) or malformed. Surface a clear error instead of a raw
+  // SyntaxError/ZodError — getProjectProfile catches and degrades to null.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.content);
+  } catch {
+    throw new Error("Project profile response was not valid JSON.");
+  }
+  const profileResult = ProjectProfileResult.safeParse(parsed);
+  if (!profileResult.success) {
+    throw new Error("Project profile response did not match the expected shape.");
+  }
+  return { profile: profileResult.data, telemetry: result.telemetry, signals, model: AI_MODEL };
 }

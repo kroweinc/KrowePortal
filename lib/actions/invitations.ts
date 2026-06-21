@@ -252,6 +252,25 @@ export async function deleteEngagement(
   if (!engagement) return { error: "Client not found." };
 
   const admin = createAdminClient();
+
+  // Gather attachment files under this engagement's tasks before the cascade:
+  // engagement → tasks → task_attachments all cascade via FK, but the storage
+  // objects in the task-attachments bucket are never removed by the cascade.
+  const { data: tasks } = await admin
+    .from("tasks")
+    .select("id")
+    .eq("engagement_id", engagementId);
+  const taskIds = (tasks ?? []).map((t) => t.id as string);
+  let attachmentPaths: string[] = [];
+  if (taskIds.length) {
+    const { data: files } = await admin
+      .from("task_attachments")
+      .select("storage_path")
+      .in("task_id", taskIds)
+      .not("storage_path", "is", null);
+    attachmentPaths = (files ?? []).map((f) => f.storage_path as string).filter(Boolean);
+  }
+
   const { error } = await admin
     .from("engagements")
     .delete()
@@ -259,6 +278,10 @@ export async function deleteEngagement(
     .eq("builder_id", profile.id);
 
   if (error) return { error: error.message };
+
+  if (attachmentPaths.length) {
+    await admin.storage.from("task-attachments").remove(attachmentPaths);
+  }
 
   revalidatePath("/b");
   revalidatePath("/b/engagements");
@@ -350,7 +373,7 @@ export async function acceptInvitation(
     .from("invitations")
     .select("*, engagement:engagements(*)")
     .eq("token", parsed.data.token)
-    .single();
+    .maybeSingle();
 
   if (invErr || !invitation) return { error: "Invitation not found." };
   if (invitation.status === "accepted") return { error: "This invite has already been used." };

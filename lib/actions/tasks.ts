@@ -355,9 +355,24 @@ export async function deleteTask(taskId: string) {
   if (!profile) redirect("/login");
 
   const supabase = await getClient(profile.id);
+
+  // Gather attachment files before the row cascade: FK ON DELETE CASCADE removes
+  // task_attachments rows but never the underlying storage objects (see
+  // deleteAttachment for the per-file pattern), which would leak files forever.
+  const { data: files } = await supabase
+    .from("task_attachments")
+    .select("storage_path")
+    .eq("task_id", taskId)
+    .not("storage_path", "is", null);
+
   const { error } = await supabase.from("tasks").delete().eq("id", taskId);
 
   if (error) return { error: error.message };
+
+  const paths = (files ?? []).map((f) => f.storage_path as string).filter(Boolean);
+  if (paths.length) {
+    await createAdminClient().storage.from("task-attachments").remove(paths);
+  }
 
   revalidatePath("/o");
   revalidatePath("/b");

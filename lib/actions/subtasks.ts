@@ -32,7 +32,7 @@ export async function createSubtask(
     .eq("task_id", taskId)
     .order("position", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   const position = (maxRow?.position ?? -1) + 1;
 

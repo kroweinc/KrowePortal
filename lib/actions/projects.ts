@@ -174,9 +174,52 @@ export async function deleteProject(
   if (!before) return { error: "Document not found." };
   if (before.owner_id !== profile.id) return { error: "Not your document." };
 
+  // Block deleting a project that backs a live engagement. engagements.project_id
+  // is ON DELETE SET NULL and a partial unique index prevents re-linking, so the
+  // operator's signed quote/contract/PRD would silently disappear from their
+  // portal with no way to restore the link. (Admin read: ownership already
+  // verified above; this just checks the link reliably regardless of RLS.)
+  const admin = createAdminClient();
+  const { data: liveEngagement } = await admin
+    .from("engagements")
+    .select("id")
+    .eq("project_id", id)
+    .not("started_at", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (liveEngagement) {
+    return {
+      error:
+        "This project backs an active client and can't be deleted. Remove the client link first.",
+    };
+  }
+
+  // Gather stored files before the cascade: FK CASCADE drops project_materials
+  // and project_sop_transcripts rows but never their objects in the
+  // project-materials bucket.
+  const [{ data: materials }, { data: transcripts }] = await Promise.all([
+    admin
+      .from("project_materials")
+      .select("storage_path")
+      .eq("project_id", id)
+      .not("storage_path", "is", null),
+    admin
+      .from("project_sop_transcripts")
+      .select("storage_path")
+      .eq("project_id", id)
+      .not("storage_path", "is", null),
+  ]);
+
   // Child documents (prds/quotes/contracts) cascade via FK ON DELETE CASCADE.
   const { error } = await supabase.from("projects").delete().eq("id", id);
   if (error) return { error: error.message };
+
+  const paths = [...(materials ?? []), ...(transcripts ?? [])]
+    .map((r) => r.storage_path as string)
+    .filter(Boolean);
+  if (paths.length) {
+    await admin.storage.from("project-materials").remove(paths);
+  }
 
   revalidatePath("/b/projects");
   return { success: true };

@@ -244,9 +244,12 @@ export async function getAttachmentSignedUrl(attachmentId: string): Promise<{ ur
     .from("task_attachments")
     .select("storage_path")
     .eq("id", attachmentId)
-    .single();
+    .maybeSingle();
 
   if (!attachment) return { error: "Not found" };
+  // Link/text attachments have no stored file; guard so we never pass null to
+  // createSignedUrl (defensive — the download button only renders for files).
+  if (!attachment.storage_path) return { error: "This attachment has no file to download." };
 
   const adminClient = createAdminClient();
   const { data, error } = await adminClient.storage
