@@ -66,6 +66,7 @@ const SECTIONS = `The PRD uses these JSON keys. Write for a small-business owner
 
 const COST_RULES = `Cost rules for sections 8 and 9:
 - monthlyCost is the third party's / provider's own published subscription rate per month, phrased like "~$25/mo" or "$0/mo + 2.9% per txn". It is NEVER the developer's fee or setup time.
+- ONE provider's subscription is billed ONCE even when it spans several stack items/layers. When the SAME platform appears as multiple entries (e.g. Supabase used for both Auth and Postgres, or Firebase for Auth + Firestore + Storage), that is ONE plan, not one per layer. Put the platform's monthly plan price on a SINGLE representative item and set every other same-platform item's monthlyCost to "$0/mo (incl.)". NEVER repeat the full plan price on each layer — that double-counts a single subscription and overstates the bill.
 - You MAY fill monthlyCost from typical published rates you know, but set "estimated": true on that item so it is flagged for the builder to verify.
 - If you don't know a price, ASK the builder to confirm it during the interview. Only when you are finalizing without an answer, fill a clearly-marked estimate (estimated: true) — never leave the price as an open question in the finished PRD.`;
 
