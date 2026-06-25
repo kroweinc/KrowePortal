@@ -2,6 +2,7 @@ import { runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
 import { QuoteGenerationResult, QuoteFinalResult } from "./schemas";
 import type { Question } from "./schemas";
+import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import { DEFAULT_QUOTE_HOURLY_RATE } from "@/lib/quote/totals";
 import type { QuoteContent, PrdContent } from "@/lib/types";
 
@@ -84,7 +85,7 @@ ${SECTIONS}
 
 ${pricingRules(rate)}
 
-${QUALITY_RULES}
+${QUALITY_RULES}${deepBlock}
 
 Output ONLY valid JSON.`;
 
@@ -141,13 +142,14 @@ async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
+  responseFormat: ReturnType<typeof jsonResponseFormat>,
   meta?: AiCallMeta
 ): Promise<string> {
   const response = await runChat(
     {
       model: AI_MODEL,
       max_completion_tokens: maxTokens,
-      response_format: { type: "json_object" },
+      response_format: responseFormat,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -158,49 +160,40 @@ async function callOpenAI(
   return response.choices[0]?.message?.content ?? "";
 }
 
-export async function generateQuote(input: QuoteGenInput, meta?: AiCallMeta): Promise<QuoteGenResult> {
-  const schema = input.forceFinal ? QuoteFinalResult : QuoteGenerationResult;
+export const QUOTE_MAX_TOKENS = 16000;
+
+/** System + user prompts for a quote generation round. Shared by the blocking
+    generateQuote and the streaming route handler. */
+export function buildQuotePrompts(input: QuoteGenInput): { systemPrompt: string; userPrompt: string } {
   const rate = input.hourlyRate ?? DEFAULT_QUOTE_HOURLY_RATE;
-  const systemPrompt = buildSystemPrompt(input.forceFinal, rate, input.deepContext);
-  const userPrompt = buildUserPrompt(input);
-  const maxTokens = 16000;
+  return {
+    systemPrompt: buildSystemPrompt(input.forceFinal, rate, input.deepContext),
+    userPrompt: buildUserPrompt(input),
+  };
+}
 
-  let raw = await callOpenAI(systemPrompt, userPrompt, maxTokens, meta);
+/** Strict json_schema on the single-object final quote; json_object on the
+    question round (root discriminated union, illegal for strict). */
+export function quoteResponseFormat(forceFinal: boolean): ReturnType<typeof jsonResponseFormat> {
+  return forceFinal ? jsonResponseFormat(QuoteFinalResult, "quote_document") : { type: "json_object" };
+}
 
+/** Non-throwing parse of a quote response: returns null on a parse or schema
+    failure so the caller can resample once. The question round uses lenient
+    json_object and the model occasionally drifts outside the union on the first
+    sample — it reliably self-corrects on a resample. */
+function tryParseQuoteResult(raw: string, input: QuoteGenInput): QuoteGenResult | null {
+  const rate = input.hourlyRate ?? DEFAULT_QUOTE_HOURLY_RATE;
+  const schema = input.forceFinal ? QuoteFinalResult : QuoteGenerationResult;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw || "{}");
   } catch {
-    parsed = {};
+    return null;
   }
 
-  let result = schema.safeParse(parsed);
-  if (!result.success) {
-    const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    raw = await callOpenAI(
-      systemPrompt,
-      `${userPrompt}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`,
-      maxTokens,
-      meta
-    );
-    try {
-      parsed = JSON.parse(raw || "{}");
-    } catch {
-      parsed = {};
-    }
-    result = schema.safeParse(parsed);
-  }
-
-  if (!result.success) {
-    // Last-resort: never throw on the question path — fall through to an empty
-    // quote so the wizard can still hand the builder an editable draft. Warn so
-    // the (otherwise silent) blank-draft fallback is visible in logs.
-    if (input.forceFinal) {
-      console.warn("[generateQuote] schema validation failed after retry; returning empty quote draft");
-      return { kind: "quote", content: {} };
-    }
-    throw new Error("AI response validation failed");
-  }
+  const result = schema.safeParse(stripNullsDeep(parsed));
+  if (!result.success) return null;
 
   const data = result.data;
   if (data.kind === "questions") {
@@ -211,4 +204,38 @@ export async function generateQuote(input: QuoteGenInput, meta?: AiCallMeta): Pr
     hourlyRate: (data.content as QuoteContent).hourlyRate ?? rate,
   };
   return { kind: "quote", content, contextSummary: data.contextSummary };
+}
+
+/** Parse a raw generation response into the wizard result shape, applying the
+    fallback hourly rate. A forced-final failure degrades to an empty draft
+    (warn-logged); a failed question round throws. Used by the streaming route,
+    which can't resample mid-stream — the blocking generateQuote path below adds
+    the resample + finalize instead. */
+export function parseQuoteResult(raw: string, input: QuoteGenInput): QuoteGenResult {
+  const result = tryParseQuoteResult(raw, input);
+  if (result) return result;
+  if (input.forceFinal) {
+    console.warn("[generateQuote] schema validation failed; returning empty quote draft");
+    return { kind: "quote", content: {} };
+  }
+  throw new Error("AI response validation failed");
+}
+
+export async function generateQuote(input: QuoteGenInput, meta?: AiCallMeta): Promise<QuoteGenResult> {
+  const { systemPrompt, userPrompt } = buildQuotePrompts(input);
+  const callOnce = () =>
+    callOpenAI(systemPrompt, userPrompt, QUOTE_MAX_TOKENS, quoteResponseFormat(input.forceFinal), meta);
+
+  // The lenient question round occasionally drifts outside the union on the first
+  // sample; resample once before degrading (the model reliably self-corrects).
+  // The forced-final round is strict-schema-constrained, so it skips the retry.
+  let result = tryParseQuoteResult(await callOnce(), input);
+  if (!result && !input.forceFinal) result = tryParseQuoteResult(await callOnce(), input);
+  if (result) return result;
+
+  // Still unparseable: degrade rather than throw. A forced-final failure becomes
+  // an empty draft; a failed question round finalizes the quote directly — the
+  // forceFinal path is strict-schema-constrained, so this cannot recurse.
+  if (input.forceFinal) return { kind: "quote", content: {} };
+  return generateQuote({ ...input, forceFinal: true }, meta);
 }

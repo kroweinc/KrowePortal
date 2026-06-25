@@ -1,10 +1,16 @@
 import { openai, runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
 import { TaskGenerationResult, TaskOnlyResult } from "./schemas";
+import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import { buildTaskSystemPrompt, buildTaskUserPrompt } from "./prompts";
 import type { RepoContext } from "@/lib/github/types";
 import { runWithTools, type RepoToolContext } from "@/lib/github/ai-tools";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type OpenAI from "openai";
+
+type ResponseFormat = NonNullable<
+  OpenAI.Chat.Completions.ChatCompletionCreateParams["response_format"]
+>;
 
 interface GenerateInput {
   rawDescription: string;
@@ -17,12 +23,13 @@ async function callOpenAIOneShot(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
+  responseFormat: ResponseFormat,
   meta?: AiCallMeta
 ): Promise<string> {
   const response = await runChat({
     model: AI_MODEL,
     max_completion_tokens: maxTokens,
-    response_format: { type: "json_object" },
+    response_format: responseFormat,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -35,11 +42,12 @@ async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
+  responseFormat: ResponseFormat,
   toolContext: RepoToolContext | undefined,
   meta?: AiCallMeta
 ): Promise<string> {
   if (!toolContext) {
-    return callOpenAIOneShot(systemPrompt, userPrompt, maxTokens, meta);
+    return callOpenAIOneShot(systemPrompt, userPrompt, maxTokens, responseFormat, meta);
   }
 
   const messages: ChatCompletionMessageParam[] = [
@@ -47,6 +55,8 @@ async function callOpenAI(
     { role: "user", content: userPrompt },
   ];
 
+  // The GitHub tool loop only supports json_object (not json_schema), so the
+  // repo-aware path keeps the lenient format and relies on safeParse downstream.
   const result = await runWithTools(openai, messages, toolContext, {
     model: AI_MODEL,
     maxTokens,
@@ -65,38 +75,40 @@ export async function generateTask(input: GenerateInput, meta?: AiCallMeta): Pro
   const { rawDescription, repoContext, answers, toolContext } = input;
   const forceTask = (answers?.length ?? 0) > 0;
   const schema = forceTask ? TaskOnlyResult : TaskGenerationResult;
+  // Strict json_schema only on the single-object forceTask path with no tools.
+  // The question round is a root discriminated union (illegal for strict) and the
+  // tool loop can't carry json_schema — both stay json_object.
+  const responseFormat: ResponseFormat =
+    forceTask && !toolContext
+      ? jsonResponseFormat(TaskOnlyResult, "task_draft")
+      : { type: "json_object" };
   const systemPrompt = buildTaskSystemPrompt(repoContext, { forceTask });
   const userPrompt = buildTaskUserPrompt(rawDescription, answers);
 
-  let raw = await callOpenAI(systemPrompt, userPrompt, 1500, toolContext, meta);
+  const callOnce = () => callOpenAI(systemPrompt, userPrompt, 1500, responseFormat, toolContext, meta);
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("AI returned non-JSON response");
-  }
+  // Non-throwing parse: null on a non-JSON or schema-invalid response. safeParse
+  // still enforces refinements (estHigh >= estLow, …) and catches a truncated
+  // response even when strict mode guarantees the top-level shape.
+  const tryParse = (raw: string): TaskGenerationResult | null => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    const result = schema.safeParse(stripNullsDeep(parsed));
+    return result.success ? (result.data as TaskGenerationResult) : null;
+  };
 
-  const result = schema.safeParse(parsed);
-  if (result.success) return result.data as TaskGenerationResult;
+  // The lenient question round occasionally drifts outside the union on the first
+  // sample; resample once before failing (the model reliably self-corrects). The
+  // strict forceTask draft is structurally constrained, so it skips the retry.
+  let result = tryParse(await callOnce());
+  if (!result && !forceTask) result = tryParse(await callOnce());
+  if (result) return result;
 
-  const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-  raw = await callOpenAIOneShot(
-    systemPrompt,
-    `${userPrompt}\n\nYour previous response did not match the required schema. Errors: ${errorDesc}\nPlease try again.`,
-    1500,
-    meta
-  );
-
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error("AI returned non-JSON on retry");
-  }
-
-  const retryResult = schema.safeParse(parsed);
-  if (!retryResult.success) {
-    throw new Error("AI response validation failed after retry");
-  }
-  return retryResult.data as TaskGenerationResult;
+  // Persistent failure: surface a clear error (the caller degrades). There's no
+  // sensible auto-finalize for a question round with no answers to force a task.
+  throw new Error("AI response validation failed");
 }

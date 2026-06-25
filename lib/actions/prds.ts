@@ -1,38 +1,39 @@
 "use server";
 
+import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
-import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { createClient, createAdminClient } from "@/lib/supabase/server";
-import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { getProjectMaterials } from "@/lib/actions/project-materials";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
-import { generatePrd } from "@/lib/ai/generate-prd";
+import { generatePrd, OPENER_QUESTION } from "@/lib/ai/generate-prd";
 import { assertAiBudget } from "@/lib/ai/usage";
-import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
+import { getCurrentProfile } from "@/lib/auth";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
 import { fieldsForSection, refinableSection } from "@/lib/prd/section-fields";
-import { SCOPE_STAGE_COUNT } from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
 import { PrdContentSchema } from "@/lib/ai/schemas";
-import type { Prd, PrdContent } from "@/lib/types";
+import type { Prd, PrdContent, PrdSummary } from "@/lib/types";
 
-/** Hard cap on adaptive question rounds before a PRD is forced. */
-const MAX_PRD_ROUNDS = 5;
-
-/** No-notes "deep context" path: one round per fixed scope stage, then force the PRD. */
-const MAX_PRD_ROUNDS_DEEP = SCOPE_STAGE_COUNT;
+// Columns for list/summary reads — every Prd field except the heavy `content`
+// jsonb, which PRD list rows don't render (docMeta reads only dates/status).
+const PRD_SUMMARY_COLUMNS =
+  "id, project_id, created_by, title, status, source_notes, token, sent_at, signed_by_name, signed_at, signer_ip, signature_consent, signed_by_user_id, rejected_at, rejection_note, created_at, updated_at";
+import {
+  getClient,
+  withFreeTierAnalysis,
+  isEmptyPrdContent,
+  resolvePrdDraft,
+  persistPrdDraft,
+  type DraftPrdInput,
+  type DraftPrdResult,
+} from "@/lib/prd/draft-core";
 
 /** Hard cap on refine question rounds before a section patch is forced. */
 const MAX_REFINE_ROUNDS = 2;
-
-async function getClient(profileId: string) {
-  return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
-}
 
 function revalidatePrd(projectId: string, id: string, token?: string | null) {
   revalidatePath(`/b/projects/${projectId}`);
@@ -41,101 +42,28 @@ function revalidatePrd(projectId: string, id: string, token?: string | null) {
 }
 
 /**
- * Best-effort Free-Tier Fit (§15) computed at generation time so a freshly drafted
- * or regenerated PRD already ships with its free-tier verdicts — the same analysis
- * the builder can re-run by hand from the editor. Returns the content untouched when
- * there's no billable stack to assess or the AI call fails: PRD creation must never
- * hinge on this side analysis.
- */
-async function withFreeTierAnalysis(content: PrdContent): Promise<PrdContent> {
-  const hasStack = (content.techStack?.length ?? 0) > 0;
-  const hasIntegrations = (content.integrations?.length ?? 0) > 0;
-  if (!hasStack && !hasIntegrations) return content;
-
-  try {
-    const analysis = await analyzeFreeTierFit(content, content.scaleAssumptions);
-    if (!analysis.services.length) return content;
-    analysis.analyzedAt = new Date().toISOString();
-    analysis.analyzedStack = stackServiceNames(content);
-    return { ...content, freeTierAnalysis: analysis };
-  } catch {
-    return content;
-  }
-}
-
-const draftSchema = z.object({
-  projectId: z.string().uuid(),
-  title: z.string().min(1, "Give the PRD a title.").max(200),
-  notes: z.string().max(20000).optional(),
-  answers: z
-    .array(
-      z.object({
-        questionId: z.string(),
-        question: z.string().max(400),
-        answer: z.string().max(2000),
-      })
-    )
-    .max(40)
-    .optional(),
-  round: z.number().int().min(0).max(10),
-});
-
-export type DraftPrdInput = z.input<typeof draftSchema>;
-
-export type DraftPrdResult =
-  | { kind: "questions"; items: Question[] }
-  | { kind: "prd"; prdId: string }
-  | { error: string };
-
-/**
  * Adaptive PRD wizard step. Reads notes + accumulated answers and either asks
  * another round of clarifying questions or generates + inserts the finished
- * PRD draft (returning its id for the client to redirect to).
+ * PRD draft (returning its id for the client to redirect to). The streaming route
+ * (app/api/ai/prd/stream) reuses resolvePrdDraft + persistPrdDraft from the shared
+ * core so a streamed generation is saved identically and exactly once.
  */
 export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can create PRDs." };
+  const resolved = await resolvePrdDraft(input);
+  if (!resolved.ok) {
+    if (resolved.status === 401) redirect("/login");
+    return { error: resolved.error };
+  }
 
-  const parsed = draftSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-
-  const { projectId, title, notes, answers = [], round } = parsed.data;
-
-  const project = await getProjectById(projectId);
-  if (!project) return { error: "Document not found." };
-  if (project.owner_id !== profile.id) return { error: "Not your document." };
-
-  // These three reads are independent — run them concurrently rather than serially.
-  const [materials, sopTranscripts, budget] = await Promise.all([
-    getProjectMaterials(projectId),
-    getProjectSopTranscripts(projectId),
-    assertAiBudget(profile.id),
-  ]);
-  if (!budget.ok) return { error: budget.error };
-
-  // No written notes ⇒ deep context-gathering mode: a fixed step-by-step scope
-  // intake (one stage per round), then a synthesized context summary saved back
-  // to the project. `stageIndex` maps the current round to its scope stage.
-  const deepContext = !(notes && notes.trim().length > 0);
-  const forceFinal = round >= (deepContext ? MAX_PRD_ROUNDS_DEEP : MAX_PRD_ROUNDS);
-  const stageIndex = deepContext ? Math.min(round, SCOPE_STAGE_COUNT - 1) : undefined;
+  // No-notes round 0: serve the fixed opener directly so the builder's idea is
+  // captured before any questions are generated — no AI call, instant response.
+  if (resolved.openerRound) {
+    return { kind: "questions", items: [OPENER_QUESTION] };
+  }
 
   let result;
   try {
-    result = await generatePrd(
-      {
-        title,
-        notes,
-        businessContext: composeBusinessContext(project, materials, sopTranscripts),
-        answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
-        forceFinal,
-        deepContext,
-        stageIndex,
-        currentDate: new Date().toISOString().slice(0, 10),
-      },
-      { userId: profile.id, operation: "generate_prd" }
-    );
+    result = await generatePrd(resolved.genInput, { userId: resolved.profile.id, operation: "generate_prd" });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI generation failed";
     return { error: msg };
@@ -145,72 +73,25 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
     return { kind: "questions", items: result.items };
   }
 
-  // Final PRD — persist a draft and hand back its id. Capture the narrowed PRD
-  // branch into consts so the after() closure below keeps the right types.
-  const prdContent = result.content;
-  const contextSummary = result.contextSummary;
-  const transcript = answers.length
-    ? answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n")
-    : "";
-  const sourceNotes = [notes?.trim(), transcript].filter(Boolean).join("\n\n---\n\n") || null;
-
-  const supabase = await getClient(profile.id);
-  const { data, error } = await supabase
-    .from("prds")
-    .insert({
-      project_id: projectId,
-      created_by: profile.id,
-      title,
-      status: "draft",
-      content: prdContent,
-      source_notes: sourceNotes,
-    })
-    .select("id")
-    .single();
-
-  if (error || !data) return { error: error?.message ?? "Failed to create PRD." };
-  const prdId = data.id as string;
-
-  // Deep-context path: persist the synthesized business context to the project so
-  // future documents (PRDs/quotes/contracts) start warm. Only when the project has
-  // no context yet — never clobber what the builder already wrote. Best-effort: a
-  // failed write-back must never break PRD creation.
-  if (deepContext && contextSummary && !project.context?.trim()) {
+  // Empty finalized PRD (an early finalize with nothing, or a final round that
+  // degraded to a blank draft) — retry once with forceFinal before refusing, so a
+  // transient empty result self-heals rather than erroring the builder out. Mirrors
+  // the streaming route's recovery; persistPrdDraft still refuses a persistent blank.
+  if (isEmptyPrdContent(result.content)) {
     try {
-      await supabase
-        .from("projects")
-        .update({ context: contextSummary, updated_at: new Date().toISOString() })
-        .eq("id", projectId);
-    } catch {
-      // ignore — context write-back is non-critical
+      result = await generatePrd(
+        { ...resolved.genInput, forceFinal: true },
+        { userId: resolved.profile.id, operation: "generate_prd" }
+      );
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "AI generation failed" };
     }
+    if (result.kind !== "prd") return { error: "The PRD came back empty — generation didn't finish. Please try again." };
   }
 
-  // Free-Tier Fit (§15) is a separate ~3–5s AI call. Run it AFTER the response is
-  // sent so the builder reaches the editor immediately; the verdicts persist a
-  // moment later and appear on the next load (the editor shows an empty state +
-  // manual re-run until then). Best-effort — PRD creation never hinges on it.
-  after(async () => {
-    try {
-      const analyzed = await withFreeTierAnalysis(prdContent);
-      if (!analyzed.freeTierAnalysis) return;
-      // Ownership was verified above; the admin client bypasses RLS and avoids
-      // relying on request cookies that may be gone after the response.
-      const admin = createAdminClient();
-      const { data: row } = await admin.from("prds").select("content").eq("id", prdId).single();
-      const current = (row?.content as PrdContent | null) ?? prdContent;
-      // Merge ONLY freeTierAnalysis so a quick builder edit to other fields isn't clobbered.
-      await admin
-        .from("prds")
-        .update({ content: { ...current, freeTierAnalysis: analyzed.freeTierAnalysis } })
-        .eq("id", prdId);
-    } catch {
-      // best-effort: §15 stays empty; the builder can re-run it from the editor.
-    }
-  });
-
-  revalidatePath(`/b/projects/${projectId}`);
-  return { kind: "prd", prdId };
+  const saved = await persistPrdDraft(resolved.save, result.content, result.contextSummary);
+  if ("error" in saved) return { error: saved.error };
+  return { kind: "prd", prdId: saved.prdId };
 }
 
 export async function regeneratePrd(
@@ -248,7 +129,13 @@ export async function regeneratePrd(
     forceFinal: true,
     currentDate: new Date().toISOString().slice(0, 10),
   });
-  const content = result.kind === "prd" ? await withFreeTierAnalysis(result.content) : {};
+  // Don't overwrite the existing draft with a blank: a failed/truncated final
+  // round degrades to empty content, which the all-optional schema would accept
+  // and silently wipe the builder's PRD. Bail with a retryable error instead.
+  if (result.kind !== "prd" || isEmptyPrdContent(result.content)) {
+    return { error: "The PRD came back empty — generation didn't finish. Please try again." };
+  }
+  const content = await withFreeTierAnalysis(result.content);
 
   const { error } = await supabase
     .from("prds")
@@ -448,7 +335,7 @@ export async function revokePrdShareLink(
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("prds")
-    .select("created_by, project_id")
+    .select("created_by, project_id, token")
     .eq("id", id)
     .maybeSingle();
 
@@ -461,8 +348,42 @@ export async function revokePrdShareLink(
     .eq("id", id);
   if (error) return { error: error.message };
 
-  revalidatePath(`/b/projects/${before.project_id as string}`);
+  revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true };
+}
+
+// Mint a fresh share link: a new token (so old links stay dead), a reset expiry
+// window, and a cleared revocation flag — the re-share path after revoke/expiry.
+export async function reissuePrdShareLink(
+  id: string
+): Promise<{ success: true; token: string } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can reissue a link." };
+
+  const supabase = await getClient(profile.id);
+  const { data: before } = await supabase
+    .from("prds")
+    .select("created_by, project_id, token")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!before) return { error: "PRD not found." };
+  if (before.created_by !== profile.id) return { error: "Not your PRD." };
+
+  // supabase-js can't invoke the SQL column default on update, so mint the same
+  // 64-hex shape here; expiry window matches migration 0062 (90 days for docs).
+  const token = randomBytes(32).toString("hex");
+  const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from("prds")
+    .update({ token, token_expires_at: expires, token_revoked_at: null })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidatePrd(before.project_id as string, id, before.token as string | null);
+  revalidatePath(`/prd/${token}`);
+  return { success: true, token };
 }
 
 export async function getPrdsByProject(projectId: string): Promise<Prd[]> {
@@ -480,6 +401,24 @@ export async function getPrdsByProject(projectId: string): Promise<Prd[]> {
     .order("created_at", { ascending: false });
 
   return (data ?? []) as Prd[];
+}
+
+// List-view variant: same scope/order as getPrdsByProject but omits the heavy
+// `content` jsonb. Use for dashboard PRD lists; use getPrdsByProject (full) when
+// content is needed (e.g. contract auto-fill via bestPrdContent).
+export async function getPrdSummariesByProject(projectId: string): Promise<PrdSummary[]> {
+  const profile = await getCurrentProfile();
+  if (!profile) return [];
+
+  const supabase = await getClient(profile.id);
+  const { data } = await supabase
+    .from("prds")
+    .select(PRD_SUMMARY_COLUMNS)
+    .eq("project_id", projectId)
+    .eq("created_by", profile.id)
+    .order("created_at", { ascending: false });
+
+  return (data ?? []) as PrdSummary[];
 }
 
 export async function getPrdById(id: string): Promise<Prd | null> {

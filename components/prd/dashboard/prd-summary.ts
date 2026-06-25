@@ -30,6 +30,19 @@ function stripPeriod(s: string): string {
   return s.replace(/\s*\/?\s*(per\s+)?mo(nth)?\.?\b/gi, "").trim();
 }
 
+// Keep ONLY the price range, never the prose around it. The model sometimes
+// returns a whole sentence for a cost figure (e.g. "~$0-$70 excluding developer
+// services and any paid Google Workspace seats already in use") — the stat card
+// and cost pill must show just the money: "~$0-$70". Pulls the leading
+// $-figure (optionally a range) and drops everything after; if there's no
+// $-figure at all, falls back to the period-stripped string.
+const PRICE_RANGE = /[~<≈]?\s*\$\s*\d[\d,]*(?:\.\d+)?(?:\s*(?:[-–—]|to)\s*\$?\s*\d[\d,]*(?:\.\d+)?)?/;
+export function priceRange(s?: string | null): string | null {
+  if (!s) return null;
+  const m = String(s).match(PRICE_RANGE);
+  return m ? m[0].replace(/\s+/g, " ").trim() : stripPeriod(String(s));
+}
+
 // The headline monthly cost. The Free-Tier Fit verdict (§15) is the authoritative
 // source of what the product actually costs to RUN: if every service fits its
 // free tier the bill is $0, otherwise it's the summed minimum of the paid tiers
@@ -50,7 +63,7 @@ export function monthlyCost(content: PrdContent): {
     const paid = a.totalMonthlyCostIfPaid?.trim();
     if (paid) {
       const label = a.overallFitsFree === "no" ? "paid tier needed" : "may need paid tier";
-      return { display: stripPeriod(paid), unit: "/mo est.", sub: `${n} services · ${label}`, source: "free-tier" };
+      return { display: priceRange(paid) ?? stripPeriod(paid), unit: "/mo est.", sub: `${n} services · ${label}`, source: "free-tier" };
     }
     // No paid figure + a clean "yes" verdict ⇒ it runs entirely on free tiers.
     if (a.overallFitsFree === "yes") {

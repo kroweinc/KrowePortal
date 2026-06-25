@@ -55,6 +55,47 @@ export async function runChat(
   return response;
 }
 
+// Whether the streaming route handlers are live. Off by default so the wizards
+// keep using the blocking server-action path until streaming is explicitly
+// enabled (OPENAI_ENABLE_STREAMING=true) — a flag, not a revert.
+export const STREAMING_ENABLED = process.env.OPENAI_ENABLE_STREAMING === "true";
+
+/**
+ * Streaming sibling of runChat for the long PRD/quote generations. Yields the
+ * incremental text deltas as they arrive (so a route handler can forward them to
+ * the browser) and records token usage from the final usage-bearing chunk via
+ * the same ai_usage ledger. Applies AI_REASONING_EFFORT identically to runChat.
+ *
+ * Composes with structured outputs — pass the same strict `response_format` and
+ * accumulate the deltas into the full JSON to validate once at the end.
+ */
+export async function* runChatStream(
+  params: Omit<
+    OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+    "stream" | "stream_options"
+  >,
+  meta?: AiCallMeta
+): AsyncGenerator<string, void, unknown> {
+  const stream = await openai.chat.completions.create({
+    ...(AI_REASONING_EFFORT && params.reasoning_effort == null
+      ? { reasoning_effort: AI_REASONING_EFFORT }
+      : {}),
+    ...params,
+    stream: true,
+    stream_options: { include_usage: true },
+  });
+
+  let usage: OpenAI.CompletionUsage | undefined;
+  for await (const chunk of stream) {
+    // The final chunk carries usage (include_usage) and has no choices.
+    if (chunk.usage) usage = chunk.usage;
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield delta;
+  }
+
+  if (meta && usage) void recordAiUsage(meta, String(params.model), usage);
+}
+
 /**
  * Translate a raw OpenAI/network error into a clear, builder-facing sentence.
  * The SDK's default messages ("429 You exceeded your current quota…") are

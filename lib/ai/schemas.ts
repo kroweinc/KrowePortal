@@ -20,6 +20,10 @@ const Question = z
     // One short, plain-language sentence on WHY it's the best default, for a
     // non-technical builder. Interview-time guidance only; not persisted.
     recommendation: z.string().min(1).max(280).optional(),
+    // When true, the wizard offers a "Skip" affordance so the builder can move on
+    // without answering (e.g. an optional catch-all gap-filler). Not surfaced to
+    // the model in any prompt — only the server-built fallback round sets it.
+    skippable: z.boolean().optional(),
   })
   // Only choice questions need a real pick-list; date/text questions are free-form.
   .superRefine((q, ctx) => {

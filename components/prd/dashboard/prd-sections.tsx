@@ -18,6 +18,7 @@ import { analyzeFreeTierFitAction } from "@/lib/actions/free-tier";
 import { renameTechAcrossPrd } from "@/lib/prd/rename-tech";
 import { flowSteps } from "@/lib/prd/flow-steps";
 import { InlineText, InlineList, InlineSelect, AddButton, RemoveCard, useEditing } from "./inline-edit";
+import { priceRange } from "./prd-summary";
 import { BrandLogo } from "../brand-logo";
 
 /** Patch the PRD content. Accepts a partial (merged onto the current content) or
@@ -681,7 +682,7 @@ function FreeTierFitBody({ content, patch }: SectionBodyProps) {
             {analysis.primaryLimitingFactor && (
               <span className="freetier-headline__factor">First to break free: {analysis.primaryLimitingFactor}</span>
             )}
-            <CostTag value={analysis.totalMonthlyCostIfPaid} />
+            <CostTag value={priceRange(analysis.totalMonthlyCostIfPaid)} />
           </div>
 
           <AssumptionStats assumptions={assumptions} onChange={patchAssumptions} />
@@ -1006,32 +1007,39 @@ function MilestonesBody({ content, patch }: SectionBodyProps) {
 }
 
 // Simple list/text section bodies via factory.
-const listBody =
-  (key: keyof PrdContent, variant: "bullet" | "ordered" | "check" | "plain", addLabel: string, ph: string) =>
-  ({ content, patch }: SectionBodyProps): ReactNode =>
-    (
-      <InlineList
-        items={(content[key] as string[]) ?? []}
-        onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
-        variant={variant}
-        addLabel={addLabel}
-        placeholder={ph}
-      />
-    );
+const listBody = (
+  key: keyof PrdContent,
+  variant: "bullet" | "ordered" | "check" | "plain",
+  addLabel: string,
+  ph: string
+) => {
+  const Body = ({ content, patch }: SectionBodyProps): ReactNode => (
+    <InlineList
+      items={(content[key] as string[]) ?? []}
+      onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
+      variant={variant}
+      addLabel={addLabel}
+      placeholder={ph}
+    />
+  );
+  Body.displayName = `ListBody(${String(key)})`;
+  return Body;
+};
 
-const textBody =
-  (key: keyof PrdContent, ph: string) =>
-  ({ content, patch }: SectionBodyProps): ReactNode =>
-    (
-      <InlineText
-        value={content[key] as string | undefined}
-        onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
-        placeholder={ph}
-        className="prose-text"
-        multiline
-        tag="p"
-      />
-    );
+const textBody = (key: keyof PrdContent, ph: string) => {
+  const Body = ({ content, patch }: SectionBodyProps): ReactNode => (
+    <InlineText
+      value={content[key] as string | undefined}
+      onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
+      placeholder={ph}
+      className="prose-text"
+      multiline
+      tag="p"
+    />
+  );
+  Body.displayName = `TextBody(${String(key)})`;
+  return Body;
+};
 
 // =====================================================================
 //  Section registry — order, numbering, grouping

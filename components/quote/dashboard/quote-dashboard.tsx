@@ -17,6 +17,7 @@ import type { Quote, QuoteContent } from "@/lib/types";
 import { recomputeTotals, applyMilestonePercents } from "@/lib/quote/totals";
 import { QuoteDocument } from "@/components/quote/quote-document";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
+import { ShareLinkControls } from "@/components/doc/share-link-controls";
 import { EditContext, InlineText } from "@/components/prd/dashboard/inline-edit";
 import { QuoteStatStrip } from "./quote-stat-strip";
 import { QuoteRail } from "./quote-rail";
@@ -267,6 +268,14 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
             <button type="button" className="prd-btn prd-btn--outline" onClick={copyLink} disabled={isPending}>
               <Link2 className="h-3.5 w-3.5" /> Copy link
             </button>
+            <ShareLinkControls
+              kind="quote"
+              id={quote.id}
+              token={quote.token}
+              expiresAt={quote.token_expires_at}
+              revokedAt={quote.token_revoked_at}
+              isDraft={isDraft}
+            />
             {editing && (
               <div className="dash-actions">
                 {isDraft && (

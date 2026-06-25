@@ -18,6 +18,7 @@ import { updatePrdContent, sendPrd, deletePrd } from "@/lib/actions/prds";
 import type { Prd, PrdContent } from "@/lib/types";
 import { PrdDocument } from "@/components/prd/prd-document";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
+import { ShareLinkControls } from "@/components/doc/share-link-controls";
 import { EditContext, InlineText } from "./inline-edit";
 import { PrdStatStrip } from "./prd-stat-strip";
 import { PrdRail } from "./prd-rail";
@@ -280,6 +281,14 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
               >
                 <Link2 className="h-3.5 w-3.5" /> Copy link
               </button>
+              <ShareLinkControls
+                kind="prd"
+                id={prd.id}
+                token={prd.token}
+                expiresAt={prd.token_expires_at}
+                revokedAt={prd.token_revoked_at}
+                isDraft={isDraft}
+              />
               {editing && (
                 <div className="dash-actions">
                   {isDraft && (
