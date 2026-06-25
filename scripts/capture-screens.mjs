@@ -137,7 +137,7 @@ async function snap(ctx, dir, name, route) {
   try {
     const resp = await page.goto(`${BASE}${route}`, { waitUntil: "networkidle", timeout: 60000 });
     httpCode = resp ? resp.status() : null;
-  } catch (e) {
+  } catch {
     status = "load-incomplete";
     await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
   }

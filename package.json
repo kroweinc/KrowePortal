@@ -8,7 +8,7 @@
     "dev:webpack": "npm run dev:stop && NODE_OPTIONS='--max-http-header-size=98304' next dev --port 3030 --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

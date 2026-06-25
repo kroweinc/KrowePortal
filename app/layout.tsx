@@ -36,9 +36,10 @@ export const metadata: Metadata = {
       "Manage every operator-client in one workspace: delivery, comments, and ongoing conversation co-located with the work.",
     images: [
       {
-        url: assetUrl("/opengraph-image.png"),
+        url: assetUrl("/opengraph-image.jpg"),
         width: 1200,
         height: 630,
+        type: "image/jpeg",
         alt: "Krowe",
       },
     ],
@@ -48,7 +49,7 @@ export const metadata: Metadata = {
     title: "Krowe",
     description:
       "Manage every operator-client in one workspace: delivery, comments, and ongoing conversation co-located with the work.",
-    images: [assetUrl("/twitter-image.png")],
+    images: [assetUrl("/twitter-image.jpg")],
   },
   // Icons live in public/ (not the app/ file convention) and are referenced
   // with absolute, asset-prefixed URLs. Under the krowehub.com path proxy, a
