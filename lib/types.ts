@@ -48,6 +48,17 @@ export interface Profile {
   tour_status: TourStatus;
 }
 
+/** Per-user email notification toggles (one row per user, see migration 0059).
+    A missing row means all-on — keep these keys in sync with the migration
+    columns and the NotifyType map in lib/email/notify.ts. */
+export interface NotificationPreferences {
+  user_id: string;
+  notify_doc_signed: boolean;
+  notify_change_order: boolean;
+  notify_invite_accepted: boolean;
+  updated_at: string;
+}
+
 export interface Engagement {
   id: string;
   operator_id: string | null;
@@ -553,6 +564,8 @@ export interface Prd {
   content: PrdContent;
   source_notes: string | null;
   token: string;
+  token_expires_at: string | null; // share-link expiry (migration 0062)
+  token_revoked_at: string | null; // set when the share link is revoked
   sent_at: string | null;
   signed_by_name: string | null;
   signed_at: string | null;
@@ -643,6 +656,8 @@ export interface Quote {
   source_notes: string | null;
   source_prd_id: string | null; // PRD this quote was priced from (from-PRD path)
   token: string;
+  token_expires_at: string | null; // share-link expiry (migration 0062)
+  token_revoked_at: string | null; // set when the share link is revoked
   sent_at: string | null;
   signed_by_name: string | null;
   signed_at: string | null;
@@ -710,6 +725,8 @@ export interface Contract {
   content: ContractContent;
   source_notes: string | null;
   token: string;
+  token_expires_at: string | null; // share-link expiry (migration 0062)
+  token_revoked_at: string | null; // set when the share link is revoked
   sent_at: string | null;
   signed_by_name: string | null;
   signed_at: string | null;
@@ -721,6 +738,12 @@ export interface Contract {
   created_at: string;
   updated_at: string;
 }
+
+// List/summary projections — omit the heavy `content` jsonb for dashboard list
+// reads that only render title/status/dates/token. Detail views use the full type.
+// (Quotes are intentionally excluded: their list rows show content.totals.grand.)
+export type PrdSummary = Omit<Prd, "content">;
+export type ContractSummary = Omit<Contract, "content">;
 
 export type AttachmentType = "file" | "link" | "text";
 
@@ -768,6 +791,8 @@ export interface BuilderProfile {
   avatar_storage_path: string | null;
   is_published: boolean;
   token: string;
+  token_expires_at: string | null; // share-link expiry (migration 0062)
+  token_revoked_at: string | null; // set when the share link is revoked
   github_synced_at: string | null;
   tags: string[]; // achievement/identity badges, e.g. "Hackathon Winner"
   // Quote defaults — the base pricing every new quote starts from (0058).

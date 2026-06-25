@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -9,7 +10,6 @@ import { getProjectById } from "@/lib/actions/projects";
 import { getProjectMaterials } from "@/lib/actions/project-materials";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
-import { getPrdById } from "@/lib/actions/prds";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
 import { friendlyAiError } from "@/lib/ai/client";
 import { generateQuote } from "@/lib/ai/generate-quote";
@@ -17,16 +17,14 @@ import { assertAiBudget } from "@/lib/ai/usage";
 import { refineQuoteSection as runRefineSection } from "@/lib/ai/refine-quote-section";
 import { fieldsForSection, refinableSection } from "@/lib/quote/section-fields";
 import { recomputeTotals, applyMilestonePercents } from "@/lib/quote/totals";
-import { applyPricingDefaults } from "@/lib/quote/defaults";
-import { getPricingDefaults } from "@/lib/actions/pricing-defaults";
 import type { Question } from "@/lib/ai/schemas";
-import type { Quote, QuoteContent, PrdContent } from "@/lib/types";
-
-/** Hard cap on adaptive question rounds before a quote is forced. */
-const MAX_QUOTE_ROUNDS = 4;
-
-/** Raised cap for the from-scratch "deep context" path: broad→specific over more rounds. */
-const MAX_QUOTE_ROUNDS_DEEP = 7;
+import type { Quote, QuoteContent } from "@/lib/types";
+import {
+  resolveQuoteDraft,
+  persistQuoteDraft,
+  type DraftQuoteInput,
+  type DraftQuoteResult,
+} from "@/lib/quote/draft-core";
 
 /** Hard cap on refine question rounds before a section patch is forced. */
 const MAX_REFINE_ROUNDS = 2;
@@ -41,94 +39,24 @@ function revalidateQuote(projectId: string, id: string, token?: string | null) {
   if (token) revalidatePath(`/quotes/${token}`);
 }
 
-const draftSchema = z.object({
-  projectId: z.string().uuid(),
-  title: z.string().min(1, "Give the quote a title.").max(200),
-  source: z.enum(["prd", "scratch", "notes"]),
-  sourcePrdId: z.string().uuid().optional(),
-  notes: z.string().max(20000).optional(),
-  answers: z
-    .array(
-      z.object({
-        questionId: z.string(),
-        question: z.string().max(400),
-        answer: z.string().max(2000),
-      })
-    )
-    .max(40)
-    .optional(),
-  round: z.number().int().min(0).max(10),
-});
-
-export type DraftQuoteInput = z.input<typeof draftSchema>;
-
-export type DraftQuoteResult =
-  | { kind: "questions"; items: Question[] }
-  | { kind: "quote"; quoteId: string }
-  | { error: string };
-
 /**
  * Adaptive quote wizard step. Reads the chosen source (an existing PRD, raw
  * notes, or a from-scratch interview) plus accumulated answers and either asks
  * another round of clarifying questions or generates + inserts the finished
- * quote draft (returning its id for the client to redirect to).
+ * quote draft. The streaming route (app/api/ai/quote/stream) reuses
+ * resolveQuoteDraft + persistQuoteDraft from the shared core so a streamed
+ * generation is saved identically and exactly once.
  */
 export async function draftQuote(input: DraftQuoteInput): Promise<DraftQuoteResult> {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can create quotes." };
-
-  const parsed = draftSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
-
-  const { projectId, title, source, sourcePrdId, notes, answers = [], round } = parsed.data;
-
-  const project = await getProjectById(projectId);
-  if (!project) return { error: "Document not found." };
-  if (project.owner_id !== profile.id) return { error: "Not your document." };
-
-  const materials = await getProjectMaterials(projectId);
-  const sopTranscripts = await getProjectSopTranscripts(projectId);
-
-  // Load the source PRD (from-PRD path). It must belong to the same project.
-  let prdContent: PrdContent | undefined;
-  if (source === "prd") {
-    if (!sourcePrdId) return { error: "Pick a PRD to generate the quote from." };
-    const prd = await getPrdById(sourcePrdId);
-    if (!prd || prd.project_id !== projectId) return { error: "PRD not found." };
-    prdContent = prd.content;
+  const resolved = await resolveQuoteDraft(input);
+  if (!resolved.ok) {
+    if (resolved.status === 401) redirect("/login");
+    return { error: resolved.error };
   }
-
-  // Deep context-gathering mode whenever there's no source material to price
-  // from: the "from scratch" path, or a "from notes" path where notes were left
-  // blank (notes are optional). Deep mode runs more rounds, asks broad→specific
-  // questions, and synthesizes a context summary saved back to the project.
-  const hasNotes = source === "notes" && (notes?.trim().length ?? 0) > 0;
-  const deepContext = source === "scratch" || (source === "notes" && !hasNotes);
-  const forceFinal = round >= (deepContext ? MAX_QUOTE_ROUNDS_DEEP : MAX_QUOTE_ROUNDS);
-
-  const budget = await assertAiBudget(profile.id);
-  if (!budget.ok) return { error: budget.error };
-
-  // Builder's pricing defaults seed every new quote (rate, payment terms, design).
-  const pricingDefaults = await getPricingDefaults(profile.id);
 
   let result;
   try {
-    result = await generateQuote(
-      {
-        title,
-        notes: source === "notes" ? notes : undefined,
-        prdContent,
-        businessContext: composeBusinessContext(project, materials, sopTranscripts),
-        answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
-        forceFinal,
-        deepContext,
-        hourlyRate: pricingDefaults.hourlyRate,
-        currentDate: new Date().toISOString().slice(0, 10),
-      },
-      { userId: profile.id, operation: "generate_quote" }
-    );
+    result = await generateQuote(resolved.genInput, { userId: resolved.profile.id, operation: "generate_quote" });
   } catch (err) {
     return { error: friendlyAiError(err) };
   }
@@ -137,52 +65,9 @@ export async function draftQuote(input: DraftQuoteInput): Promise<DraftQuoteResu
     return { kind: "questions", items: result.items };
   }
 
-  // Final quote — persist a draft and hand back its id.
-  const transcript = answers.length
-    ? answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n")
-    : "";
-  const sourceNotes = [notes?.trim(), transcript].filter(Boolean).join("\n\n---\n\n") || null;
-
-  // Seed the builder's defaults (rate, payment terms, design system), then tie all
-  // arithmetic out regardless of model drift: price line items by hours × rate and
-  // derive milestone amounts from the percents. Defaults must be applied BEFORE
-  // recompute so the design fee feeds the grand total and milestones derive from it.
-  const content = applyMilestonePercents(
-    recomputeTotals(applyPricingDefaults(result.content, pricingDefaults))
-  );
-
-  const supabase = await getClient(profile.id);
-  const { data, error } = await supabase
-    .from("quotes")
-    .insert({
-      project_id: projectId,
-      created_by: profile.id,
-      title,
-      status: "draft",
-      content,
-      source_notes: sourceNotes,
-      source_prd_id: source === "prd" ? sourcePrdId : null,
-    })
-    .select("id")
-    .single();
-
-  if (error || !data) return { error: error?.message ?? "Failed to create quote." };
-
-  // Deep-context path: persist the synthesized business context to the project so
-  // future documents start warm. Only when the project has no context yet.
-  if (deepContext && result.contextSummary && !project.context?.trim()) {
-    try {
-      await supabase
-        .from("projects")
-        .update({ context: result.contextSummary, updated_at: new Date().toISOString() })
-        .eq("id", projectId);
-    } catch {
-      // ignore — context write-back is non-critical
-    }
-  }
-
-  revalidatePath(`/b/projects/${projectId}`);
-  return { kind: "quote", quoteId: data.id as string };
+  const saved = await persistQuoteDraft(resolved.save, result.content, result.contextSummary);
+  if ("error" in saved) return { error: saved.error };
+  return { kind: "quote", quoteId: saved.quoteId };
 }
 
 export async function regenerateQuote(
@@ -412,6 +297,69 @@ export async function deleteQuote(id: string): Promise<{ success: true } | { err
   return { success: true };
 }
 
+// Revokes the public share link — the public lookup rejects a revoked row
+// (migration 0062), killing access via any already-shared link.
+export async function revokeQuoteShareLink(
+  id: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can revoke a link." };
+
+  const supabase = await getClient(profile.id);
+  const { data: before } = await supabase
+    .from("quotes")
+    .select("created_by, project_id, token")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!before) return { error: "Quote not found." };
+  if (before.created_by !== profile.id) return { error: "Not your quote." };
+
+  const { error } = await supabase
+    .from("quotes")
+    .update({ token_revoked_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateQuote(before.project_id as string, id, before.token as string | null);
+  return { success: true };
+}
+
+// Mint a fresh share link: a new token (so old links stay dead), a reset expiry
+// window, and a cleared revocation flag — the re-share path after revoke/expiry.
+export async function reissueQuoteShareLink(
+  id: string
+): Promise<{ success: true; token: string } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can reissue a link." };
+
+  const supabase = await getClient(profile.id);
+  const { data: before } = await supabase
+    .from("quotes")
+    .select("created_by, project_id, token")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!before) return { error: "Quote not found." };
+  if (before.created_by !== profile.id) return { error: "Not your quote." };
+
+  // supabase-js can't invoke the SQL column default on update, so mint the same
+  // 64-hex shape here; expiry window matches migration 0062 (90 days for docs).
+  const token = randomBytes(32).toString("hex");
+  const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from("quotes")
+    .update({ token, token_expires_at: expires, token_revoked_at: null })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateQuote(before.project_id as string, id, before.token as string | null);
+  revalidatePath(`/quotes/${token}`);
+  return { success: true, token };
+}
+
 export async function getQuotesByProject(projectId: string): Promise<Quote[]> {
   const profile = await getCurrentProfile();
   if (!profile) return [];
@@ -419,6 +367,8 @@ export async function getQuotesByProject(projectId: string): Promise<Quote[]> {
   const supabase = await getClient(profile.id);
   // Owner-scoped (created_by == project owner). RLS enforces this for the normal
   // client; the dev admin client bypasses RLS, so we replicate the scope here.
+  // Keeps `*` (incl. content) on purpose: quote list rows render the grand total
+  // via quoteDocMeta (content.totals.grand), and contract auto-fill reads content.
   const { data } = await supabase
     .from("quotes")
     .select("*")

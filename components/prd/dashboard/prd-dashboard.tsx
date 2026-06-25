@@ -12,16 +12,18 @@ import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Send, Sparkles, Check, Link2, Receipt } from "lucide-react";
+import { Send, Sparkles, Check, Link2, Receipt, Trash2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updatePrdContent, sendPrd, deletePrd } from "@/lib/actions/prds";
 import type { Prd, PrdContent } from "@/lib/types";
 import { PrdDocument } from "@/components/prd/prd-document";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
+import { ShareLinkControls } from "@/components/doc/share-link-controls";
 import { EditContext, InlineText } from "./inline-edit";
 import { PrdStatStrip } from "./prd-stat-strip";
 import { PrdRail } from "./prd-rail";
 import { RefineSectionDialog } from "./refine-section-dialog";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import "./prd-dashboard.css";
 
 /** How long after the last edit we flush to the server. */
@@ -53,6 +55,7 @@ interface PrdDashboardProps {
 export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   const isDraft = prd.status === "draft";
   const [mode, setMode] = useState<"edit" | "preview">("edit");
@@ -161,8 +164,16 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
     return true;
   }
 
-  function send() {
-    if (!confirm("Send this PRD to the client? You can still edit it afterward.")) return;
+  async function send() {
+    const ok = await confirm({
+      title: "Send this PRD to the client?",
+      description:
+        "They’ll get a link to the live document. You can still edit it afterward — changes appear instantly.",
+      confirmText: "Send to client",
+      icon: Send,
+      tone: "brand",
+    });
+    if (!ok) return;
     startTransition(async () => {
       if (!(await publish())) return;
       toast.success("PRD sent");
@@ -172,8 +183,18 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
 
   /** Copy the public share link. Publishing a draft first makes it visible to
       the client, so confirm before flipping its status. */
-  function copyLink() {
-    if (isDraft && !confirm("Sharing a link makes this PRD visible to the client. Continue?")) return;
+  async function copyLink() {
+    if (isDraft) {
+      const ok = await confirm({
+        title: "Share this PRD with the client?",
+        description:
+          "Copying the link publishes this draft so the client can open it. You can keep editing afterward.",
+        confirmText: "Copy share link",
+        icon: Link2,
+        tone: "brand",
+      });
+      if (!ok) return;
+    }
     const wasDraft = isDraft;
     startTransition(async () => {
       if (!(await publish())) return;
@@ -189,8 +210,16 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
     });
   }
 
-  function remove() {
-    if (!confirm("Delete this draft? This cannot be undone.")) return;
+  async function remove() {
+    const ok = await confirm({
+      title: "Delete this draft?",
+      description: "This permanently removes the PRD. This can’t be undone.",
+      confirmText: "Delete draft",
+      cancelText: "Keep draft",
+      icon: Trash2,
+      tone: "danger",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const result = await deletePrd(prd.id);
       if ("error" in result) {
@@ -252,6 +281,14 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
               >
                 <Link2 className="h-3.5 w-3.5" /> Copy link
               </button>
+              <ShareLinkControls
+                kind="prd"
+                id={prd.id}
+                token={prd.token}
+                expiresAt={prd.token_expires_at}
+                revokedAt={prd.token_revoked_at}
+                isDraft={isDraft}
+              />
               {editing && (
                 <div className="dash-actions">
                   {isDraft && (
@@ -317,6 +354,8 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
         currentContent={content}
         onApply={(p) => patch(p)}
       />
+
+      {confirmDialog}
     </div>
 
     {/* Print-only canonical document — hidden on screen, surfaced when the

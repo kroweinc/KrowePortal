@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 // Bypasses RLS — only for dev mode where there is no real auth session.
 export function createAdminClient() {
@@ -10,7 +11,11 @@ export function createAdminClient() {
   );
 }
 
-export async function createClient() {
+// Memoized per-request: a single render touches the cookie-bound client from the
+// layout, the page, and several server actions. Without cache() each call rebuilt
+// the client and (via getCurrentProfile) re-hit Supabase auth over the network.
+// React.cache() collapses them to one instance per request.
+export const createClient = cache(async function createClient() {
   const cookieStore = await cookies();
 
   return createServerClient(
@@ -33,4 +38,4 @@ export async function createClient() {
       },
     }
   );
-}
+});

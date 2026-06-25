@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { isTaskMember, isTaskCommitMember } from "@/lib/actions/task-access";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -35,6 +36,8 @@ export async function linkTaskCommit(
 
   const parsed = linkSchema.safeParse({ taskId, commit });
   if (!parsed.success) return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -99,6 +102,8 @@ export async function unlinkTaskCommit(
 
   const parsed = unlinkSchema.safeParse({ id: taskCommitId });
   if (!parsed.success) return { error: "Invalid id" };
+  if (!(await isTaskCommitMember(parsed.data.id, profile.id)))
+    return { error: "You don't have access to this commit link." };
 
   const supabase = await getClient(profile.id);
 

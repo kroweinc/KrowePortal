@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
+import { EngagementDocRow } from "@/components/doc/engagement-doc-row";
+import type { DocKind } from "@/components/doc/doc-menu";
 import type { BriefStatus } from "@/lib/types";
 
 /* Read-only list of the documents that belong to an engagement. Documents hang
@@ -15,6 +17,10 @@ export interface EngagementDocItem {
   status: BriefStatus;
   meta: string;
   href: string;
+  // Builder-only: when present, the row gains the right-click actions menu.
+  // Omitted in the operator/client view so those rows stay read-only links.
+  docKind?: DocKind;
+  token?: string | null;
 }
 
 export function EngagementDocuments({
@@ -34,21 +40,34 @@ export function EngagementDocuments({
 
   return (
     <div className="space-y-2">
-      {items.map((d) => (
-        <Link
-          key={d.id}
-          href={d.href}
-          className="flex items-center justify-between gap-4 rounded-lg border border-neutral-200 bg-white px-4 py-3 transition-colors hover:border-neutral-300"
-        >
-          <div className="min-w-0 flex-1">
-            <div className="mb-0.5 flex items-center gap-2">
-              <span className="truncate text-sm font-medium text-neutral-900">{d.title}</span>
-              <BriefStatusPill status={d.status} />
+      {items.map((d) =>
+        d.docKind ? (
+          <EngagementDocRow
+            key={d.id}
+            docKind={d.docKind}
+            id={d.id}
+            title={d.title}
+            status={d.status}
+            meta={d.meta}
+            href={d.href}
+            token={d.token ?? null}
+          />
+        ) : (
+          <Link
+            key={d.id}
+            href={d.href}
+            className="flex items-center justify-between gap-4 rounded-lg border border-neutral-200 bg-white px-4 py-3 transition-colors hover:border-neutral-300"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="mb-0.5 flex items-center gap-2">
+                <span className="truncate text-sm font-medium text-neutral-900">{d.title}</span>
+                <BriefStatusPill status={d.status} />
+              </div>
+              <div className="text-xs text-neutral-500">{d.meta}</div>
             </div>
-            <div className="text-xs text-neutral-500">{d.meta}</div>
-          </div>
-        </Link>
-      ))}
+          </Link>
+        )
+      )}
     </div>
   );
 }

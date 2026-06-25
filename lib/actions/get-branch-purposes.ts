@@ -11,11 +11,6 @@ type BranchForPurpose = {
   latestCommit: { message: string; date: string } | null;
 };
 
-type BranchPurposeRow = {
-  branch_name: string;
-  purpose: string;
-};
-
 async function readCachedPurposes(
   repoFullName: string,
   branches: BranchForPurpose[]

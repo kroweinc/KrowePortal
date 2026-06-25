@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { NewProjectForm } from "./new-project-form";
 
-export const metadata = { title: "New Project" };
+export const metadata = { title: "New Project Docs" };
 
 export default async function NewProjectPage() {
   const profile = await getCurrentProfile();

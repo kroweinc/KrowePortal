@@ -1,6 +1,7 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import { getBuilderProfileByToken } from "@/lib/actions/builder-profile-public";
+import { getShareLinkState } from "@/lib/actions/share-links";
+import { ShareLinkError } from "@/components/share-link/share-link-error";
 import { PublicProfileView } from "@/components/builder-profile/public-profile-view";
 
 interface Props {
@@ -17,27 +18,16 @@ export default async function PublicBuilderProfilePage({ params }: Props) {
   const { token } = await params;
 
   if (!/^[a-f0-9]{64}$/.test(token)) {
-    return <ErrorCard message="This profile link is invalid." />;
+    return <ShareLinkError state="not-found" noun="profile" />;
   }
 
-  // getBuilderProfileByToken already hides unpublished profiles (returns null).
+  // getBuilderProfileByToken already hides unpublished/expired/revoked (returns
+  // null); on the null path, classify the token so we can show why.
   const data = await getBuilderProfileByToken(token);
   if (!data) {
-    return <ErrorCard message="This profile isn't available." />;
+    const state = await getShareLinkState("builder_profiles", token);
+    return <ShareLinkError state={state} noun="profile" />;
   }
 
   return <PublicProfileView data={data} token={token} />;
-}
-
-function ErrorCard({ message }: { message: string }) {
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-neutral-50 px-4">
-      <div className="w-full max-w-sm text-center">
-        <p className="text-sm text-neutral-500">{message}</p>
-        <Link href="/" className="mt-4 inline-block text-sm text-neutral-700 underline">
-          Go home
-        </Link>
-      </div>
-    </main>
-  );
 }

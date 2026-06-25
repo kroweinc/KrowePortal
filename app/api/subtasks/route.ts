@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { isTaskMember } from "@/lib/actions/task-access";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 
 async function getClient(profileId: string) {
@@ -15,6 +16,9 @@ export async function GET(request: NextRequest) {
   const profile = await getCurrentProfile();
   if (!profile) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!(await isTaskMember(taskId, profile.id))) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const supabase = await getClient(profile.id);

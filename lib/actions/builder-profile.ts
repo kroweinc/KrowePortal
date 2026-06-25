@@ -363,6 +363,26 @@ export async function updateProfileTags(input: {
   return { success: true };
 }
 
+// Revokes the public profile share link — the public lookup (and resume URL)
+// reject a revoked row (migration 0062), killing access via any shared link.
+export async function revokeProfileShareLink(): Promise<{ success?: boolean; error?: string }> {
+  const { profile, error: roleError } = await requireBuilder();
+  if (!profile) return { error: roleError! };
+
+  const row = await getOwnedProfile(profile.id);
+  if (!row) return { error: "Profile not found." };
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("builder_profiles")
+    .update({ token_revoked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", row.id);
+  if (error) return { error: error.message };
+
+  revalidateProfile(row.token);
+  return { success: true };
+}
+
 // ============================================================
 // GitHub showcase
 // ============================================================
@@ -1553,13 +1573,21 @@ export async function regenerateShareToken(): Promise<{
   if (!row) return { error: "Profile not found." };
 
   // supabase-js can't invoke the SQL column default on update, so mint the
-  // same 64-hex shape here.
+  // same 64-hex shape here. Also reset the expiry window (365 days for profiles,
+  // per migration 0062) and clear any prior revocation so a fresh link works
+  // after the old one was revoked or expired.
   const token = randomBytes(32).toString("hex");
+  const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
   const supabase = await getClient(profile.id);
   const { error } = await supabase
     .from("builder_profiles")
-    .update({ token, updated_at: new Date().toISOString() })
+    .update({
+      token,
+      token_expires_at: expires,
+      token_revoked_at: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", row.id);
   if (error) return { error: error.message };
 

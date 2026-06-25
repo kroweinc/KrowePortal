@@ -61,8 +61,10 @@ export function EngagementLogo({
       <span className="op-badge" title={badgeInitials}>
         {badgeUrl ? (
           // Plain <img>: signed Supabase Storage URL, no next/image remotePatterns needed.
+          // Square intrinsic dims match the .op-badge box (CSS sizes it 100%) and
+          // give the browser a 1:1 aspect ratio to reserve, avoiding CLS.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={badgeUrl} alt="" />
+          <img src={badgeUrl} alt="" width={22} height={22} />
         ) : (
           badgeInitials
         )}

@@ -3,11 +3,13 @@
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
-import type { TaskStatus, TaskPriority } from "@/lib/types";
+import { isTaskMember } from "@/lib/actions/task-access";
+import type { TaskStatus } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -57,16 +59,22 @@ export async function createTask(formData: FormData) {
     },
   });
 
-  await estimateAndSaveTaskHours({
-    taskId: data.id as string,
-    title: parsed.data.title,
-    description: parsed.data.description ?? null,
-    priority: parsed.data.priority,
-    userId: profile.id,
-  });
+  // The AI hours estimate is a 1-3s OpenAI round-trip that self-persists to the
+  // task row. Defer it past the response with after() so "Add task" returns
+  // instantly; the estimate fills in on the next revalidation/navigation.
+  const taskId = data.id as string;
+  after(() =>
+    estimateAndSaveTaskHours({
+      taskId,
+      title: parsed.data.title,
+      description: parsed.data.description ?? null,
+      priority: parsed.data.priority,
+      userId: profile.id,
+    })
+  );
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
-  return { success: true, taskId: data.id as string };
+  return { success: true, taskId };
 }
 
 const updateTaskSchema = z.object({
@@ -93,6 +101,8 @@ export async function updateTask(formData: FormData) {
 
   const supabase = await getClient(profile.id);
   const { id, ...updates } = parsed.data;
+  if (!(await isTaskMember(id, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const { data: before } = await supabase
     .from("tasks")
@@ -108,18 +118,23 @@ export async function updateTask(formData: FormData) {
   if (error) return { error: error.message };
 
   if (before) {
-    for (const [field, newValue] of Object.entries(updates)) {
-      const oldValue = (before as Record<string, unknown>)[field];
-      if (oldValue === newValue) continue;
-      await writeAuditEntry({
-        taskId: id,
-        actorId: profile.id,
-        action: "task.field_changed",
-        field,
-        oldValue,
-        newValue,
-      });
-    }
+    // Write one audit entry per changed field — in parallel, not a serial loop,
+    // so a multi-field edit doesn't stack several DB round-trips before returning.
+    const changed = Object.entries(updates).filter(
+      ([field, newValue]) => (before as Record<string, unknown>)[field] !== newValue
+    );
+    await Promise.all(
+      changed.map(([field, newValue]) =>
+        writeAuditEntry({
+          taskId: id,
+          actorId: profile.id,
+          action: "task.field_changed",
+          field,
+          oldValue: (before as Record<string, unknown>)[field],
+          newValue,
+        })
+      )
+    );
   }
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
@@ -141,6 +156,8 @@ export async function markTaskDone(
 
   const parsed = markDoneSchema.safeParse({ taskId, ...payload });
   if (!parsed.success) return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -202,6 +219,8 @@ export async function markTaskForApproval(
 
   const parsed = markForApprovalSchema.safeParse({ taskId, ...payload });
   if (!parsed.success) return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const now = new Date().toISOString();
   const updates: Record<string, string | null> = {
@@ -256,6 +275,8 @@ export async function approveTask(
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "operator") return { error: "Only operators can approve tasks." };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -291,6 +312,8 @@ export async function approveTask(
 export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -319,12 +342,15 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   }
 
   revalidatePath("/b");
+  revalidatePath("/o");
   return { success: true };
 }
 
 export async function reorderTask(taskId: string, sortOrder: number) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
   const { error } = await supabase
@@ -340,11 +366,28 @@ export async function reorderTask(taskId: string, sortOrder: number) {
 export async function deleteTask(taskId: string) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
+
+  // Gather attachment files before the row cascade: FK ON DELETE CASCADE removes
+  // task_attachments rows but never the underlying storage objects (see
+  // deleteAttachment for the per-file pattern), which would leak files forever.
+  const { data: files } = await supabase
+    .from("task_attachments")
+    .select("storage_path")
+    .eq("task_id", taskId)
+    .not("storage_path", "is", null);
+
   const { error } = await supabase.from("tasks").delete().eq("id", taskId);
 
   if (error) return { error: error.message };
+
+  const paths = (files ?? []).map((f) => f.storage_path as string).filter(Boolean);
+  if (paths.length) {
+    await createAdminClient().storage.from("task-attachments").remove(paths);
+  }
 
   revalidatePath("/o");
   revalidatePath("/b");

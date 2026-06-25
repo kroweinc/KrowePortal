@@ -7,6 +7,7 @@ import { generateSubtasks } from "@/lib/ai/generate-subtasks";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
+import { isTaskMember } from "@/lib/actions/task-access";
 import type { Subtask } from "@/lib/types";
 import type { GenerationResult } from "@/lib/ai/schemas";
 
@@ -20,6 +21,8 @@ export async function generateSubtaskDrafts(input: {
 }): Promise<GenerationResult | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(input.taskId, profile.id)))
+    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -71,6 +74,8 @@ export async function acceptGeneratedSubtasks(
 
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { inserted: [], error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
@@ -80,7 +85,7 @@ export async function acceptGeneratedSubtasks(
     .eq("task_id", taskId)
     .order("position", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
 
   const start = (maxRow?.position ?? -1) + 1;
 

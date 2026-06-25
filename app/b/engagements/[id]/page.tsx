@@ -1,20 +1,18 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, BookOpen, Briefcase, FileText, Github, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Briefcase, FileText, Github, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getMyPendingInvites } from "@/lib/actions/invitations";
 import { getMyBuilderIdentity } from "@/lib/actions/builder-profile";
-import { getPrdsByProject } from "@/lib/actions/prds";
+import { getPrdSummariesByProject } from "@/lib/actions/prds";
 import { getQuotesByProject } from "@/lib/actions/quote-docs";
 import { getContractsByProject } from "@/lib/actions/contracts";
 import { EngagementSettingsCard } from "@/components/engagement-admin/engagement-settings-card";
 import { DeleteEngagementCard } from "@/components/engagement-admin/delete-engagement-card";
 import { RepoSelector } from "@/components/github/repo-selector";
 import { BusinessContactCard } from "@/components/doc/business-contact-card";
-import { BusinessContextCard } from "@/components/dashboard/business-context-card";
 import { BusinessLinksEditor } from "@/components/engagement/business-links-editor";
-import { getBusinessContext } from "@/lib/actions/engagement";
 import { DetailHero } from "@/components/engagement/detail-hero";
 import { EngagementSection } from "@/components/engagement/engagement-section";
 import type { EngagementStatusKind } from "@/components/engagement/engagement-status";
@@ -59,7 +57,7 @@ export default async function BuilderEngagementPage({
   if (!data) notFound();
   const engagement = data as Engagement;
 
-  const [pendingInvites, ghConnection, identity, taskRows, businessContext] = await Promise.all([
+  const [pendingInvites, ghConnection, identity, taskRows] = await Promise.all([
     getMyPendingInvites(),
     supabase
       .from("github_connections")
@@ -73,7 +71,6 @@ export default async function BuilderEngagementPage({
       .select("status")
       .eq("engagement_id", id)
       .then(({ data }) => data ?? []),
-    getBusinessContext(id),
   ]);
 
   const operatorName = engagement.operator?.display_name ?? null;
@@ -100,7 +97,7 @@ export default async function BuilderEngagementPage({
   let docItems: EngagementDocItem[] = [];
   if (projectId) {
     const [prds, quotes, contracts] = await Promise.all([
-      getPrdsByProject(projectId),
+      getPrdSummariesByProject(projectId),
       getQuotesByProject(projectId),
       getContractsByProject(projectId),
     ]);
@@ -111,6 +108,8 @@ export default async function BuilderEngagementPage({
         status: p.status,
         meta: docMeta(p),
         href: `/b/projects/${projectId}/prd/${p.id}`,
+        docKind: "prd" as const,
+        token: p.token,
       })),
       ...quotes.map((q) => ({
         id: q.id,
@@ -118,6 +117,8 @@ export default async function BuilderEngagementPage({
         status: q.status,
         meta: quoteDocMeta(q),
         href: `/b/projects/${projectId}/quotes/${q.id}`,
+        docKind: "quote" as const,
+        token: q.token,
       })),
       ...contracts.map((c) => ({
         id: c.id,
@@ -125,6 +126,8 @@ export default async function BuilderEngagementPage({
         status: c.status,
         meta: docMeta(c),
         href: `/b/projects/${projectId}/contract/${c.id}`,
+        docKind: "contract" as const,
+        token: c.token,
       })),
     ];
   }
@@ -179,19 +182,6 @@ export default async function BuilderEngagementPage({
           </EngagementSection>
 
           <EngagementSection
-            icon={<BookOpen size={19} strokeWidth={1.75} />}
-            title="Business context"
-            hint="How the business works today and the problem you're solving — context for the build."
-          >
-            <BusinessContextCard
-              engagementId={engagement.id}
-              cards={businessContext}
-              canEdit
-              variant="bare"
-            />
-          </EngagementSection>
-
-          <EngagementSection
             icon={<FileText size={19} strokeWidth={1.75} />}
             title="Documents"
             hint="The PRD, quote, and contract from the project this client came from."
@@ -230,7 +220,7 @@ export default async function BuilderEngagementPage({
             ) : (
               <p className="text-sm text-neutral-500">
                 <Link
-                  href="/b/github/settings"
+                  href="/b/settings/github"
                   className="text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
                 >
                   Connect GitHub

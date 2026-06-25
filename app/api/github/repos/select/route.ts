@@ -3,13 +3,17 @@ import { createAdminClient } from "@/lib/supabase/server"
 import { getCurrentProfile } from "@/lib/auth"
 import { z } from "zod"
 
+// Repo coords are interpolated into GitHub API paths downstream (repo-context,
+// branches). Constrain them to the GitHub grammar so a "#"/"?"/slash can't
+// corrupt a request path or query. Branch names are more permissive (they may
+// contain "/") so they are only length-bounded; callers encodeURIComponent them.
 const schema = z.object({
   engagement_id: z.string().uuid().optional(),
   repo_id: z.number(),
-  repo_full_name: z.string(),
-  repo_name: z.string(),
-  repo_owner: z.string(),
-  default_branch: z.string(),
+  repo_full_name: z.string().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/).max(200),
+  repo_name: z.string().regex(/^[A-Za-z0-9._-]+$/).max(100),
+  repo_owner: z.string().regex(/^[A-Za-z0-9-]+$/).max(100),
+  default_branch: z.string().min(1).max(255),
 })
 
 export async function POST(request: Request) {

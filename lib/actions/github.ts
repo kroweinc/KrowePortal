@@ -23,7 +23,6 @@ export async function disconnectGithub(): Promise<{ success: true } | { error: s
   if (error) return { error: error.message };
 
   revalidatePath("/b/github");
-  revalidatePath("/b/github/settings");
-  revalidatePath("/b/settings");
+  revalidatePath("/b/settings/github");
   return { success: true };
 }

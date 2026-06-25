@@ -7,14 +7,16 @@
    After the path, it mirrors the PRD wizard's question loop (recommended option
    pre-selected, multi-select, "Other"), then redirects to the quote dashboard. */
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Sparkles, Loader2, FileText, PenLine, NotebookPen } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { draftQuote, type DraftQuoteInput } from "@/lib/actions/quote-docs";
+import { draftQuote } from "@/lib/actions/quote-docs";
+import type { DraftQuoteInput, DraftQuoteResult } from "@/lib/quote/draft-core";
 import type { Question } from "@/lib/ai/schemas";
+import { streamDraft } from "@/lib/ai/stream-client";
 
 const OTHER = "__other__";
 
@@ -28,6 +30,14 @@ const matchesRecommended = (opt: string, rec?: string) =>
 
 type Source = "prd" | "scratch" | "notes";
 type AnswerEntry = { questionId: string; question: string; answer: string };
+
+// A generated round retained so the builder can step back into it without
+// regenerating: the questions plus the live selections/free-text for each.
+type RoundData = {
+  items: Question[];
+  selections: Record<string, string[]>;
+  otherText: Record<string, string>;
+};
 
 type WizardState =
   | { kind: "path" }
@@ -54,9 +64,12 @@ interface Props {
   initialTitle: string;
   prds: WizardPrd[];
   initialPrdId?: string | null;
+  /** When true, the final generation streams progressively via the SSE route
+      (OPENAI_ENABLE_STREAMING). Off ⇒ the blocking draftQuote action path. */
+  streamingEnabled?: boolean;
 }
 
-export function QuoteWizard({ projectId, projectName, backHref, initialTitle, prds, initialPrdId }: Props) {
+export function QuoteWizard({ projectId, projectName, backHref, initialTitle, prds, initialPrdId, streamingEnabled = false }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -64,11 +77,30 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
   const [source, setSource] = useState<Source>(initialPrdId ? "prd" : "scratch");
   const [prdId, setPrdId] = useState<string | null>(initialPrdId ?? null);
   const [notes, setNotes] = useState("");
-  const [round, setRound] = useState(0);
-  const [answers, setAnswers] = useState<AnswerEntry[]>([]);
+  // Earlier rounds (back) and rounds stepped back out of but re-enterable without
+  // regenerating (forward). The current round lives in `state` while answering.
+  const [back, setBack] = useState<RoundData[]>([]);
+  const [forward, setForward] = useState<RoundData[]>([]);
+  const round = back.length;
   const [state, setState] = useState<WizardState>(initialPrdId ? { kind: "prd" } : { kind: "path" });
+  // Always points at the latest state so the Escape handler cancels the live round.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  // Mirror the history into refs so cancel/back/redo callbacks read fresh values.
+  const backRef = useRef<RoundData[]>([]);
+  backRef.current = back;
+  const forwardRef = useRef<RoundData[]>([]);
+  forwardRef.current = forward;
+  // Generation token: bumping it abandons the in-flight draft so a cancelled
+  // round can't navigate away or overwrite the screen when it finally resolves.
+  const genId = useRef(0);
+  // Aborts the in-flight streaming fetch on cancel — stops server work too.
+  const abortRef = useRef<AbortController | null>(null);
+  // Snapshot of the screen + history to restore if a round is cancelled or fails.
+  const restoreRef = useRef<{ state: WizardState; back: RoundData[]; forward: RoundData[] } | null>(null);
 
   function run(src: Source, srcPrdId: string | null, nextAnswers: AnswerEntry[], nextRound: number, label: string) {
+    const myGen = ++genId.current;
     setState({ kind: "loading", label });
     const payload: DraftQuoteInput = {
       projectId,
@@ -79,44 +111,109 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
       answers: nextAnswers,
       round: nextRound,
     };
-    // Where to land if the draft fails — the path's own entry point.
-    const entryState: WizardState =
-      src === "prd" ? { kind: "prd" } : src === "notes" ? { kind: "notes" } : { kind: "path" };
+
+    // One result handler for both the streaming and blocking paths.
+    const handle = (result: DraftQuoteResult) => {
+      if (myGen !== genId.current) return; // cancelled — abandon the result
+
+      if ("error" in result) {
+        toast.error(result.error);
+        restoreScreen();
+        return;
+      }
+
+      if (result.kind === "questions") {
+        setState({
+          kind: "questions",
+          items: result.items,
+          selections: Object.fromEntries(
+            result.items.map((q) => [
+              q.id,
+              q.recommended && q.options.some((o) => matchesRecommended(o, q.recommended)) ? [q.recommended] : [],
+            ])
+          ),
+          otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
+        });
+        return;
+      }
+
+      router.push(`${backHref}/quotes/${result.quoteId}`);
+    };
+
+    if (streamingEnabled) {
+      // Stream the generation for true server-side cancellation via
+      // AbortController.
+      const controller = new AbortController();
+      abortRef.current = controller;
+      void (async () => {
+        try {
+          const evt = await streamDraft("/api/ai/quote/stream", payload, {
+            signal: controller.signal,
+          });
+          if (myGen !== genId.current) return;
+          if (evt.type === "questions") handle({ kind: "questions", items: evt.items });
+          else if (evt.type === "done" && evt.quoteId) handle({ kind: "quote", quoteId: evt.quoteId });
+          else handle({ error: evt.type === "error" ? evt.error : "Generation failed." });
+        } catch (err) {
+          if (myGen !== genId.current) return; // aborted by cancelLoading — ignore
+          handle({ error: err instanceof Error ? err.message : "Something went wrong generating the quote." });
+        }
+      })();
+      return;
+    }
 
     startTransition(async () => {
       try {
-        const result = await draftQuote(payload);
-
-        if ("error" in result) {
-          toast.error(result.error);
-          setState(entryState);
-          return;
-        }
-
-        if (result.kind === "questions") {
-          setState({
-            kind: "questions",
-            items: result.items,
-            selections: Object.fromEntries(
-              result.items.map((q) => [
-                q.id,
-                q.recommended && q.options.some((o) => matchesRecommended(o, q.recommended)) ? [q.recommended] : [],
-              ])
-            ),
-            otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
-          });
-          return;
-        }
-
-        router.push(`${backHref}/quotes/${result.quoteId}`);
+        handle(await draftQuote(payload));
       } catch (err) {
+        if (myGen !== genId.current) return; // cancelled — abandon the result
         // A thrown/rejected server action (network drop, timeout) must never
         // leave the wizard stuck on the spinner with no feedback or escape.
         toast.error(err instanceof Error ? err.message : "Something went wrong generating the quote.");
-        setState(entryState);
+        restoreScreen();
       }
     });
   }
+
+  // The entry screen for a creation path — where Back from round 0 returns.
+  const entryStateFor = (src: Source): WizardState =>
+    src === "prd" ? { kind: "prd" } : src === "notes" ? { kind: "notes" } : { kind: "path" };
+
+  // Restore the pre-generation screen + round history from the snapshot.
+  function restoreScreen() {
+    const r = restoreRef.current;
+    if (r) {
+      setBack(r.back);
+      setForward(r.forward);
+      setState(r.state);
+    } else {
+      setState({ kind: "path" });
+    }
+  }
+
+  // Cancel an in-progress generation: abandon the draft and return to the
+  // screen the round was launched from, with the latest round rolled back out.
+  function cancelLoading() {
+    if (stateRef.current.kind !== "loading") return;
+    genId.current += 1;
+    // Abort the streaming fetch so the server stops generating (and skips the save).
+    abortRef.current?.abort();
+    abortRef.current = null;
+    restoreScreen();
+  }
+
+  // Esc cancels an in-progress generation, mirroring the on-screen Cancel button.
+  useEffect(() => {
+    if (state.kind !== "loading") return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelLoading();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state.kind]);
 
   function startPath(src: Source, srcPrdId?: string | null) {
     if (!title.trim()) {
@@ -125,8 +222,10 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
     }
     setSource(src);
     setPrdId(srcPrdId ?? null);
-    setAnswers([]);
-    setRound(0);
+    setBack([]);
+    setForward([]);
+    // Cancelling or failing the first round returns to this path's entry screen.
+    restoreRef.current = { state: stateRef.current, back: [], forward: [] };
     const label =
       src === "prd"
         ? "Pricing the PRD…"
@@ -159,18 +258,54 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
     });
   }
 
+  // The flat answer list for a set of rounds, in order — what the server sees.
+  function answersFromRounds(rounds: RoundData[]): AnswerEntry[] {
+    return rounds.flatMap((r) =>
+      r.items.map((q) => ({
+        questionId: q.id,
+        question: q.text,
+        answer: answerFor(q, r.selections, r.otherText),
+      }))
+    );
+  }
+
   function submitAnswers() {
-    if (state.kind !== "questions") return;
-    const roundAnswers: AnswerEntry[] = state.items.map((q) => ({
-      questionId: q.id,
-      question: q.text,
-      answer: answerFor(q, state.selections, state.otherText),
-    }));
-    const merged = [...answers, ...roundAnswers];
-    const nextRound = round + 1;
-    setAnswers(merged);
-    setRound(nextRound);
-    run(source, prdId, merged, nextRound, "Putting your quote together…");
+    const s = stateRef.current;
+    if (s.kind !== "questions") return;
+    const current: RoundData = { items: s.items, selections: s.selections, otherText: s.otherText };
+
+    // Not at the frontier: step forward into the already-generated next round
+    // instead of regenerating it.
+    if (forwardRef.current.length > 0) {
+      const [next, ...rest] = forwardRef.current;
+      setBack((b) => [...b, current]);
+      setForward(rest);
+      setState({ kind: "questions", items: next.items, selections: next.selections, otherText: next.otherText });
+      return;
+    }
+
+    // Frontier: bank this round and generate the next round (or the final quote).
+    const nextBack = [...backRef.current, current];
+    restoreRef.current = { state: s, back: backRef.current, forward: forwardRef.current };
+    setBack(nextBack);
+    setForward([]);
+    run(source, prdId, answersFromRounds(nextBack), nextBack.length, "Putting your quote together…");
+  }
+
+  // Back one round. From a later round, step into the previous round (re-enterable
+  // without regenerating); from round 0, return to the path's entry screen.
+  function goBack() {
+    const s = stateRef.current;
+    if (s.kind !== "questions") return;
+    const current: RoundData = { items: s.items, selections: s.selections, otherText: s.otherText };
+    if (backRef.current.length > 0) {
+      const prev = backRef.current[backRef.current.length - 1];
+      setBack((b) => b.slice(0, -1));
+      setForward((f) => [current, ...f]);
+      setState({ kind: "questions", items: prev.items, selections: prev.selections, otherText: prev.otherText });
+      return;
+    }
+    setState(entryStateFor(source));
   }
 
   const questionsReady =
@@ -314,6 +449,13 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
         <div className="flex flex-col items-center justify-center gap-3 py-20">
           <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
           <p className="text-sm text-neutral-500">{state.label}</p>
+          <button
+            type="button"
+            onClick={cancelLoading}
+            className="mt-1 text-xs text-neutral-400 underline-offset-2 transition hover:text-neutral-700 hover:underline"
+          >
+            Cancel · Esc
+          </button>
         </div>
       )}
 
@@ -396,10 +538,18 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
             })}
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100">
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-neutral-100">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" onClick={goBack}>
+                Back
+              </Button>
+              <Button variant="ghost" onClick={() => router.push(backHref)}>
+                Cancel
+              </Button>
+            </div>
             <Button onClick={submitAnswers} disabled={!questionsReady}>
               <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-              Continue
+              {forward.length ? "Next" : "Continue"}
             </Button>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { getPrdsByProject } from "@/lib/actions/prds";
 import { QuoteWizard } from "@/components/quote/quote-wizard";
+import { STREAMING_ENABLED } from "@/lib/ai/client";
 
 export const metadata = { title: "New Quote" };
 
@@ -37,6 +38,7 @@ export default async function NewProjectQuotePage({
           initialTitle={`${project.name} — Quote`}
           prds={wizardPrds}
           initialPrdId={initialPrdId}
+          streamingEnabled={STREAMING_ENABLED}
         />
       </div>
     </main>

@@ -3,7 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { CalendarDays, Check, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { updateTaskStatus } from "@/lib/actions/tasks";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { ApprovalPill } from "@/components/approval-pill";
@@ -29,6 +31,7 @@ interface TaskCardProps {
 
 export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
   const [isDragging, setIsDragging] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
   const nextStatus = NEXT_STATUS[task.status];
@@ -46,6 +49,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
   }
 
   return (
+    <>
     <div
       className={`krowe-card priority-${task.priority} status-${task.status} ${isDragging ? "dragging" : ""}`}
       draggable
@@ -118,17 +122,27 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
           <button
             className="krowe-iconbtn danger"
             title="Delete task"
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
-              if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+              if (
+                !(await confirm({
+                  title: `Delete “${task.title}”?`,
+                  description: "This permanently removes the task. This can’t be undone.",
+                  confirmText: "Delete task",
+                  cancelText: "Cancel",
+                  icon: Trash2,
+                  tone: "danger",
+                }))
+              )
+                return;
               import("@/lib/actions/tasks")
                 .then(({ deleteTask }) => deleteTask(task.id))
                 .then((res) => {
                   if (res && typeof res === "object" && "error" in res && res.error) {
-                    alert(res.error as string);
+                    toast.error(res.error as string);
                   }
                 })
-                .catch(() => alert("Couldn't delete the task. Please try again."));
+                .catch(() => toast.error("Couldn't delete the task. Please try again."));
             }}
           >
             <Trash2 width={14} height={14} />
@@ -148,5 +162,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
         </span>
       </div>
     </div>
+    {confirmDialog}
+    </>
   );
 }

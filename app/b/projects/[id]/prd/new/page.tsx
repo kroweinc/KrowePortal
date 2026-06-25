@@ -3,6 +3,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { PrdWizard } from "@/components/prd/prd-wizard";
+import { STREAMING_ENABLED } from "@/lib/ai/client";
 
 export const metadata = { title: "New PRD" };
 
@@ -30,6 +31,7 @@ export default async function NewProjectPrdPage({
         backHref={`/b/projects/${id}`}
         initialTitle={`${project.name} — PRD`}
         initialSopTranscripts={sopTranscripts}
+        streamingEnabled={STREAMING_ENABLED}
       />
     </main>
   );

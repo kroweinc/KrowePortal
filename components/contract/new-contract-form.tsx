@@ -6,13 +6,13 @@
    Notes are optional — a contract can be drafted purely from the selected
    quote + PRD. Mirrors new-doc-form.tsx's action/toast plumbing. */
 
-import { useActionState, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { FileText, Receipt } from "lucide-react";
+import { FileText, Receipt, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-type ActionResult = { error: string } | undefined;
-type DocAction = (formData: FormData) => Promise<{ error: string } | void>;
+type DocAction = (formData: FormData) => Promise<{ error: string } | { contractId: string }>;
 
 export interface ContractDocOption {
   id: string;
@@ -43,24 +43,60 @@ export function NewContractForm({
   defaultQuoteId,
   defaultPrdId,
 }: Props) {
+  const router = useRouter();
   const [title, setTitle] = useState(initialTitle ?? "");
   const [quoteId, setQuoteId] = useState<string>(defaultQuoteId ?? "");
   const [prdId, setPrdId] = useState<string>(defaultPrdId ?? "");
+  const [isPending, setIsPending] = useState(false);
+  // Bumping this abandons an in-flight draft so a cancelled generation can't
+  // navigate away when it finally resolves on the server.
+  const genId = useRef(0);
 
-  const [state, formAction, isPending] = useActionState<ActionResult, FormData>(
-    async (_prev, formData) => {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (isPending) return;
+    const formData = new FormData(e.currentTarget);
+    const myGen = ++genId.current;
+    setIsPending(true);
+    try {
       const result = await action(formData);
-      return result ?? undefined;
-    },
-    undefined
-  );
+      if (myGen !== genId.current) return; // cancelled — ignore the result
+      if ("error" in result) {
+        toast.error(result.error);
+        setIsPending(false);
+        return;
+      }
+      // Leave the spinner up through the navigation that unmounts this form.
+      router.push(`/b/projects/${projectId}/contract/${result.contractId}`);
+    } catch (err) {
+      if (myGen !== genId.current) return;
+      toast.error(err instanceof Error ? err.message : "Couldn't draft the contract.");
+      setIsPending(false);
+    }
+  }
 
+  // Cancel an in-progress draft: abandon the result and restore the form (the
+  // builder's title / quote / PRD / notes are all preserved).
+  function cancel() {
+    genId.current += 1;
+    setIsPending(false);
+  }
+
+  // Esc cancels an in-progress draft, mirroring the Cancel button.
   useEffect(() => {
-    if (state && "error" in state) toast.error(state.error);
-  }, [state]);
+    if (!isPending) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancel();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isPending]);
 
   return (
-    <form action={formAction} className="space-y-8">
+    <form onSubmit={handleSubmit} className="space-y-8">
       <input type="hidden" name="projectId" value={projectId} />
       {/* Radios are controlled in state and mirrored into these hidden fields,
           so the selected ids (or "" for none) post with the form. */}
@@ -123,10 +159,33 @@ export function NewContractForm({
         </Field>
       </Section>
 
-      <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100">
-        <Button type="submit" disabled={isPending}>
-          {isPending ? "Drafting…" : "Generate contract draft"}
-        </Button>
+      <div className="flex items-center justify-end gap-3 pt-2 border-t border-neutral-100">
+        {isPending ? (
+          <>
+            <span className="flex items-center gap-2 text-sm text-neutral-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Drafting…
+            </span>
+            <button
+              type="button"
+              onClick={cancel}
+              className="text-xs text-neutral-400 underline-offset-2 transition hover:text-neutral-700 hover:underline"
+            >
+              Cancel · Esc
+            </button>
+          </>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => router.push(`/b/projects/${projectId}`)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">Generate contract draft</Button>
+          </>
+        )}
       </div>
     </form>
   );

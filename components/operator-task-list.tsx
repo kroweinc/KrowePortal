@@ -9,6 +9,7 @@ import { ApprovalPill } from "@/components/approval-pill";
 import { PlainEnglishProvider } from "@/components/plain-english-context";
 import { deleteTask } from "@/lib/actions/tasks";
 import { sortByPriority } from "@/lib/utils";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { Task } from "@/lib/types";
 
 const STATUS_ORDER = ["inbox", "in_progress", "blocked", "done"] as const;
@@ -29,6 +30,7 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("task"));
+  const [confirm, confirmDialog] = useConfirm();
 
   const selectedTask = tasks.find((t) => t.id === selectedId) ?? null;
 
@@ -95,9 +97,19 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
                       <button
                         className="krowe-iconbtn danger"
                         title="Delete task"
-                        onClick={(e) => {
+                        onClick={async (e) => {
                           e.stopPropagation();
-                          if (!window.confirm(`Delete "${task.title}"?`)) return;
+                          if (
+                            !(await confirm({
+                              title: `Delete “${task.title}”?`,
+                              description: "This permanently removes the task. This can’t be undone.",
+                              confirmText: "Delete task",
+                              cancelText: "Cancel",
+                              icon: Trash2,
+                              tone: "danger",
+                            }))
+                          )
+                            return;
                           deleteTask(task.id).then(() => router.refresh());
                         }}
                       >
@@ -117,6 +129,7 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
         currentUserId={currentUserId}
         onOpenChange={(open) => !open && syncSelected(null)}
       />
+      {confirmDialog}
     </PlainEnglishProvider>
   );
 }
