@@ -13,12 +13,30 @@
 import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Pencil, Link2, Download, Trash2 } from "lucide-react";
+import { Pencil, Link2, Link2Off, RotateCw, Download, Trash2 } from "lucide-react";
 import { useContextMenu, type MenuItem } from "@/components/ui/context-menu";
 import { useConfirm, usePrompt } from "@/components/ui/confirm-dialog";
-import { deletePrd, updatePrdContent, sendPrd } from "@/lib/actions/prds";
-import { deleteQuote, updateQuoteContent, sendQuote } from "@/lib/actions/quote-docs";
-import { deleteContract, updateContractContent, sendContract } from "@/lib/actions/contracts";
+import {
+  deletePrd,
+  updatePrdContent,
+  sendPrd,
+  revokePrdShareLink,
+  reissuePrdShareLink,
+} from "@/lib/actions/prds";
+import {
+  deleteQuote,
+  updateQuoteContent,
+  sendQuote,
+  revokeQuoteShareLink,
+  reissueQuoteShareLink,
+} from "@/lib/actions/quote-docs";
+import {
+  deleteContract,
+  updateContractContent,
+  sendContract,
+  revokeContractShareLink,
+  reissueContractShareLink,
+} from "@/lib/actions/contracts";
 
 export type DocKind = "prd" | "quote" | "contract";
 
@@ -38,6 +56,8 @@ interface KindHandlers {
   publish: (
     id: string
   ) => Promise<{ success: true } | { success: true; effectiveDate: string } | { error: string }>;
+  revoke: (id: string) => Promise<{ success: true } | { error: string }>;
+  reissue: (id: string) => Promise<{ success: true; token: string } | { error: string }>;
   /** Public share path segment: /{path}/{token}. */
   path: string;
 }
@@ -47,18 +67,24 @@ const KIND: Record<DocKind, KindHandlers> = {
     del: deletePrd,
     rename: (id, t) => updatePrdContent(id, { title: t }),
     publish: sendPrd,
+    revoke: revokePrdShareLink,
+    reissue: reissuePrdShareLink,
     path: "prd",
   },
   quote: {
     del: deleteQuote,
     rename: (id, t) => updateQuoteContent(id, { title: t }),
     publish: sendQuote,
+    revoke: revokeQuoteShareLink,
+    reissue: reissueQuoteShareLink,
     path: "quotes",
   },
   contract: {
     del: deleteContract,
     rename: (id, t) => updateContractContent(id, { title: t }),
     publish: (id) => sendContract(id),
+    revoke: revokeContractShareLink,
+    reissue: reissueContractShareLink,
     path: "contract",
   },
 };
@@ -135,6 +161,66 @@ export function useDocMenu(doc: DocRef) {
               toast.message("Copy this link", { description: url });
             }
             if (isDraft) router.refresh();
+          });
+        },
+      },
+      {
+        label: "Generate new link",
+        icon: <RotateCw size={15} strokeWidth={1.9} />,
+        // A draft has never been shared — nothing to rotate yet.
+        disabled: isDraft,
+        disabledReason: "Share the document first",
+        onSelect: async () => {
+          if (
+            !(await confirm({
+              title: "Generate a new share link?",
+              description: "Anyone using the old link will lose access. You'll get a fresh link to share.",
+              confirmText: "Generate new link",
+              cancelText: "Keep current link",
+            }))
+          )
+            return;
+          startTransition(async () => {
+            const r = await k.reissue(doc.id);
+            if (isErr(r)) {
+              toast.error(r.error);
+              return;
+            }
+            const url = `${window.location.origin}/${k.path}/${r.token}`;
+            try {
+              await navigator.clipboard.writeText(url);
+              toast.success("New share link copied");
+            } catch {
+              toast.message("Copy this link", { description: url });
+            }
+            router.refresh();
+          });
+        },
+      },
+      {
+        label: "Revoke share link",
+        icon: <Link2Off size={15} strokeWidth={1.9} />,
+        destructive: true,
+        // A draft has never been shared — nothing to revoke yet.
+        disabled: isDraft,
+        disabledReason: "Share the document first",
+        onSelect: async () => {
+          if (
+            !(await confirm({
+              title: "Revoke this share link?",
+              description: "Anyone with the current link will lose access. Generate a new link to re-share.",
+              tone: "danger",
+              confirmText: "Revoke link",
+            }))
+          )
+            return;
+          startTransition(async () => {
+            const r = await k.revoke(doc.id);
+            if (isErr(r)) toast.error(r.error);
+            else {
+              toast.success("Share link revoked");
+              router.refresh();
+            }
           });
         },
       },
