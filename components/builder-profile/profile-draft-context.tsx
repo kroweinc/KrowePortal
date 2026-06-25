@@ -72,6 +72,8 @@ export interface ProfileDraft {
   githubUsername: string | null;
   githubSyncedAt: string | null;
   token: string;
+  tokenExpiresAt: string | null;
+  tokenRevokedAt: string | null;
   isPublished: boolean;
 }
 
@@ -149,6 +151,8 @@ function seedFromBundle(bundle: BuilderProfileBundle): ProfileDraft {
     githubUsername: bundle.githubUsername,
     githubSyncedAt: p.github_synced_at,
     token: p.token,
+    tokenExpiresAt: p.token_expires_at,
+    tokenRevokedAt: p.token_revoked_at,
     isPublished: p.is_published,
   };
 }
@@ -334,6 +338,8 @@ export function ProfileDraftProvider({
       githubUsername: bundle.githubUsername,
       githubSyncedAt: p.github_synced_at,
       token: p.token,
+      tokenExpiresAt: p.token_expires_at,
+      tokenRevokedAt: p.token_revoked_at,
       isPublished: p.is_published,
     };
 
@@ -426,7 +432,14 @@ export function draftToPublicProfile(
     hasResume: draft.hasResume,
     githubUsername: draft.githubUsername,
     githubSyncedAt: draft.githubSyncedAt,
-    projects: draft.projects,
+    // Tech badges render as plain text pills in the live preview: brand-glyph
+    // resolution is server-only (keeps `simple-icons` out of the client bundle),
+    // and the draft is live client state with no server round-trip. The published
+    // public page resolves the real brand logos server-side.
+    projects: draft.projects.map((project) => ({
+      ...project,
+      techBadges: project.tech.map((tech) => ({ tech, icon: null })),
+    })),
     experience: draft.experience,
     codingTools: draft.codingTools,
   };

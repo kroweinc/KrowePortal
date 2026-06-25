@@ -155,8 +155,12 @@ export function ProjectList({ projects }: { projects: BuilderProfileProject[] })
                     <Star className="h-3 w-3" /> {project.stars.toLocaleString()}
                   </span>
                 )}
+                {/* Plain text pills in the editor: tags are live, unsaved draft
+                    state, and resolving brand glyphs here would pull the heavy
+                    `simple-icons` table back into the client bundle. The public
+                    profile shows the resolved brand logos (server-resolved). */}
                 {project.tech.map((t) => (
-                  <TechBadge key={t} tech={t} />
+                  <TechBadge key={t} tech={t} icon={null} />
                 ))}
               </div>
               {project.languages && project.languages.length > 0 && (
