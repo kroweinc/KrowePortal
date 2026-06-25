@@ -31,8 +31,13 @@ function env(key) {
   return line ? line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "") : undefined;
 }
 
-const BUILDER = { email: "investinkrowe@krowehub.com", password: "500kPlease@" };
-const OPERATOR = { email: "krowe.internal@krowehub.com", password: "500kPlease@" };
+const DEMO_PASSWORD = env("DEMO_ACCOUNT_PASSWORD");
+if (!DEMO_PASSWORD) {
+  console.error("Missing DEMO_ACCOUNT_PASSWORD in .env.local — set the demo-account password there (never hardcode it).");
+  process.exit(1);
+}
+const BUILDER = { email: "investinkrowe@krowehub.com", password: DEMO_PASSWORD };
+const OPERATOR = { email: "krowe.internal@krowehub.com", password: DEMO_PASSWORD };
 
 const admin = createClient(env("NEXT_PUBLIC_SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), {
   auth: { autoRefreshToken: false, persistSession: false },

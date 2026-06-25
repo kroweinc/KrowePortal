@@ -3,9 +3,10 @@
  * Seed a self-contained DEMO / INVESTOR account against the hosted Supabase project.
  *
  * Creates (idempotent — safe to re-run):
- *   1. A verified builder login        → investinkrowe@krowehub.com / 500kPlease@
+ *   1. A verified builder login        → investinkrowe@krowehub.com
  *      (email_confirm:true, so the unverifiable krowehub.com domain is bypassed)
- *   2. A companion operator ("client") → krowe.internal@krowehub.com / 500kPlease@
+ *   2. A companion operator ("client") → krowe.internal@krowehub.com
+ *      Both share the password in DEMO_ACCOUNT_PASSWORD (.env.local / host env).
  *      This is scaffolding so the builder's board shows a real client name and
  *      operator-requested tasks have proper attribution. It also lets you demo
  *      the *operator* side of the same engagement if you want.
@@ -34,15 +35,20 @@ function env(key) {
 
 const url = env("NEXT_PUBLIC_SUPABASE_URL");
 const serviceKey = env("SUPABASE_SERVICE_ROLE_KEY");
+const demoPassword = env("DEMO_ACCOUNT_PASSWORD");
 if (!url || !serviceKey) {
   console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
+  process.exit(1);
+}
+if (!demoPassword) {
+  console.error("Missing DEMO_ACCOUNT_PASSWORD in .env.local — set the demo-account password there (never hardcode it).");
   process.exit(1);
 }
 const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
 
 // ---- config -----------------------------------------------------------------
-const BUILDER = { email: "investinkrowe@krowehub.com", password: "500kPlease@", name: "Krowe Demo" };
-const OPERATOR = { email: "krowe.internal@krowehub.com", password: "500kPlease@", name: "Krowe Team" };
+const BUILDER = { email: "investinkrowe@krowehub.com", password: demoPassword, name: "Krowe Demo" };
+const OPERATOR = { email: "krowe.internal@krowehub.com", password: demoPassword, name: "Krowe Team" };
 const ENGAGEMENT_TITLE = "Krowe Internal";
 const PROJECT_NAME = "Krowe Internal";
 // Demo operator emails from earlier runs that this theme supersedes — removed on run.
@@ -605,8 +611,8 @@ console.log(`  ✓ Contract (sent, awaiting signature) — token ${contract.toke
 // ---- summary ----------------------------------------------------------------
 console.log("\n────────────────────────────────────────────");
 console.log("DEMO ACCOUNT READY");
-console.log("  Builder login : investinkrowe@krowehub.com   /  500kPlease@   → lands on /b");
-console.log("  Client login  : krowe.internal@krowehub.com  /  500kPlease@   → operator side (optional)");
+console.log("  Builder login : investinkrowe@krowehub.com   (password: DEMO_ACCOUNT_PASSWORD)  → lands on /b");
+console.log("  Client login  : krowe.internal@krowehub.com  (password: DEMO_ACCOUNT_PASSWORD)  → operator side (optional)");
 console.log("  Both emails are force-verified (email_confirm).");
 console.log("  ----------------------------------------------------------");
 console.log("  Project    : Krowe Internal  (1 project · 1 live engagement · 7 tasks)");
