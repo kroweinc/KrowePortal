@@ -4,10 +4,15 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { checkRate } from "@/lib/rate-limit";
 import { notifyUser, docSignedEmail } from "@/lib/email/notify";
 import type { Engagement } from "@/lib/types";
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
+
+// Per-minute limits for public sign/decline (env-tunable, live defaults).
+const SIGN_PER_TOKEN = Number(process.env.RATE_LIMIT_SIGN_TOKEN_PER_MIN ?? 5);
+const SIGN_PER_IP = Number(process.env.RATE_LIMIT_SIGN_IP_PER_MIN ?? 10);
 
 export interface AcceptInput {
   signerName: string;
@@ -21,6 +26,24 @@ type ProjectRef = { id: string; owner_id: string; name: string | null };
 async function clientIp(): Promise<string | null> {
   const hdr = await headers();
   return (hdr.get("x-forwarded-for")?.split(",")[0] ?? hdr.get("x-real-ip") ?? "").trim() || null;
+}
+
+// Per-token + per-IP throttle for the public sign/decline endpoints. Trips if
+// either bucket is exceeded. The IP check is skipped when no forwarded address
+// is present (so unknown-IP callers aren't bucketed together). Fail-open via
+// checkRate. Returns true when the request should be blocked.
+async function signRateLimited(token: string): Promise<boolean> {
+  const byToken = await checkRate({
+    key: `sign:token:${token}`,
+    limit: SIGN_PER_TOKEN,
+    windowSeconds: 60,
+  });
+  if (!byToken.allowed) return true;
+
+  const ip = await clientIp();
+  if (!ip) return false;
+  const byIp = await checkRate({ key: `sign:ip:${ip}`, limit: SIGN_PER_IP, windowSeconds: 60 });
+  return !byIp.allowed;
 }
 
 /**
@@ -125,6 +148,9 @@ async function prepareAccept(
   | { ok: false; error: string }
 > {
   if (!TOKEN_RE.test(token)) return { ok: false, error: "Invalid link." };
+  if (await signRateLimited(token)) {
+    return { ok: false, error: "Too many attempts. Please wait a minute and try again." };
+  }
   const signerName = input.signerName?.trim() ?? "";
   if (signerName.length < 2) return { ok: false, error: "Please type your full name to accept." };
   if (signerName.length > 200) return { ok: false, error: "Name is too long." };
@@ -308,6 +334,9 @@ async function prepareReject(
   | { ok: false; error: string }
 > {
   if (!TOKEN_RE.test(token)) return { ok: false, error: "Invalid link." };
+  if (await signRateLimited(token)) {
+    return { ok: false, error: "Too many attempts. Please wait a minute and try again." };
+  }
 
   const supabase = await createClient();
   const {

@@ -1,7 +1,9 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/server";
+import { checkRate } from "@/lib/rate-limit";
 import { getCurrentProfile } from "@/lib/auth";
+import { resolveTechBadges, type ResolvedTechBadge } from "@/lib/builder-profile/tech-icons";
 import type {
   BuilderProfileCodingTool,
   BuilderProfileExperience,
@@ -10,9 +12,19 @@ import type {
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
 
+// Per-minute cap on public resume fetches per share token (env-tunable). A
+// 64-hex token is itself the capability, so a per-token bucket is sufficient.
+const RESUME_PER_TOKEN = Number(process.env.RATE_LIMIT_RESUME_TOKEN_PER_MIN ?? 20);
+
 // Builder-added badges, capped so a rich profile can't produce an unbounded
 // badge row.
 const MAX_DISPLAY_TAGS = 14;
+
+// A profile project with its tech tags pre-resolved to brand icons on the server,
+// so the public view never imports the heavy `simple-icons` glyph table.
+export type PublicBuilderProfileProject = BuilderProfileProject & {
+  techBadges: ResolvedTechBadge[];
+};
 
 export interface PublicBuilderProfile {
   displayName: string;
@@ -29,7 +41,7 @@ export interface PublicBuilderProfile {
   hasResume: boolean;
   githubUsername: string | null;
   githubSyncedAt: string | null;
-  projects: BuilderProfileProject[];
+  projects: PublicBuilderProfileProject[];
   experience: BuilderProfileExperience[];
   codingTools: BuilderProfileCodingTool[];
 }
@@ -125,7 +137,11 @@ async function assemblePublicProfile(
     avatarUrl = signed?.signedUrl ?? null;
   }
 
-  const projectList = (projects ?? []) as BuilderProfileProject[];
+  // Resolve each project's tech tags to brand icons here on the server so the
+  // public view (and the in-app live preview) never bundle `simple-icons`.
+  const projectList: PublicBuilderProfileProject[] = (
+    (projects ?? []) as BuilderProfileProject[]
+  ).map((project) => ({ ...project, techBadges: resolveTechBadges(project.tech) }));
   const experienceList = (experience ?? []) as BuilderProfileExperience[];
   const codingToolList = (codingTools ?? []) as BuilderProfileCodingTool[];
 
@@ -162,6 +178,12 @@ export async function getPublicResumeUrl(
   token: string
 ): Promise<{ url?: string; error?: string }> {
   if (!TOKEN_RE.test(token)) return { error: "Invalid link." };
+  const rate = await checkRate({
+    key: `resume:token:${token}`,
+    limit: RESUME_PER_TOKEN,
+    windowSeconds: 60,
+  });
+  if (!rate.allowed) return { error: "Too many requests. Please wait a moment." };
 
   const admin = createAdminClient();
   const { data } = await admin
