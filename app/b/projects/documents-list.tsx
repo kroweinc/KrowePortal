@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { ArrowDownNarrowWide, ChevronRight, Plus } from "lucide-react";
 import { Ember } from "@/components/design-atoms";
@@ -27,15 +26,6 @@ export interface DocRow {
   docsDone: number;
 }
 
-type Filter = "all" | DocStatus;
-
-const FILTERS: { key: Filter; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "active", label: "Active" },
-  { key: "won", label: "Won" },
-  { key: "cold", label: "Cold" },
-];
-
 export function DocumentsList({
   rows,
   owner,
@@ -43,17 +33,6 @@ export function DocumentsList({
   rows: DocRow[];
   owner: { name: string; initials: string };
 }) {
-  const [filter, setFilter] = useState<Filter>("all");
-
-  const counts: Record<Filter, number> = {
-    all: rows.length,
-    active: rows.filter((r) => r.status === "active").length,
-    won: rows.filter((r) => r.status === "won").length,
-    cold: rows.filter((r) => r.status === "cold").length,
-  };
-
-  const visible = filter === "all" ? rows : rows.filter((r) => r.status === filter);
-
   return (
     <>
       <div className="krowe-page-head">
@@ -63,7 +42,7 @@ export function DocumentsList({
           </h1>
           <div className="krowe-page-sub">
             <span>
-              {visible.length} project{visible.length === 1 ? "" : "s"}
+              {rows.length} project{rows.length === 1 ? "" : "s"}
             </span>
             <span className="sep">·</span>
             <span className="krowe-quip">
@@ -77,27 +56,20 @@ export function DocumentsList({
       </div>
 
       <div className="krowe-filterbar">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            className={`krowe-filter${filter === f.key ? " on" : ""}`}
-            onClick={() => setFilter(f.key)}
-          >
-            {f.label} <span className="fc">{counts[f.key]}</span>
-          </button>
-        ))}
+        <button type="button" className="krowe-filter on">
+          All <span className="fc">{rows.length}</span>
+        </button>
         <span className="grow" />
         <span className="krowe-sort">
           <ArrowDownNarrowWide width={14} height={14} /> Recently updated
         </span>
       </div>
 
-      {visible.length === 0 ? (
-        <DocsEmpty hasAny={rows.length > 0} />
+      {rows.length === 0 ? (
+        <DocsEmpty />
       ) : (
         <div className="krowe-doc-list">
-          {visible.map((r) => (
+          {rows.map((r) => (
             <Link key={r.id} href={`/b/projects/${r.id}`} className="krowe-doc-card">
               <span className={`krowe-doc-logo ${r.tone}`}>
                 <span className="krowe-doc-mono">{r.initials}</span>
@@ -161,11 +133,11 @@ export function DocumentsList({
   );
 }
 
-function DocsEmpty({ hasAny }: { hasAny: boolean }) {
+function DocsEmpty() {
   return (
     <div className="krowe-doc-empty">
       <Ember size={40} />
-      <p>{hasAny ? "No projects match this filter." : "No projects here yet. What are you preparing for?"}</p>
+      <p>No projects here yet. What are you preparing for?</p>
       <Link href="/b/projects/new" className="krowe-doc-newbtn" style={{ margin: "0 auto" }}>
         <Plus width={16} height={16} /> New document
       </Link>

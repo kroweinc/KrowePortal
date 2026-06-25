@@ -9,7 +9,7 @@ import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
 import { isTaskMember } from "@/lib/actions/task-access";
-import type { TaskStatus, TaskPriority } from "@/lib/types";
+import type { TaskStatus } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();

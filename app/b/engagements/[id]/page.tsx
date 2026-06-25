@@ -5,7 +5,7 @@ import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getMyPendingInvites } from "@/lib/actions/invitations";
 import { getMyBuilderIdentity } from "@/lib/actions/builder-profile";
-import { getPrdsByProject } from "@/lib/actions/prds";
+import { getPrdSummariesByProject } from "@/lib/actions/prds";
 import { getQuotesByProject } from "@/lib/actions/quote-docs";
 import { getContractsByProject } from "@/lib/actions/contracts";
 import { EngagementSettingsCard } from "@/components/engagement-admin/engagement-settings-card";
@@ -97,7 +97,7 @@ export default async function BuilderEngagementPage({
   let docItems: EngagementDocItem[] = [];
   if (projectId) {
     const [prds, quotes, contracts] = await Promise.all([
-      getPrdsByProject(projectId),
+      getPrdSummariesByProject(projectId),
       getQuotesByProject(projectId),
       getContractsByProject(projectId),
     ]);

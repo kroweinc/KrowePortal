@@ -2573,13 +2573,6 @@ button.krowe-desc-inline-text:hover {
 .prdnew .prd-progress-bar { position: relative; width: 100%; height: 6px; border-radius: var(--radius-full); background: var(--border); overflow: hidden; }
 .prdnew .prd-progress-fill { position: absolute; top: 0; left: 0; bottom: 0; border-radius: var(--radius-full); background: linear-gradient(135deg, var(--primary) 0%, var(--primary-accent) 100%); transition: width 300ms var(--ease-out-smooth); }
 .prdnew .prd-progress-meta { width: 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-family: var(--font-mono); font-size: 11.5px; color: var(--muted-foreground); }
-.prdnew .prd-progress-steps { list-style: none; margin: 5px 0 0; padding: 0; display: flex; flex-direction: column; gap: 9px; align-items: flex-start; align-self: center; }
-.prdnew .prd-progress-step { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--faint-foreground); }
-.prdnew .prd-progress-ic { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); background: var(--surface-subtle); color: var(--faint-foreground); }
-.prdnew .prd-progress-step.done { color: var(--muted-foreground); }
-.prdnew .prd-progress-step.done .prd-progress-ic { background: var(--success-soft); color: var(--success); border-color: color-mix(in srgb, var(--success) 26%, transparent); }
-.prdnew .prd-progress-step.cur { color: var(--foreground); font-weight: 500; }
-.prdnew .prd-progress-step.cur .prd-progress-ic { background: var(--primary-soft); color: var(--primary); border-color: color-mix(in srgb, var(--primary) 34%, transparent); }
 .prdnew .prd-progress-cancel { margin-top: 8px; background: none; border: none; padding: 5px 10px; border-radius: 6px; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em; color: var(--muted-foreground); cursor: pointer; transition: color 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth); }
 .prdnew .prd-progress-cancel:hover { color: var(--foreground); background: var(--surface-subtle); }
 
@@ -2713,6 +2706,7 @@ button.krowe-desc-inline-text:hover {
 .prdnew .ed-opt-input:focus-visible + .ed-radio { border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 14%, transparent); }
 
 .prdnew .ed-sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 48px 26px; border-top: 1px solid var(--border); }
+.prdnew .ed-foot-left { display: inline-flex; align-items: center; gap: 16px; }
 .prdnew .ed-kbd { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 6px; border-radius: 5px; background: var(--surface-subtle); border: 1px solid var(--border); }
 
 /* The editorial CTA is the one orange gradient pill (intro CTA stays dark). */
@@ -3039,6 +3033,66 @@ button.krowe-desc-inline-text:hover {
 
 /* live-preview drawer caption */
 .ppsetup-preview-cap { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint-foreground); }
+
+/* ── Live Preview drawer (right-side sheet) ──
+   The profile editor's "Live preview" opens this drawer, styled after the Krowe
+   Design "Live Mirror" handoff: a browser-framed render of the public profile
+   clients see, fed live from the draft. See live-preview-drawer.tsx. */
+.lpd-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-shrink: 0; padding: 15px 18px; background: white;
+  border-bottom: 1px solid var(--border);
+}
+.lpd-acts { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.lpd-viewpublic {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
+  border-radius: var(--radius-md); border: 1px solid var(--border); background: white;
+  font-size: 12.5px; font-weight: 500; color: var(--muted-foreground); cursor: pointer;
+  transition: color 150ms var(--ease-out-smooth), border-color 150ms var(--ease-out-smooth);
+}
+.lpd-viewpublic:hover { color: var(--foreground); border-color: var(--border-strong); }
+.lpd-x {
+  width: 30px; height: 30px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-md); border: 1px solid var(--border);
+  background: white; color: var(--muted-foreground); cursor: pointer;
+  transition: color 150ms var(--ease-out-smooth), border-color 150ms var(--ease-out-smooth);
+}
+.lpd-x:hover { color: var(--foreground); border-color: var(--border-strong); }
+
+.lpd-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px; }
+.lpd-body::-webkit-scrollbar { width: 10px; }
+.lpd-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 999px;
+  border: 3px solid var(--surface-subtle);
+}
+.lpd-frame {
+  border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
+  box-shadow: var(--shadow-2); background: white;
+}
+.lpd-bar {
+  display: flex; align-items: center; gap: 11px; flex-shrink: 0;
+  padding: 9px 13px; background: white; border-bottom: 1px solid var(--border);
+}
+.lpd-dots { display: flex; gap: 6px; flex-shrink: 0; }
+.lpd-dots i {
+  width: 9px; height: 9px; border-radius: 999px;
+  background: var(--surface-sunken); border: 1px solid var(--border-strong);
+}
+.lpd-addr {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  height: 26px; padding: 0 11px; border-radius: var(--radius-full);
+  background: var(--surface-subtle); border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lpd-addr svg { color: var(--success); flex-shrink: 0; }
+.lpd-page {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 16px; background: var(--surface-sunken);
+}
+/* On the framed "page", sections read flatter than floating cards. */
+.lpd-page > header, .lpd-page > section { box-shadow: none; }
 
 /* ── Coding tools: section grid + "Add coding tools" picker ──────────────────
    Ported from the Krowe Design handoff (Profile Setup · Smart Scroll). The

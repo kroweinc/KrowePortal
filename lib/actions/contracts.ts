@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -15,7 +16,12 @@ import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeSopBlock } from "@/lib/project/business-context";
 import { todayISODate, isISODate } from "@/lib/contract/effective-date";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
-import type { Contract, ContractContent, QuoteContent, PrdContent } from "@/lib/types";
+import type { Contract, ContractContent, ContractSummary, QuoteContent, PrdContent } from "@/lib/types";
+
+// Columns for list/summary reads — every Contract field except the heavy
+// `content` jsonb, which no contract list view renders.
+const CONTRACT_SUMMARY_COLUMNS =
+  "id, project_id, created_by, title, status, source_notes, token, sent_at, signed_by_name, signed_at, signer_ip, signature_consent, signed_by_user_id, rejected_at, rejection_note, created_at, updated_at";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
@@ -303,7 +309,7 @@ export async function deleteContract(id: string): Promise<{ success: true } | { 
 
 // Revokes the public share link. The token stays in place but the public lookup
 // rejects a revoked row (migration 0062), immediately killing access via any
-// already-shared/leaked link. (Reissuing a fresh link is a follow-up; no UI yet.)
+// already-shared/leaked link. Reissue (below) mints a fresh link afterward.
 export async function revokeContractShareLink(
   id: string
 ): Promise<{ success: true } | { error: string }> {
@@ -314,7 +320,7 @@ export async function revokeContractShareLink(
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("contracts")
-    .select("created_by, project_id")
+    .select("created_by, project_id, token")
     .eq("id", id)
     .maybeSingle();
 
@@ -327,25 +333,60 @@ export async function revokeContractShareLink(
     .eq("id", id);
   if (error) return { error: error.message };
 
-  revalidatePath(`/b/projects/${before.project_id as string}`);
+  revalidateContract(before.project_id as string, id, before.token as string | null);
   return { success: true };
 }
 
-export async function getContractsByProject(projectId: string): Promise<Contract[]> {
+// Mint a fresh share link: a new token (so old links stay dead), a reset expiry
+// window, and a cleared revocation flag — the re-share path after revoke/expiry.
+export async function reissueContractShareLink(
+  id: string
+): Promise<{ success: true; token: string } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can reissue a link." };
+
+  const supabase = await getClient(profile.id);
+  const { data: before } = await supabase
+    .from("contracts")
+    .select("created_by, project_id, token")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!before) return { error: "Contract not found." };
+  if (before.created_by !== profile.id) return { error: "Not your contract." };
+
+  // supabase-js can't invoke the SQL column default on update, so mint the same
+  // 64-hex shape here; expiry window matches migration 0062 (90 days for docs).
+  const token = randomBytes(32).toString("hex");
+  const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+  const { error } = await supabase
+    .from("contracts")
+    .update({ token, token_expires_at: expires, token_revoked_at: null })
+    .eq("id", id);
+  if (error) return { error: error.message };
+
+  revalidateContract(before.project_id as string, id, before.token as string | null);
+  revalidatePath(`/contract/${token}`);
+  return { success: true, token };
+}
+
+export async function getContractsByProject(projectId: string): Promise<ContractSummary[]> {
   const profile = await getCurrentProfile();
   if (!profile) return [];
 
   const supabase = await getClient(profile.id);
   // Owner-scoped (created_by == project owner). RLS enforces this for the normal
   // client; the dev admin client bypasses RLS, so we replicate the scope here.
+  // List read: omit the heavy `content` jsonb (unused by every contract list view).
   const { data } = await supabase
     .from("contracts")
-    .select("*")
+    .select(CONTRACT_SUMMARY_COLUMNS)
     .eq("project_id", projectId)
     .eq("created_by", profile.id)
     .order("created_at", { ascending: false });
 
-  return (data ?? []) as Contract[];
+  return (data ?? []) as ContractSummary[];
 }
 
 export async function getContractById(id: string): Promise<Contract | null> {

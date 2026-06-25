@@ -205,9 +205,6 @@ function TaskDetailBody({
   const deliverableAttachments = (task.task_attachments ?? []).filter(
     (a) => a.is_deliverable,
   );
-  const regularAttachments = (task.task_attachments ?? []).filter(
-    (a) => !a.is_deliverable,
-  );
   const hasDeliverable = task.status === "done";
   const hasDeliverableSummary =
     task.pushed_to_main || task.completion_note || deliverableAttachments.length > 0;
@@ -383,7 +380,7 @@ function TaskDetailBody({
                 taskId={task.id}
                 role={role}
                 currentUserId={currentUserId}
-                initial={deliverableAttachments}
+                initial={[]}
                 isDeliverable={true}
                 readOnly={true}
               />
@@ -420,7 +417,7 @@ function TaskDetailBody({
               taskId={task.id}
               role={role}
               currentUserId={currentUserId}
-              initial={regularAttachments}
+              initial={[]}
               isDeliverable={false}
             />
           </div>

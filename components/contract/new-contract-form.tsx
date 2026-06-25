@@ -93,7 +93,6 @@ export function NewContractForm({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPending]);
 
   return (
@@ -176,7 +175,16 @@ export function NewContractForm({
             </button>
           </>
         ) : (
-          <Button type="submit">Generate contract draft</Button>
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => router.push(`/b/projects/${projectId}`)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">Generate contract draft</Button>
+          </>
         )}
       </div>
     </form>

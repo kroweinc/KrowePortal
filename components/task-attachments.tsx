@@ -63,6 +63,7 @@ export function TaskAttachments({
   readOnly = false,
 }: TaskAttachmentsProps) {
   const [attachments, setAttachments] = useState<TaskAttachment[]>(initial);
+  const [loading, setLoading] = useState(initial.length === 0);
   const [isPending, startTransition] = useTransition();
   const [collapsed, setCollapsed] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>(null);
@@ -73,12 +74,14 @@ export function TaskAttachments({
 
   useEffect(() => {
     if (initial.length > 0) return;
+    setLoading(true);
     fetch(`/api/attachments?taskId=${taskId}&isDeliverable=${isDeliverable}`)
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) setAttachments(data);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, [taskId, initial.length, isDeliverable]);
 
   function closeAdd() {
@@ -333,7 +336,9 @@ export function TaskAttachments({
         />
       )}
 
-      {!collapsed && attachments.length === 0 && !isDeliverable ? (
+      {!collapsed && loading ? (
+        <p className="py-1 text-xs text-neutral-400">Loading attachments…</p>
+      ) : !collapsed && attachments.length === 0 && !isDeliverable ? (
         <p className="py-1 text-xs text-neutral-400">No attachments</p>
       ) : !collapsed ? (
         <ul className="space-y-1.5">

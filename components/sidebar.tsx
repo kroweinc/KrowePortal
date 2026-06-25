@@ -76,8 +76,10 @@ export function Sidebar({ tabs, basePath }: SidebarProps) {
   return (
     <aside className="krowe-sidebar">
       <div className="krowe-sidebar-brand">
+        {/* Intrinsic dimensions (493×506) reserve the logo's space before load to
+            avoid CLS; CSS (.krowe-sidebar-brand img) scales it to height:26px. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={assetUrl("/KroweIcon.png")} alt="Krowe" />
+        <img src={assetUrl("/KroweIcon.png")} alt="Krowe" width={493} height={506} />
         <span className="krowe-sidebar-word">Krowe</span>
       </div>
 

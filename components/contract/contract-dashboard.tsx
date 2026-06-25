@@ -28,6 +28,7 @@ import { ContractDocument } from "@/components/contract/contract-document";
 import { useTodayISODate } from "@/lib/contract/use-today";
 import { formatEffectiveDate } from "@/lib/contract/effective-date";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
+import { ShareLinkControls } from "@/components/doc/share-link-controls";
 import { EditContext, InlineText } from "@/components/prd/dashboard/inline-edit";
 import { EditorSection, TextField, StringListEditor } from "@/components/doc/editor-primitives";
 import { formatUSD, parseMoney } from "@/lib/quote/format";
@@ -283,6 +284,14 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
             <button type="button" className="prd-btn prd-btn--outline" onClick={copyLink} disabled={isPending}>
               <Link2 className="h-3.5 w-3.5" /> Copy link
             </button>
+            <ShareLinkControls
+              kind="contract"
+              id={contract.id}
+              token={contract.token}
+              expiresAt={contract.token_expires_at}
+              revokedAt={contract.token_revoked_at}
+              isDraft={isDraft}
+            />
             {editing && (
               <div className="dash-actions">
                 {isDraft && (
