@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { recordDocumentEvent } from "@/lib/context/document-events";
 import type { Engagement } from "@/lib/types";
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
@@ -172,7 +173,7 @@ async function prepareAccept(
 export async function acceptAndSignQuote(token: string, input: AcceptInput): Promise<AcceptResult> {
   const prep = await prepareAccept("quotes", token, input);
   if (!prep.ok) return { error: prep.error };
-  const { admin, user, signerName, docId, projectId } = prep;
+  const { admin, user, engagement, signerName, docId, projectId } = prep;
 
   const ip = await clientIp();
   const now = new Date().toISOString();
@@ -194,6 +195,16 @@ export async function acceptAndSignQuote(token: string, input: AcceptInput): Pro
   if (error) return { error: error.message };
   if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
 
+  await recordDocumentEvent({
+    docKind: "quote",
+    docId,
+    engagementId: engagement.id,
+    eventType: "signed",
+    actorId: user.id,
+    actorRole: "client",
+    payload: { signerName, signerIp: ip, accepted: true },
+  });
+
   revalidatePath(`/quotes/${token}`);
   revalidatePath(`/o/quotes/${token}`);
   revalidatePath(`/b/projects/${projectId}`);
@@ -205,7 +216,7 @@ export async function acceptAndSignQuote(token: string, input: AcceptInput): Pro
 export async function acceptAndSignContract(token: string, input: AcceptInput): Promise<AcceptResult> {
   const prep = await prepareAccept("contracts", token, input);
   if (!prep.ok) return { error: prep.error };
-  const { admin, user, signerName, docId, projectId } = prep;
+  const { admin, user, engagement, signerName, docId, projectId } = prep;
 
   const ip = await clientIp();
   const now = new Date().toISOString();
@@ -225,6 +236,16 @@ export async function acceptAndSignContract(token: string, input: AcceptInput): 
     .select("id");
   if (error) return { error: error.message };
   if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
+
+  await recordDocumentEvent({
+    docKind: "contract",
+    docId,
+    engagementId: engagement.id,
+    eventType: "signed",
+    actorId: user.id,
+    actorRole: "client",
+    payload: { signerName, signerIp: ip },
+  });
 
   // A signed contract means the deal is won — only flip active projects.
   await admin
@@ -253,7 +274,7 @@ export async function acceptAndSignContract(token: string, input: AcceptInput): 
 export async function acceptAndSignPrd(token: string, input: AcceptInput): Promise<AcceptResult> {
   const prep = await prepareAccept("prds", token, input);
   if (!prep.ok) return { error: prep.error };
-  const { admin, user, signerName, docId, projectId } = prep;
+  const { admin, user, engagement, signerName, docId, projectId } = prep;
 
   const ip = await clientIp();
   const now = new Date().toISOString();
@@ -273,6 +294,16 @@ export async function acceptAndSignPrd(token: string, input: AcceptInput): Promi
     .select("id");
   if (error) return { error: error.message };
   if (!signedRows?.length) return { error: "This document is not awaiting acceptance." };
+
+  await recordDocumentEvent({
+    docKind: "prd",
+    docId,
+    engagementId: engagement.id,
+    eventType: "signed",
+    actorId: user.id,
+    actorRole: "client",
+    payload: { signerName, signerIp: ip },
+  });
 
   revalidatePath(`/prd/${token}`);
   revalidatePath(`/o/prd/${token}`);
@@ -338,17 +369,28 @@ async function rejectDoc(
   const { admin, projectId, docId } = prep;
 
   const now = new Date().toISOString();
+  const cleanNote = note.trim().slice(0, 2000) || null;
   const { error } = await admin
     .from(table)
     .update({
       status: "rejected",
       rejected_at: now,
-      rejection_note: note.trim().slice(0, 2000) || null,
+      rejection_note: cleanNote,
       updated_at: now,
     })
     .eq("token", token)
     .eq("status", "sent");
   if (error) return { error: error.message };
+
+  const docKind = ({ quotes: "quote", contracts: "contract", prds: "prd" } as const)[table];
+  await recordDocumentEvent({
+    docKind,
+    docId,
+    projectId,
+    eventType: "rejected",
+    actorRole: "client",
+    payload: cleanNote ? { rejectionNote: cleanNote } : {},
+  });
 
   revalidatePath(`${publicPathPrefix}/${token}`);
   revalidatePath(`/o${publicPathPrefix}/${token}`);

@@ -256,8 +256,11 @@ export const PrdContentSchema = z.object({
 });
 
 // While the wizard may still ask more questions: questions OR a finished PRD.
+// The PRD interview is sequential — exactly ONE question per response — so the
+// next question can build on the answer just given. min(1) makes a single
+// question valid; max(2) tolerates a rare model slip without a hard failure.
 export const PrdGenerationResult = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("questions"), items: z.array(Question).min(2).max(5) }),
+  z.object({ kind: z.literal("questions"), items: z.array(Question).min(1).max(2) }),
   z.object({
     kind: z.literal("prd"),
     content: PrdContentSchema,

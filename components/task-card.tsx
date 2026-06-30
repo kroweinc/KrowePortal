@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, Trash2 } from "lucide-react";
-import { updateTaskStatus } from "@/lib/actions/tasks";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { ArrowRight, CalendarDays, Check, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
+import { updateTaskStatus, deleteTask } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { ApprovalPill } from "@/components/approval-pill";
 import { DeliveryChips } from "@/components/design-atoms";
+import { useContextMenu, ContextMenu, type MenuItem } from "@/components/ui/context-menu";
 import type { Task, Role, TaskStatus } from "@/lib/types";
 
 const NEXT_STATUS: Record<TaskStatus, TaskStatus | null> = {
@@ -28,11 +31,14 @@ interface TaskCardProps {
 }
 
 export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
+  const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
+  const menu = useContextMenu();
   const nextStatus = NEXT_STATUS[task.status];
   const sourceLabel = task.source === "operator_request" ? "operator" : "builder";
+  const taskHref = `/${role === "operator" ? "o" : "b"}/tasks/${task.id}`;
 
   async function handleAdvance() {
     if (!nextStatus) return;
@@ -45,10 +51,46 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
     }
   }
 
+  function handleDelete() {
+    if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+    deleteTask(task.id)
+      .then((res) => {
+        if (res && typeof res === "object" && "error" in res && res.error) {
+          toast.error(res.error as string);
+        }
+      })
+      .catch(() => toast.error("Couldn't delete the task. Please try again."));
+  }
+
+  const menuItems: MenuItem[] = [
+    {
+      label: "Open",
+      icon: <ExternalLink size={15} strokeWidth={1.9} />,
+      onSelect: () => (onSelect ? onSelect(task) : router.push(taskHref)),
+    },
+    ...(role === "builder" && nextStatus
+      ? [
+          {
+            label: `Move to ${ADVANCE_LABEL[task.status]}`,
+            icon: <ArrowRight size={15} strokeWidth={1.9} />,
+            onSelect: handleAdvance,
+          },
+        ]
+      : []),
+    {
+      label: "Delete",
+      icon: <Trash2 size={15} strokeWidth={1.9} />,
+      destructive: true,
+      separatorBefore: true,
+      onSelect: handleDelete,
+    },
+  ];
+
   return (
     <div
       className={`krowe-card priority-${task.priority} status-${task.status} ${isDragging ? "dragging" : ""}`}
       draggable
+      onContextMenu={menu.openAtEvent}
       onDragStart={(e) => {
         setIsDragging(true);
         e.dataTransfer.setData("taskId", task.id);
@@ -105,34 +147,31 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
           </span>
           <span className={`krowe-chip krowe-chip-source ${sourceLabel}`}>{sourceLabel}</span>
         </div>
-        <div className="krowe-card-actions">
-          {role === "builder" && nextStatus && (
-            <button
-              className="krowe-advance-btn"
-              onClick={(e) => { e.stopPropagation(); handleAdvance(); }}
-            >
-              <span style={{ fontFamily: "var(--font-mono)" }}>→</span>
-              {ADVANCE_LABEL[task.status]}
-            </button>
-          )}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <div className="krowe-card-actions">
+            {role === "builder" && nextStatus && (
+              <button
+                className="krowe-advance-btn"
+                onClick={(e) => { e.stopPropagation(); handleAdvance(); }}
+              >
+                <span style={{ fontFamily: "var(--font-mono)" }}>→</span>
+                {ADVANCE_LABEL[task.status]}
+              </button>
+            )}
+          </div>
           <button
-            className="krowe-iconbtn danger"
-            title="Delete task"
+            type="button"
+            className="ctx-kebab"
+            title="Task actions"
+            aria-label="Task actions"
             onClick={(e) => {
               e.stopPropagation();
-              if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
-              import("@/lib/actions/tasks")
-                .then(({ deleteTask }) => deleteTask(task.id))
-                .then((res) => {
-                  if (res && typeof res === "object" && "error" in res && res.error) {
-                    alert(res.error as string);
-                  }
-                })
-                .catch(() => alert("Couldn't delete the task. Please try again."));
+              menu.openAtAnchor(e.currentTarget);
             }}
           >
-            <Trash2 width={14} height={14} />
+            <MoreHorizontal width={16} height={16} />
           </button>
+          <ContextMenu state={menu.state} items={menuItems} onClose={menu.close} />
         </div>
       </div>
 

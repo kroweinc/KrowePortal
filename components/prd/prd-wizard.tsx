@@ -48,7 +48,22 @@ const isRealOption = (opt: string) => {
 const matchesRecommended = (opt: string, rec?: string) =>
   !!rec && opt.trim().toLowerCase() === rec.trim().toLowerCase();
 
+// Soft caps mirroring the server's question limits (lib/actions/prds.ts) so the
+// progress track reflects roughly how far along the sequential interview is.
+// Cosmetic only — the server owns the real cap and forced-final behavior.
+const SOFT_TARGET = 10;
+const SOFT_TARGET_DEEP = 14;
+
 type AnswerEntry = { questionId: string; question: string; answer: string };
+
+// One answered step of the sequential interview, retained so "Back" can restore
+// the exact prior question + the builder's selection without a server round-trip.
+type Step = {
+  items: Question[];
+  selections: Record<string, string[]>;
+  otherText: Record<string, string>;
+  answers: AnswerEntry[];
+};
 
 type WizardState =
   | { kind: "intro" }
@@ -120,7 +135,7 @@ function WzProgress({ label, index, total }: { label: string; index: number; tot
           {label}
         </span>
         <span className="wz-progress-count">
-          <b>{String(Math.min(index + 1, total)).padStart(2, "0")}</b> / {String(total).padStart(2, "0")}
+          Question <b>{String(index + 1).padStart(2, "0")}</b>
         </span>
       </div>
       <div className="wz-progress-track">
@@ -150,8 +165,8 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
             <span className="ed-doc-meta">{docMeta}</span>
           </div>
           <div className="ed-fill">
-            {facts.map((f) => (
-              <div key={f.key} className={`ed-fact ${f.status}`}>
+            {facts.map((f, i) => (
+              <div key={`${i}-${f.key}`} className={`ed-fact ${f.status}`}>
                 <span className="ed-fact-k">
                   {f.status === "done" ? (
                     <Check size={12} strokeWidth={3} />
@@ -231,13 +246,21 @@ export function PrdWizard({
 
   const [title, setTitle] = useState(initialTitle);
   const [notes, setNotes] = useState("");
-  const [round, setRound] = useState(0);
+  // Answered steps, newest last — drives "Back" between sequential questions.
+  const [history, setHistory] = useState<Step[]>([]);
   const [answers, setAnswers] = useState<AnswerEntry[]>([]);
   const [state, setState] = useState<WizardState>({ kind: "intro" });
   // Always points at the latest state so queued auto-advance timers and the
   // global keydown handler read fresh selections/cursor, never a stale closure.
   const stateRef = useRef(state);
   stateRef.current = state;
+  // Mirror latest answers/history too: the keydown handler and queued auto-advance
+  // timers only re-subscribe on a state.kind change, but "Back" mutates these
+  // WITHOUT one — so reading the live ref is the only stale-proof source.
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const historyRef = useRef(history);
+  historyRef.current = history;
   // Pending single-select auto-advance timer.
   const advTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Cosmetic only — the server decides behavior from the (empty) notes each round.
@@ -318,7 +341,7 @@ export function PrdWizard({
     });
   }
 
-  function run(nextAnswers: AnswerEntry[], nextRound: number, label: string) {
+  function run(nextAnswers: AnswerEntry[], nextRound: number, label: string, finalize = false) {
     setState({ kind: "loading", label });
     startTransition(async () => {
       const result = await draftPrd({
@@ -327,6 +350,7 @@ export function PrdWizard({
         notes: notes.trim() || undefined,
         answers: nextAnswers,
         round: nextRound,
+        finalize: finalize || undefined,
       });
 
       if ("error" in result) {
@@ -368,7 +392,7 @@ export function PrdWizard({
     }
     setDeepMode(!notes.trim());
     setAnswers([]);
-    setRound(0);
+    setHistory([]);
     run([], 0, notes.trim() ? "Reading your notes…" : "Preparing questions…");
   }
 
@@ -407,11 +431,39 @@ export function PrdWizard({
       question: q.text,
       answer: answerFor(q, s.selections, s.otherText),
     }));
-    const merged = [...answers, ...roundAnswers];
-    const nextRound = round + 1;
+    // Remember this step so the next question can be left via "Back".
+    const step: Step = {
+      items: s.items,
+      selections: s.selections,
+      otherText: s.otherText,
+      answers: roundAnswers,
+    };
+    const merged = [...answersRef.current, ...roundAnswers];
+    // The server forces the final PRD once the answer count hits the cap; mirror
+    // that here only to choose the right loading label.
+    const cap = deepMode ? SOFT_TARGET_DEEP : SOFT_TARGET;
+    const finalizing = merged.length >= cap;
+    setHistory((h) => [...h, step]);
     setAnswers(merged);
-    setRound(nextRound);
-    run(merged, nextRound, "Putting your PRD together…");
+    run(merged, merged.length, finalizing ? "Putting your PRD together…" : "Reading your answer…");
+  }
+
+  // Escape hatch: stop interviewing and generate the PRD from whatever's been
+  // answered so far (including the current question if it's been answered).
+  function finishNow() {
+    clearAdvTimer();
+    const s = stateRef.current;
+    let merged = answersRef.current;
+    if (s.kind === "questions") {
+      const answeredNow = s.items
+        .map((q) => ({ questionId: q.id, question: q.text, answer: answerFor(q, s.selections, s.otherText) }))
+        .filter((a) => a.answer.length > 0);
+      if (answeredNow.length) {
+        merged = [...answersRef.current, ...answeredNow];
+        setAnswers(merged);
+      }
+    }
+    run(merged, merged.length, "Putting your PRD together…", true);
   }
 
   function clearAdvTimer() {
@@ -443,9 +495,25 @@ export function PrdWizard({
     if (s.kind !== "questions") return;
     if (s.cursor > 0) {
       setState((prev) => (prev.kind === "questions" ? { ...prev, cursor: prev.cursor - 1 } : prev));
-    } else {
-      router.push(backHref);
+      return;
     }
+    // First question of the current step — step back to the previous question,
+    // restoring its options + the builder's prior selection without a server
+    // call. Its follow-up is discarded and regenerated on the way forward.
+    if (historyRef.current.length > 0) {
+      const prev = historyRef.current[historyRef.current.length - 1];
+      setHistory((h) => h.slice(0, -1));
+      setAnswers((a) => a.slice(0, Math.max(0, a.length - prev.answers.length)));
+      setState({
+        kind: "questions",
+        items: prev.items,
+        selections: prev.selections,
+        otherText: prev.otherText,
+        cursor: 0,
+      });
+      return;
+    }
+    router.push(backHref);
   }
 
   // Pick an option. Single-select auto-advances ~440ms after the choice;
@@ -790,12 +858,16 @@ export function PrdWizard({
         (() => {
           const q = state.items[state.cursor];
           if (!q) return null;
-          const total = state.items.length;
           const selected = state.selections[q.id] ?? [];
           const otherOn = selected.includes(OTHER);
-          const isLast = state.cursor === total - 1;
           const answered = answerFor(q, state.selections, state.otherText).length > 0;
           const optList = [...q.options.filter(isRealOption), OTHER];
+          // Sequential interview: position of THIS question across the whole run,
+          // and whether answering it will trip the server's forced-final cap.
+          const cap = deepMode ? SOFT_TARGET_DEEP : SOFT_TARGET;
+          const answeredCount = answers.length + state.cursor;
+          const isRoundLast = state.cursor === state.items.length - 1;
+          const willFinalize = isRoundLast && answeredCount + 1 >= cap;
 
           // Left "draft" doc grows across rounds: answered facts from prior
           // rounds (always done) + this round's questions (active/done/pending).
@@ -828,7 +900,7 @@ export function PrdWizard({
                     <span className="ci">
                       <ArrowLeft size={15} strokeWidth={2} />
                     </span>
-                    {state.cursor === 0 && round === 0 ? "Setup" : "Back"}
+                    {state.cursor === 0 && history.length === 0 ? "Setup" : "Back"}
                   </button>
                   <button type="button" className="linkbtn" onClick={() => router.push(backHref)}>
                     Save &amp; exit
@@ -836,11 +908,11 @@ export function PrdWizard({
                 </div>
 
                 <div className="ed-sheet-body">
-                  <div key={state.cursor} className="ed-sheet-inner ed-anim">
+                  <div key={answeredCount} className="ed-sheet-inner ed-anim">
                     <WzProgress
                       label={deepMode ? "Building the context" : "Sharpening the PRD"}
-                      index={state.cursor}
-                      total={total}
+                      index={answeredCount}
+                      total={cap}
                     />
                     <h1 className="ed-q-text">
                       {q.text}
@@ -911,10 +983,17 @@ export function PrdWizard({
                   <span className="foot-hint">
                     <span className="ed-kbd">1–{optList.length}</span>&nbsp;to pick
                   </span>
-                  <button className="btn-primary" disabled={!answered} onClick={goToNext}>
-                    {isLast ? "Generate my report" : "Next question"}
-                    <ArrowRight size={16} strokeWidth={2} />
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    {answers.length >= 1 && !willFinalize && (
+                      <button type="button" className="linkbtn" onClick={finishNow}>
+                        Generate now
+                      </button>
+                    )}
+                    <button className="btn-primary" disabled={!answered} onClick={goToNext}>
+                      {willFinalize ? "Generate my report" : "Next question"}
+                      <ArrowRight size={16} strokeWidth={2} />
+                    </button>
+                  </div>
                 </div>
               </section>
             </div>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, BookOpen, Briefcase, FileText, Github, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { ArrowLeft, BookOpen, Briefcase, FileText, Github, Library, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getMyPendingInvites } from "@/lib/actions/invitations";
@@ -15,8 +15,12 @@ import { BusinessContactCard } from "@/components/doc/business-contact-card";
 import { BusinessContextCard } from "@/components/dashboard/business-context-card";
 import { BusinessLinksEditor } from "@/components/engagement/business-links-editor";
 import { getBusinessContext } from "@/lib/actions/engagement";
+import { getContextItems } from "@/lib/actions/context";
+import { getClientGraph } from "@/lib/actions/context-graph";
+import { ContextView } from "@/components/context/context-view";
 import { DetailHero } from "@/components/engagement/detail-hero";
 import { EngagementSection } from "@/components/engagement/engagement-section";
+import { EngagementTabs } from "@/components/engagement/engagement-tabs";
 import type { EngagementStatusKind } from "@/components/engagement/engagement-status";
 import {
   EngagementDocuments,
@@ -59,22 +63,25 @@ export default async function BuilderEngagementPage({
   if (!data) notFound();
   const engagement = data as Engagement;
 
-  const [pendingInvites, ghConnection, identity, taskRows, businessContext] = await Promise.all([
-    getMyPendingInvites(),
-    supabase
-      .from("github_connections")
-      .select("id")
-      .eq("user_id", profile.id)
-      .maybeSingle()
-      .then(({ data }) => data),
-    getMyBuilderIdentity(),
-    supabase
-      .from("tasks")
-      .select("status")
-      .eq("engagement_id", id)
-      .then(({ data }) => data ?? []),
-    getBusinessContext(id),
-  ]);
+  const [pendingInvites, ghConnection, identity, taskRows, businessContext, contextItems, clientGraph] =
+    await Promise.all([
+      getMyPendingInvites(),
+      supabase
+        .from("github_connections")
+        .select("id")
+        .eq("user_id", profile.id)
+        .maybeSingle()
+        .then(({ data }) => data),
+      getMyBuilderIdentity(),
+      supabase
+        .from("tasks")
+        .select("status")
+        .eq("engagement_id", id)
+        .then(({ data }) => data ?? []),
+      getBusinessContext(id),
+      getContextItems(id),
+      getClientGraph(id),
+    ]);
 
   const operatorName = engagement.operator?.display_name ?? null;
   const pendingInvite = pendingInvites[engagement.id] ?? null;
@@ -111,6 +118,8 @@ export default async function BuilderEngagementPage({
         status: p.status,
         meta: docMeta(p),
         href: `/b/projects/${projectId}/prd/${p.id}`,
+        docKind: "prd" as const,
+        token: p.token,
       })),
       ...quotes.map((q) => ({
         id: q.id,
@@ -118,6 +127,8 @@ export default async function BuilderEngagementPage({
         status: q.status,
         meta: quoteDocMeta(q),
         href: `/b/projects/${projectId}/quotes/${q.id}`,
+        docKind: "quote" as const,
+        token: q.token,
       })),
       ...contracts.map((c) => ({
         id: c.id,
@@ -125,6 +136,8 @@ export default async function BuilderEngagementPage({
         status: c.status,
         meta: docMeta(c),
         href: `/b/projects/${projectId}/contract/${c.id}`,
+        docKind: "contract" as const,
+        token: c.token,
       })),
     ];
   }
@@ -136,119 +149,138 @@ export default async function BuilderEngagementPage({
   return (
     <main className="krowe-page">
       <div className="krowe-page-inner max-w-3xl">
-        <div className="mb-4">
-          <Link href="/b/engagements" className="eng-backlink">
-            <ArrowLeft size={15} strokeWidth={1.75} /> Clients
-          </Link>
-        </div>
-
-        <DetailHero
-          id={engagement.id}
-          title={engagement.title}
-          sub={heroSub}
-          websiteUrl={engagement.project?.website_url}
-          businessName={engagement.project?.prospect_name ?? engagement.project?.name}
-          statusKind={statusKind}
-          statusLabel={statusLabel}
-          repo={engagement.github_repo_full_name}
-          open={openCount}
-          done={doneCount}
-          badgeUrl={identity?.avatarUrl ?? null}
-          badgeInitials={identity?.initials ?? "•"}
-        />
-
-        <div className="eng-sections">
-          <EngagementSection
-            icon={<Briefcase size={19} strokeWidth={1.75} />}
-            title="Business information"
-            hint="Contact and links for this client — used on docs and the client dashboard."
-          >
-            {engagement.project_id && engagement.project && (
-              <BusinessContactCard
-                contact={engagement.project}
-                variant="inline"
-                showBrand
-              />
-            )}
-            <BusinessLinksEditor
-              engagementId={engagement.id}
-              initialWebsite={engagement.project?.website_url ?? null}
-              initialLinkedin={engagement.project?.linkedin_url ?? null}
-              showTopBorder={!!(engagement.project_id && engagement.project)}
+        <EngagementTabs
+          backlink={
+            <Link href="/b/engagements" className="eng-backlink">
+              <ArrowLeft size={15} strokeWidth={1.75} /> Clients
+            </Link>
+          }
+          hero={
+            <DetailHero
+              id={engagement.id}
+              title={engagement.title}
+              sub={heroSub}
+              websiteUrl={engagement.project?.website_url}
+              businessName={engagement.project?.prospect_name ?? engagement.project?.name}
+              statusKind={statusKind}
+              statusLabel={statusLabel}
+              repo={engagement.github_repo_full_name}
+              open={openCount}
+              done={doneCount}
+              badgeUrl={identity?.avatarUrl ?? null}
+              badgeInitials={identity?.initials ?? "•"}
             />
-          </EngagementSection>
-
-          <EngagementSection
-            icon={<BookOpen size={19} strokeWidth={1.75} />}
-            title="Business context"
-            hint="How the business works today and the problem you're solving — context for the build."
-          >
-            <BusinessContextCard
-              engagementId={engagement.id}
-              cards={businessContext}
-              canEdit
-              variant="bare"
-            />
-          </EngagementSection>
-
-          <EngagementSection
-            icon={<FileText size={19} strokeWidth={1.75} />}
-            title="Documents"
-            hint="The PRD, quote, and contract from the project this client came from."
-          >
-            <EngagementDocuments items={docItems} emptyLabel="No documents yet." />
-          </EngagementSection>
-
-          <EngagementSection
-            icon={<SlidersHorizontal size={19} strokeWidth={1.75} />}
-            title="Settings"
-            hint="Rename or manage the operator invite."
-          >
-            <EngagementSettingsCard engagement={engagement} pendingInvite={pendingInvite} />
-          </EngagementSection>
-
-          <EngagementSection
-            icon={<Github size={19} strokeWidth={1.75} />}
-            title="GitHub repository"
-            hint="The repo for this client — powers its project view, commits, and branches."
-          >
-            {ghConnection ? (
-              <div className="space-y-2">
-                <RepoSelector
-                  engagementId={engagement.id}
-                  currentRepo={engagement.github_repo_full_name ?? null}
-                />
-                {engagement.github_repo_full_name && (
-                  <Link
-                    href={`/b/github?engagement=${engagement.id}`}
-                    className="inline-block text-xs text-neutral-500 underline underline-offset-2 hover:text-neutral-900"
-                  >
-                    View repo →
-                  </Link>
+          }
+          info={
+            <div className="eng-sections">
+              <EngagementSection
+                icon={<Briefcase size={19} strokeWidth={1.75} />}
+                title="Business information"
+                hint="Contact and links for this client — used on docs and the client dashboard."
+              >
+                {engagement.project_id && engagement.project && (
+                  <BusinessContactCard
+                    contact={engagement.project}
+                    variant="inline"
+                    showBrand
+                  />
                 )}
-              </div>
-            ) : (
-              <p className="text-sm text-neutral-500">
-                <Link
-                  href="/b/github/settings"
-                  className="text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
-                >
-                  Connect GitHub
-                </Link>{" "}
-                first to link a repository to this client.
-              </p>
-            )}
-          </EngagementSection>
+                <BusinessLinksEditor
+                  engagementId={engagement.id}
+                  initialWebsite={engagement.project?.website_url ?? null}
+                  initialLinkedin={engagement.project?.linkedin_url ?? null}
+                  showTopBorder={!!(engagement.project_id && engagement.project)}
+                />
+              </EngagementSection>
 
-          <EngagementSection
-            icon={<TriangleAlert size={19} strokeWidth={1.75} />}
-            title="Danger zone"
-            hint="Permanently delete this client."
-            tone="danger"
-          >
-            <DeleteEngagementCard engagement={engagement} />
-          </EngagementSection>
-        </div>
+              <EngagementSection
+                icon={<BookOpen size={19} strokeWidth={1.75} />}
+                title="Business context"
+                hint="How the business works today and the problem you're solving — context for the build."
+              >
+                <BusinessContextCard
+                  engagementId={engagement.id}
+                  cards={businessContext}
+                  canEdit
+                  variant="bare"
+                />
+              </EngagementSection>
+
+              <EngagementSection
+                icon={<FileText size={19} strokeWidth={1.75} />}
+                title="Documents"
+                hint="The PRD, quote, and contract from the project this client came from."
+              >
+                <EngagementDocuments items={docItems} emptyLabel="No documents yet." />
+              </EngagementSection>
+
+              <EngagementSection
+                icon={<SlidersHorizontal size={19} strokeWidth={1.75} />}
+                title="Settings"
+                hint="Rename or manage the operator invite."
+              >
+                <EngagementSettingsCard engagement={engagement} pendingInvite={pendingInvite} />
+              </EngagementSection>
+
+              <EngagementSection
+                icon={<Github size={19} strokeWidth={1.75} />}
+                title="GitHub repository"
+                hint="The repo for this client — powers its project view, commits, and branches."
+              >
+                {ghConnection ? (
+                  <div className="space-y-2">
+                    <RepoSelector
+                      engagementId={engagement.id}
+                      currentRepo={engagement.github_repo_full_name ?? null}
+                    />
+                    {engagement.github_repo_full_name && (
+                      <Link
+                        href={`/b/github?engagement=${engagement.id}`}
+                        className="inline-block text-xs text-neutral-500 underline underline-offset-2 hover:text-neutral-900"
+                      >
+                        View repo →
+                      </Link>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-neutral-500">
+                    <Link
+                      href="/b/github/settings"
+                      className="text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
+                    >
+                      Connect GitHub
+                    </Link>{" "}
+                    first to link a repository to this client.
+                  </p>
+                )}
+              </EngagementSection>
+
+              <EngagementSection
+                icon={<TriangleAlert size={19} strokeWidth={1.75} />}
+                title="Danger zone"
+                hint="Permanently delete this client."
+                tone="danger"
+              >
+                <DeleteEngagementCard engagement={engagement} />
+              </EngagementSection>
+            </div>
+          }
+          context={
+            <div className="eng-sections">
+              <EngagementSection
+                icon={<Library size={19} strokeWidth={1.75} />}
+                title="Client context"
+                hint="Documents, SOPs, transcripts, notes, and links for this client — indexed so AI can use them."
+              >
+                <ContextView
+                  engagementId={engagement.id}
+                  initialItems={contextItems}
+                  graph={clientGraph}
+                />
+              </EngagementSection>
+            </div>
+          }
+        />
       </div>
     </main>
   );

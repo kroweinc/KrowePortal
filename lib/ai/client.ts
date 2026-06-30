@@ -12,6 +12,28 @@ export const openai = new OpenAI({
 export const AI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
 
 /**
+ * Reasoning effort for the GPT-5-series model. The default `medium` makes the
+ * model spend reasoning tokens "thinking" before it answers — fine for writing a
+ * full PRD, but wasted latency when all we need back is the next multiple-choice
+ * interview question. We dial it down for question rounds and leave it at the
+ * model default for the final PRD (where depth matters). Env-tunable so it's an
+ * easy A/B if `low` ever makes the interview feel less adaptive.
+ */
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
+
+const QUESTION_REASONING_EFFORT =
+  (process.env.PRD_QUESTION_REASONING_EFFORT as ReasoningEffort | undefined) ?? "low";
+
+/**
+ * Effort to use for a generation step. `forceFinal` (the full PRD / quote / section)
+ * keeps the model default by returning undefined; intermediate question rounds use
+ * the lighter, configurable effort.
+ */
+export function reasoningEffortFor(forceFinal: boolean): ReasoningEffort | undefined {
+  return forceFinal ? undefined : QUESTION_REASONING_EFFORT;
+}
+
+/**
  * Chat-completion call that records token usage to the ai_usage ledger when a
  * caller identity is provided. Drop-in for openai.chat.completions.create for
  * the non-streaming JSON generations used across lib/ai. Usage logging is

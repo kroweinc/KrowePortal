@@ -1,0 +1,279 @@
+/* ============================================================
+   Context Graph — Obsidian-style force-directed client overview.
+   Dark canvas with light "glass" overlays (legend + selection panel) that
+   still read as Krowe via the shared design tokens.
+   Namespaced .ctx-* so nothing collides with .eng-* / .krowe-*.
+   ============================================================ */
+
+/* View toggle (Graph / List) — echoes .eng-tabbar */
+.ctx-toggle {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  margin-bottom: 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.ctx-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.ctx-toggle-btn:hover {
+  color: var(--foreground);
+}
+.ctx-toggle-btn.is-active {
+  color: var(--foreground);
+  background: #fff;
+  box-shadow: var(--shadow-1);
+}
+
+/* Canvas surface */
+.ctx-graph-wrap {
+  position: relative;
+  width: 100%;
+  height: 560px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  /* Obsidian-ish deep slate */
+  background:
+    radial-gradient(120% 120% at 50% 0%, color-mix(in oklab, var(--foreground) 82%, #0b1020) 0%, color-mix(in oklab, var(--foreground) 92%, #05070d) 100%);
+}
+.ctx-graph-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+/* Empty state inside the canvas */
+.ctx-graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13.5px;
+  text-align: center;
+  padding: 24px;
+}
+
+/* Floating glass overlays shared look */
+.ctx-glass {
+  background: color-mix(in oklab, #fff 90%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
+}
+
+/* Legend */
+.ctx-legend {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 10px 12px;
+  max-width: 200px;
+  z-index: 2;
+}
+.ctx-legend-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  margin-bottom: 8px;
+}
+.ctx-legend-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 10px;
+}
+.ctx-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--foreground);
+}
+.ctx-legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius-full);
+  flex: none;
+}
+
+/* Selection side panel */
+.ctx-graph-panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(340px, 70%);
+  padding: 16px;
+  overflow-y: auto;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ctx-panel-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  padding: 4px;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.ctx-panel-close:hover { color: var(--foreground); }
+.ctx-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 22px;
+}
+.ctx-panel-kind {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.ctx-panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--foreground);
+}
+.ctx-panel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--primary);
+  text-decoration: none;
+}
+.ctx-panel-link:hover { text-decoration: underline; }
+.ctx-panel-meta {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* Timeline */
+.ctx-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+.ctx-timeline-empty {
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  padding: 8px 0;
+}
+.ctx-timeline-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+/* rail connecting the dots */
+.ctx-timeline-item:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 20px;
+  bottom: 0;
+  width: 1.5px;
+  background: var(--border-strong);
+}
+.ctx-timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: 21px;
+  height: 21px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex: none;
+}
+.ctx-timeline-body { min-width: 0; }
+.ctx-timeline-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ctx-timeline-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.ctx-timeline-when {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.ctx-timeline-actor {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.ctx-timeline-detail {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--foreground);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 8px 10px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* Change-request composer */
+.ctx-cr {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.ctx-cr-textarea {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--foreground);
+}
+.ctx-cr-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary-soft);
+}
+.ctx-cr-row { display: flex; gap: 8px; }

@@ -393,6 +393,50 @@ export interface ProjectSopTranscript {
   created_at: string;
 }
 
+// ── Client Context Layer (engagement-scoped, builder-only; migrations 0059/0060)
+// The single home for everything a builder knows about a client — documents,
+// SOPs, transcripts, materials, notes, links — chunked + embedded for RAG.
+export type ContextItemKind =
+  | "document"
+  | "sop"
+  | "transcript"
+  | "material"
+  | "note"
+  | "link";
+
+export type ContextEmbeddingStatus = "pending" | "ready" | "failed" | "skipped";
+
+export interface ContextItem {
+  id: string;
+  engagement_id: string;
+  created_by: string;
+  kind: ContextItemKind;
+  title: string;
+  file_name: string | null;
+  storage_path: string | null; // engagements/<id>/context/<uuid>.<ext> in project-materials bucket
+  mime_type: string | null;
+  size_bytes: number | null;
+  url: string | null; // link source only
+  content: string | null; // extracted/pasted text — what the RAG layer embeds
+  char_count: number | null;
+  source_meta: Record<string, unknown>;
+  embedding_status: ContextEmbeddingStatus;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextChunk {
+  id: string;
+  context_item_id: string;
+  engagement_id: string;
+  chunk_index: number;
+  content: string;
+  token_estimate: number | null;
+  created_at: string;
+  // `embedding` is intentionally omitted — it is server-only and never sent to the browser.
+}
+
 // ── Product Feedback ───────────────────────────────────────────────────
 export type FeedbackCategory = "bug" | "idea" | "other";
 

@@ -151,6 +151,26 @@
 .hero-stats { display: flex; align-items: center; gap: 8px; margin-top: 13px; flex-wrap: wrap; }
 .hero-stats .eng-status.live { color: var(--success); }
 
+/* ───────── Tabs (Info / Context) ───────── */
+/* Top row: back link on the left, tab bar on the right, same baseline. */
+.eng-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.eng-tabbar {
+  display: inline-flex; gap: 3px; padding: 3px;
+  background: var(--surface-subtle); border: 1px solid var(--border);
+  border-radius: var(--radius-full); flex-shrink: 0;
+}
+.eng-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: none; background: transparent; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--muted-foreground);
+  padding: 7px 18px; border-radius: var(--radius-full);
+  transition: color 140ms var(--ease-out-smooth), background 140ms var(--ease-out-smooth);
+}
+.eng-tab:not(.is-active):hover { color: var(--foreground); }
+.eng-tab.is-active { background: #fff; color: var(--foreground); box-shadow: var(--shadow-1); }
+.eng-tab svg { color: var(--faint-foreground); }
+.eng-tab.is-active svg { color: var(--primary); }
+
 /* ───────── Sections ───────── */
 .eng-sections { display: flex; flex-direction: column; gap: 18px; margin-top: 22px; }
 .eng-section { border: 1px solid var(--border); border-radius: var(--radius-lg); background: #fff; box-shadow: var(--shadow-1); padding: 22px; }

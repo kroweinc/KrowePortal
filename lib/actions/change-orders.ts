@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { recordDocumentEvent } from "@/lib/context/document-events";
 import type { ChangeOrder, ChangeOrderContent } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -82,6 +83,14 @@ export async function createChangeOrder(
     .select("id")
     .single();
   if (error || !data) return { error: error?.message ?? "Failed to create change order." };
+  await recordDocumentEvent({
+    docKind: "change_order",
+    docId: data.id as string,
+    engagementId,
+    eventType: "created",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
   revalidatePath(`/b/engagements/${engagementId}`);
   return { success: true, id: data.id as string };
 }
@@ -121,7 +130,11 @@ export async function sendChangeOrder(id: string): Promise<{ success: true } | {
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only the builder can send change orders." };
   const supabase = await getClient(profile.id);
-  const { data: before } = await supabase.from("change_orders").select("status").eq("id", id).single();
+  const { data: before } = await supabase
+    .from("change_orders")
+    .select("status, engagement_id")
+    .eq("id", id)
+    .single();
   if (!before) return { error: "Change order not found." };
   if (before.status !== "draft") return { error: "Only drafts can be sent." };
   const { error } = await supabase
@@ -129,6 +142,14 @@ export async function sendChangeOrder(id: string): Promise<{ success: true } | {
     .update({ status: "sent", updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { error: error.message };
+  await recordDocumentEvent({
+    docKind: "change_order",
+    docId: id,
+    engagementId: before.engagement_id as string,
+    eventType: "sent",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
   revalidatePath("/b/engagements");
   revalidatePath("/o/project");
   return { success: true };
@@ -142,19 +163,33 @@ export async function rejectChangeOrder(
   if (!profile) redirect("/login");
   if (profile.role !== "operator") return { error: "Only the operator can reject change orders." };
   const supabase = await getClient(profile.id);
-  const { data: before } = await supabase.from("change_orders").select("status").eq("id", id).single();
+  const { data: before } = await supabase
+    .from("change_orders")
+    .select("status, engagement_id")
+    .eq("id", id)
+    .single();
   if (!before) return { error: "Change order not found." };
   if (before.status !== "sent") return { error: "Change order is not awaiting a decision." };
+  const cleanNote = note?.slice(0, 2000) ?? null;
   const { error } = await supabase
     .from("change_orders")
     .update({
       status: "rejected",
       rejected_at: new Date().toISOString(),
-      rejection_note: note?.slice(0, 2000) ?? null,
+      rejection_note: cleanNote,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);
   if (error) return { error: error.message };
+  await recordDocumentEvent({
+    docKind: "change_order",
+    docId: id,
+    engagementId: before.engagement_id as string,
+    eventType: "rejected",
+    actorId: profile.id,
+    actorRole: "operator",
+    payload: cleanNote ? { rejectionNote: cleanNote } : {},
+  });
   revalidatePath("/b/engagements");
   revalidatePath("/o/project");
   return { success: true };
@@ -180,7 +215,7 @@ export async function signChangeOrder(
   const supabase = await getClient(profile.id);
   const { data: co } = await supabase
     .from("change_orders")
-    .select("id, status, title, content, delta_amount")
+    .select("id, status, title, content, delta_amount, engagement_id")
     .eq("id", id)
     .single();
   if (!co) return { error: "Change order not found." };
@@ -203,6 +238,16 @@ export async function signChangeOrder(
     p_delta_amount: (co.delta_amount as number | null) ?? content.total ?? 0,
   });
   if (error) return { error: error.message };
+
+  await recordDocumentEvent({
+    docKind: "change_order",
+    docId: id,
+    engagementId: co.engagement_id as string,
+    eventType: "signed",
+    actorId: profile.id,
+    actorRole: "operator",
+    payload: { signerName: parsed.data.signerName, signerIp: ip },
+  });
 
   revalidatePath("/o/project");
   revalidatePath("/b/engagements");

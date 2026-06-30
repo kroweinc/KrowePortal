@@ -2128,6 +2128,13 @@ button.krowe-desc-inline-text:hover {
 
 .docov { max-width: 660px; margin: 0 auto; padding: 40px 32px 96px; }
 
+/* Bare scope: reuse the .docov row/chip/add-button/empty styles inside another
+   container (e.g. the client-context panel embedded in an engagement section)
+   without the page-level box — so it sits flush-left and full-width like its
+   sibling sections, not as a centered 660px column. Higher specificity than the
+   @media .docov rule below, so the reset holds at every breakpoint. */
+.docov.docov-bare { max-width: none; margin: 0; padding: 0; width: 100%; }
+
 /* breadcrumb */
 .docov .crumb {
   display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;

@@ -14,16 +14,21 @@ import { assertAiBudget } from "@/lib/ai/usage";
 import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
+import { syncDocumentContext, removeDocumentContext } from "@/lib/context/sync-document";
+import { recordDocumentEvent } from "@/lib/context/document-events";
 import { fieldsForSection, refinableSection } from "@/lib/prd/section-fields";
 import type { Question } from "@/lib/ai/schemas";
 import { PrdContentSchema } from "@/lib/ai/schemas";
 import type { Prd, PrdContent } from "@/lib/types";
 
-/** Hard cap on adaptive question rounds before a PRD is forced. */
-const MAX_PRD_ROUNDS = 5;
+// The PRD interview is sequential — one question per call — so `round` is the
+// count of answers gathered so far. These cap how many questions get asked
+// before a PRD is forced; the model usually finalizes on its own well before.
+/** Hard cap on adaptive questions before a PRD is forced (notes provided). */
+const MAX_PRD_QUESTIONS = 10;
 
-/** Raised cap for the no-notes "deep context" path: interview broad→specific over more rounds. */
-const MAX_PRD_ROUNDS_DEEP = 8;
+/** Raised cap for the no-notes "deep context" path: more questions to build context from scratch. */
+const MAX_PRD_QUESTIONS_DEEP = 14;
 
 /** Hard cap on refine question rounds before a section patch is forced. */
 const MAX_REFINE_ROUNDS = 2;
@@ -75,7 +80,10 @@ const draftSchema = z.object({
     )
     .max(40)
     .optional(),
-  round: z.number().int().min(0).max(10),
+  // Number of answers gathered so far (one question is asked per call).
+  round: z.number().int().min(0).max(40),
+  // Builder hit "Generate now" — finalize the PRD from whatever's been answered.
+  finalize: z.boolean().optional(),
 });
 
 export type DraftPrdInput = z.input<typeof draftSchema>;
@@ -98,7 +106,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   const parsed = draftSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
-  const { projectId, title, notes, answers = [], round } = parsed.data;
+  const { projectId, title, notes, answers = [], round, finalize } = parsed.data;
 
   const project = await getProjectById(projectId);
   if (!project) return { error: "Document not found." };
@@ -107,10 +115,12 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   const materials = await getProjectMaterials(projectId);
   const sopTranscripts = await getProjectSopTranscripts(projectId);
 
-  // No written notes ⇒ deep context-gathering mode: more rounds, broad→specific
-  // questions, and a synthesized context summary saved back to the project.
+  // No written notes ⇒ deep context-gathering mode: more questions, broad→specific
+  // sequencing, and a synthesized context summary saved back to the project.
   const deepContext = !(notes && notes.trim().length > 0);
-  const forceFinal = round >= (deepContext ? MAX_PRD_ROUNDS_DEEP : MAX_PRD_ROUNDS);
+  // Finalize when the builder asks to (Generate now) or the question cap is hit.
+  const forceFinal =
+    finalize === true || round >= (deepContext ? MAX_PRD_QUESTIONS_DEEP : MAX_PRD_QUESTIONS);
 
   const budget = await assertAiBudget(profile.id);
   if (!budget.ok) return { error: budget.error };
@@ -161,6 +171,26 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
     .single();
 
   if (error || !data) return { error: error?.message ?? "Failed to create PRD." };
+
+  // Mirror the new PRD into the client's context layer (no-op until the project
+  // is linked to an engagement). Best-effort — never blocks PRD creation.
+  await syncDocumentContext({
+    docKind: "prd",
+    docId: data.id as string,
+    projectId,
+    title,
+    content,
+    builderId: profile.id,
+  });
+
+  await recordDocumentEvent({
+    docKind: "prd",
+    docId: data.id as string,
+    projectId,
+    eventType: "created",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
 
   // Deep-context path: persist the synthesized business context to the project so
   // future documents (PRDs/quotes/contracts) start warm. Only when the project has
@@ -221,6 +251,15 @@ export async function regeneratePrd(
     .update({ content, source_notes: clean, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  await syncDocumentContext({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content,
+    builderId: profile.id,
+  });
 
   revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true, content };
@@ -330,7 +369,7 @@ export async function updatePrdContent(
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("prds")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -344,6 +383,15 @@ export async function updatePrdContent(
   const { error } = await supabase.from("prds").update(patch).eq("id", id);
   if (error) return { error: error.message };
 
+  await syncDocumentContext({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    title: parsed.data.title ?? (before.title as string),
+    content: (parsed.data.content ?? before.content) as PrdContent,
+    builderId: profile.id,
+  });
+
   revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true };
 }
@@ -356,7 +404,7 @@ export async function sendPrd(id: string): Promise<{ success: true } | { error: 
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("prds")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -374,6 +422,26 @@ export async function sendPrd(id: string): Promise<{ success: true } | { error: 
   // Surface the PRD in the client's portal right away when it's unambiguous who
   // that client is (see connectProjectToClientOnSend).
   await connectProjectToClientOnSend(before.project_id as string, profile.id);
+
+  // Sending is when an orphan project often first gains an engagement, so this
+  // is frequently the first chance to mirror the PRD into the context layer.
+  await syncDocumentContext({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content: before.content as PrdContent,
+    builderId: profile.id,
+  });
+
+  await recordDocumentEvent({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "sent",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
 
   revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true };
@@ -397,6 +465,17 @@ export async function deletePrd(id: string): Promise<{ success: true } | { error
 
   const { error } = await supabase.from("prds").delete().eq("id", id);
   if (error) return { error: error.message };
+
+  await recordDocumentEvent({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "deleted",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
+
+  await removeDocumentContext("prd", id, before.project_id as string);
 
   revalidatePath(`/b/projects/${before.project_id as string}`);
   return { success: true };

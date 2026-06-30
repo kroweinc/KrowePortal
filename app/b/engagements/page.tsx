@@ -6,6 +6,7 @@ import { NewEngagementDialog } from "@/components/new-engagement-dialog";
 import { getMyEngagements, getMyPendingInvites } from "@/lib/actions/invitations";
 import { getMyBuilderIdentity } from "@/lib/actions/builder-profile";
 import { EngagementCard } from "@/components/engagement/engagement-card";
+import { EngagementCardMenu } from "@/components/engagement/engagement-card-menu";
 import type { EngagementStatusKind } from "@/components/engagement/engagement-status";
 import type { TaskStatus } from "@/lib/types";
 
@@ -86,20 +87,21 @@ export default async function EngagementsPage() {
                   ? "Invite pending"
                   : "No operator yet";
               return (
-                <EngagementCard
-                  key={engagement.id}
-                  id={engagement.id}
-                  title={engagement.title}
-                  websiteUrl={engagement.project?.website_url}
-                  businessName={engagement.project?.prospect_name ?? engagement.project?.name}
-                  statusKind={statusKind}
-                  statusLabel={statusLabel}
-                  repo={engagement.github_repo_full_name}
-                  open={count.open}
-                  done={count.done}
-                  badgeUrl={identity?.avatarUrl ?? null}
-                  badgeInitials={identity?.initials ?? "•"}
-                />
+                <EngagementCardMenu key={engagement.id} id={engagement.id} title={engagement.title}>
+                  <EngagementCard
+                    id={engagement.id}
+                    title={engagement.title}
+                    websiteUrl={engagement.project?.website_url}
+                    businessName={engagement.project?.prospect_name ?? engagement.project?.name}
+                    statusKind={statusKind}
+                    statusLabel={statusLabel}
+                    repo={engagement.github_repo_full_name}
+                    open={count.open}
+                    done={count.done}
+                    badgeUrl={identity?.avatarUrl ?? null}
+                    badgeInitials={identity?.initials ?? "•"}
+                  />
+                </EngagementCardMenu>
               );
             })}
           </div>
