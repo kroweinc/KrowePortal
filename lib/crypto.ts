@@ -39,7 +39,13 @@ export function encryptSecret(plaintext: string): string {
  * encryption was enabled (no real data in prod yet, but safe regardless).
  */
 export function decryptSecret(payload: string): string {
-  if (!isEncrypted(payload)) return payload;
+  if (!isEncrypted(payload)) {
+    // Back-compat path for pre-encryption tokens. Warn so a plaintext secret at
+    // rest is visible in logs; once no legacy plaintext rows remain this should
+    // be tightened to throw.
+    console.warn("[decryptSecret] received a non-enveloped (plaintext) value");
+    return payload;
+  }
   const [ivHex, tagHex, dataHex] = payload.split(":");
   const decipher = createDecipheriv(ALGO, getKey(), Buffer.from(ivHex, "hex"));
   decipher.setAuthTag(Buffer.from(tagHex, "hex"));

@@ -71,6 +71,6 @@ export async function updatePricingDefaults(
   );
   if (error) return { error: error.message };
 
-  revalidatePath("/b/settings");
+  revalidatePath("/b/settings/quotes");
   return { success: true };
 }

@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/types";
 
@@ -33,7 +34,12 @@ const DEV_PROFILES: Record<string, Profile> = {
   },
 };
 
-export async function getCurrentProfile(): Promise<Profile | null> {
+// Memoized per-request. The layout, the page, and every server action that runs
+// during a single render all ask "who is this?" — each call previously made a
+// network round-trip to Supabase auth (getUser) plus a profiles query. cache()
+// dedupes them to one auth check + one query per request, the single biggest
+// lever on page-to-page latency.
+export const getCurrentProfile = cache(async function getCurrentProfile(): Promise<Profile | null> {
   // All dev bypasses are gated by DEV_TOGGLE_ENABLED (NODE_ENV !== "production"),
   // so neither the cookie nor the env override can grant a synthetic identity in
   // production even if the variables are accidentally set.
@@ -65,7 +71,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
     .single();
 
   return data ?? null;
-}
+});
 
 /**
  * Lightweight viewer resolution for public document pages. Unlike

@@ -2,6 +2,7 @@ import { runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
 import { FreeTierAnalysisResult } from "./schemas";
 import type { FreeTierAnalysis, FreeTierAssumption } from "./schemas";
+import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import type { PrdContent } from "@/lib/types";
 
 /* Free-Tier Fit (PRD §15). Given the PRD's qualitative scope (users, features,
@@ -23,11 +24,16 @@ const EMPTY: FreeTierAnalysis = {
   analyzedAt: null,
 };
 
-async function callJson(system: string, user: string, meta?: AiCallMeta): Promise<string> {
+async function callJson(
+  system: string,
+  user: string,
+  responseFormat: ReturnType<typeof jsonResponseFormat>,
+  meta?: AiCallMeta
+): Promise<string> {
   const res = await runChat({
     model: AI_MODEL,
     max_completion_tokens: 3000,
-    response_format: { type: "json_object" },
+    response_format: responseFormat,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -180,7 +186,7 @@ VERDICT RULES:
 ROLLUP:
 - "overallFitsFree" = the worst case across all services.
 - "primaryLimitingFactor" = the single binding constraint — the first / most-likely service+dimension to break free (e.g. "Supabase database storage once submissions exceed ~500MB").
-- "totalMonthlyCostIfPaid" = the summed minimum monthly cost if every non-fitting service moves to its recommended paid tier, as a range string (e.g. "~$25–45/mo"); null if everything fits free.
+- "totalMonthlyCostIfPaid" = the summed minimum monthly cost if every non-fitting service moves to its recommended paid tier. ONLY the price range — a bare money string like "~$25–45/mo" or "$70/mo", with NO explanatory words, caveats, or "excluding…" clauses appended. null if everything fits free.
 
 TRUST: every figure is an ESTIMATE from published free-tier limits you know — state them but they must be verified; never present the client's real usage as fact. Set "estimated": true on every service. Output valid JSON only.`;
 }
@@ -212,7 +218,7 @@ function buildUserPrompt(content: PrdContent, scaleHint?: string, priorAssumptio
 /** Analyze whether the product can run on its services' free tiers and what
     limits it. `priorAssumptions` are the builder's edited stats from a prior run —
     passed back as authoritative so re-checks honor their corrected numbers.
-    Strict-schema validation with one retry, then a safe empty shell. */
+    Strict-schema validation, then a safe empty shell on failure. */
 export async function analyzeFreeTierFit(
   content: PrdContent,
   scaleHint?: string,
@@ -223,7 +229,9 @@ export async function analyzeFreeTierFit(
   const system = buildSystemPrompt(currentDate);
   const user = buildUserPrompt(content, scaleHint, priorAssumptions);
 
-  let raw = await callJson(system, user, meta);
+  // Single strict-schema call (the corrective second call is gone — strict mode
+  // guarantees the shape). A parse/refinement failure falls to the safe shell.
+  const raw = await callJson(system, user, jsonResponseFormat(FreeTierAnalysisResult, "free_tier_analysis"), meta);
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -231,18 +239,7 @@ export async function analyzeFreeTierFit(
     parsed = {};
   }
 
-  let result = FreeTierAnalysisResult.safeParse(parsed);
-  if (!result.success) {
-    const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    raw = await callJson(system, `${user}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`, meta);
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = {};
-    }
-    result = FreeTierAnalysisResult.safeParse(parsed);
-  }
-
+  const result = FreeTierAnalysisResult.safeParse(stripNullsDeep(parsed));
   if (!result.success) return EMPTY;
   return result.data;
 }

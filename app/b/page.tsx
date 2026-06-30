@@ -40,7 +40,7 @@ export default async function BuilderDashboard({
 
   const { data } = await supabase
     .from("tasks")
-    .select("*, task_attachments(*, uploader:profiles!uploaded_by(id, display_name, role))")
+    .select("*, task_attachments(id, is_deliverable, file_name)")
     .or(filter)
     .order("created_at", { ascending: false });
 

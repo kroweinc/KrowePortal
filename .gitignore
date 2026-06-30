@@ -10,3 +10,9 @@ node_modules/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Next.js auto-generated; regenerated on every build
+next-env.d.ts
+
+# Local screenshot capture output (regenerate via scripts/capture-screens.mjs)
+capture/

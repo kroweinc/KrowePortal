@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { notifyUser, inviteAcceptedEmail } from "@/lib/email/notify";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
@@ -14,8 +15,11 @@ async function getClient(profileId: string) {
 }
 
 // Creates an engagement for this builder (with backfill of existing personal tasks) if none exists.
-// Uses admin client unconditionally — we've already verified the caller's identity via getCurrentProfile().
-export async function getOrCreateEngagement(profileId: string): Promise<Engagement> {
+// Uses admin client unconditionally and trusts the caller-supplied profileId, so this MUST stay a
+// module-internal helper — never export it. Exporting it from a "use server" file would expose it as
+// an unauthenticated RPC endpoint that any client could call with an arbitrary profile id (IDOR).
+// Its only caller, createInvitation below, derives the id from getCurrentProfile() first.
+async function getOrCreateEngagement(profileId: string): Promise<Engagement> {
   const admin = createAdminClient();
 
   const { data: existingRows } = await admin
@@ -248,6 +252,25 @@ export async function deleteEngagement(
   if (!engagement) return { error: "Client not found." };
 
   const admin = createAdminClient();
+
+  // Gather attachment files under this engagement's tasks before the cascade:
+  // engagement → tasks → task_attachments all cascade via FK, but the storage
+  // objects in the task-attachments bucket are never removed by the cascade.
+  const { data: tasks } = await admin
+    .from("tasks")
+    .select("id")
+    .eq("engagement_id", engagementId);
+  const taskIds = (tasks ?? []).map((t) => t.id as string);
+  let attachmentPaths: string[] = [];
+  if (taskIds.length) {
+    const { data: files } = await admin
+      .from("task_attachments")
+      .select("storage_path")
+      .in("task_id", taskIds)
+      .not("storage_path", "is", null);
+    attachmentPaths = (files ?? []).map((f) => f.storage_path as string).filter(Boolean);
+  }
+
   const { error } = await admin
     .from("engagements")
     .delete()
@@ -255,6 +278,10 @@ export async function deleteEngagement(
     .eq("builder_id", profile.id);
 
   if (error) return { error: error.message };
+
+  if (attachmentPaths.length) {
+    await admin.storage.from("task-attachments").remove(attachmentPaths);
+  }
 
   revalidatePath("/b");
   revalidatePath("/b/engagements");
@@ -346,7 +373,7 @@ export async function acceptInvitation(
     .from("invitations")
     .select("*, engagement:engagements(*)")
     .eq("token", parsed.data.token)
-    .single();
+    .maybeSingle();
 
   if (invErr || !invitation) return { error: "Invitation not found." };
   if (invitation.status === "accepted") return { error: "This invite has already been used." };
@@ -358,6 +385,7 @@ export async function acceptInvitation(
     id: string;
     builder_id: string;
     operator_id: string | null;
+    title: string;
   };
 
   if (engagement.operator_id) return { error: "This invite has already been used." };
@@ -407,6 +435,14 @@ export async function acceptInvitation(
     .from("invitations")
     .update({ status: "accepted", accepted_at: new Date().toISOString() })
     .eq("id", invitation.id);
+
+  // Notify the builder their invite was accepted — fire-and-forget.
+  const inviteEmail = inviteAcceptedEmail({
+    operatorName: name,
+    engagementTitle: engagement.title ?? "your client",
+    engagementId: engagement.id,
+  });
+  void notifyUser({ userId: engagement.builder_id, type: "invite_accepted", ...inviteEmail });
 
   // Clear the pending invite cookie now that it's been consumed
   try {

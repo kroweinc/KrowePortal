@@ -239,7 +239,7 @@ export default async function ProjectProfilePage({
           repoUrl={repoUrl}
           builderName={operatorName ? `for ${operatorName}` : profile.display_name}
           startedAt={engagement?.created_at ?? new Date().toISOString()}
-          settingsHref="/b/github/settings"
+          settingsHref="/b/settings/github"
         />
 
         <Suspense fallback={<OverviewCardSkeleton />}>
@@ -295,7 +295,7 @@ export default async function ProjectProfilePage({
             <Icon name="arrow" size={13} color="currentColor" />
           </Link>
           <Link
-            href="/b/github/settings"
+            href="/b/settings/github"
             className="dashed-link"
             style={{
               display: "inline-flex",

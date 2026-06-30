@@ -1,18 +1,40 @@
 import { z } from "zod";
 
-const Question = z.object({
-  id: z.string(),
-  text: z.string().min(3).max(300),
-  options: z.array(z.string().min(1).max(80)).min(3).max(5),
-  // When true, the builder may select more than one option. Defaults to single-select.
-  multiSelect: z.boolean().default(false),
-  // The exact text of the option the AI judges best — MUST equal one of `options`.
-  // Surfaced in the UI as a "Recommended" badge and pre-selected for the builder.
-  recommended: z.string().min(1).max(80).optional(),
-  // One short, plain-language sentence on WHY it's the best default, for a
-  // non-technical builder. Interview-time guidance only; not persisted.
-  recommendation: z.string().min(1).max(280).optional(),
-});
+const Question = z
+  .object({
+    id: z.string(),
+    text: z.string().min(3).max(300),
+    // Choice options, ranked most→least likely. Empty for "date" and "text"
+    // questions, where the builder types a value instead of picking an option.
+    options: z.array(z.string().min(1).max(80)).max(5).default([]),
+    // "choice" (default) renders selectable options; "date" renders an MM/DD/YYYY
+    // input; "text" renders an open-ended textarea (e.g. the "what's your idea?"
+    // opener of the no-scope intake). Lets the AI mark a question as free-form
+    // entry rather than a pick-list.
+    inputType: z.enum(["choice", "date", "text"]).default("choice"),
+    // When true, the builder may select more than one option. Defaults to single-select.
+    multiSelect: z.boolean().default(false),
+    // The exact text of the option the AI judges best — MUST equal one of `options`.
+    // Surfaced in the UI as a "Recommended" badge and pre-selected for the builder.
+    recommended: z.string().min(1).max(80).optional(),
+    // One short, plain-language sentence on WHY it's the best default, for a
+    // non-technical builder. Interview-time guidance only; not persisted.
+    recommendation: z.string().min(1).max(280).optional(),
+    // When true, the wizard offers a "Skip" affordance so the builder can move on
+    // without answering (e.g. an optional catch-all gap-filler). Not surfaced to
+    // the model in any prompt — only the server-built fallback round sets it.
+    skippable: z.boolean().optional(),
+  })
+  // Only choice questions need a real pick-list; date/text questions are free-form.
+  .superRefine((q, ctx) => {
+    if (q.inputType === "choice" && q.options.length < 3) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "choice questions need at least 3 options",
+      });
+    }
+  });
 
 export const SubtaskDraft = z
   .object({

@@ -334,32 +334,39 @@ function PaymentMilestonesBody({ content, patch }: SectionBodyProps) {
 // =====================================================================
 //  Simple list / text section bodies via factory
 // =====================================================================
-const listBody =
-  (key: keyof QuoteContent, variant: "bullet" | "ordered" | "check" | "plain", addLabel: string, ph: string) =>
-  ({ content, patch }: SectionBodyProps): ReactNode =>
-    (
-      <InlineList
-        items={(content[key] as string[]) ?? []}
-        onChange={(v) => patch({ [key]: v } as Partial<QuoteContent>)}
-        variant={variant}
-        addLabel={addLabel}
-        placeholder={ph}
-      />
-    );
+const listBody = (
+  key: keyof QuoteContent,
+  variant: "bullet" | "ordered" | "check" | "plain",
+  addLabel: string,
+  ph: string
+) => {
+  const Body = ({ content, patch }: SectionBodyProps): ReactNode => (
+    <InlineList
+      items={(content[key] as string[]) ?? []}
+      onChange={(v) => patch({ [key]: v } as Partial<QuoteContent>)}
+      variant={variant}
+      addLabel={addLabel}
+      placeholder={ph}
+    />
+  );
+  Body.displayName = `ListBody(${String(key)})`;
+  return Body;
+};
 
-const textBody =
-  (key: keyof QuoteContent, ph: string) =>
-  ({ content, patch }: SectionBodyProps): ReactNode =>
-    (
-      <InlineText
-        value={content[key] as string | undefined}
-        onChange={(v) => patch({ [key]: v } as Partial<QuoteContent>)}
-        placeholder={ph}
-        className="prose-text"
-        multiline
-        tag="p"
-      />
-    );
+const textBody = (key: keyof QuoteContent, ph: string) => {
+  const Body = ({ content, patch }: SectionBodyProps): ReactNode => (
+    <InlineText
+      value={content[key] as string | undefined}
+      onChange={(v) => patch({ [key]: v } as Partial<QuoteContent>)}
+      placeholder={ph}
+      className="prose-text"
+      multiline
+      tag="p"
+    />
+  );
+  Body.displayName = `TextBody(${String(key)})`;
+  return Body;
+};
 
 // =====================================================================
 //  Section registry — order + numbering

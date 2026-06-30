@@ -1,25 +1,21 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { homePath } from "@/lib/home-path";
 
 export default async function RootPage() {
   const profile = await getCurrentProfile();
 
   if (!profile) {
+    // Distinguish "logged in but no profile yet" (→ onboarding) from "logged
+    // out" (→ login). createClient is request-cached, so this reuses the client
+    // getCurrentProfile already built.
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
-    redirect(user ? "/onboarding" : "/login");
-  }
-
-  if (profile.role === "operator") {
-    redirect("/o");
+    redirect(homePath(null, Boolean(user)));
   }
 
   // Builders mid-wizard resume where they left off. Only this root router
   // nudges them back — /b itself stays reachable so nobody gets trapped.
-  if (profile.onboarding_status === "in_progress") {
-    redirect("/onboarding");
-  }
-
-  redirect("/b");
+  redirect(homePath(profile, true));
 }

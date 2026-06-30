@@ -2,7 +2,9 @@
 
 import { useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { Unlink } from "lucide-react"
 import { disconnectGithub } from "@/lib/actions/github"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 
 interface ConnectGitHubButtonProps {
   connected: boolean
@@ -12,9 +14,20 @@ interface ConnectGitHubButtonProps {
 export function ConnectGitHubButton({ connected, username }: ConnectGitHubButtonProps) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [confirm, confirmDialog] = useConfirm()
 
-  function handleDisconnect() {
-    if (!window.confirm("Disconnect your GitHub account? You can reconnect anytime.")) return
+  async function handleDisconnect() {
+    if (
+      !(await confirm({
+        title: "Disconnect GitHub?",
+        description: "Your linked GitHub account will be removed. You can reconnect anytime.",
+        confirmText: "Disconnect",
+        cancelText: "Cancel",
+        tone: "danger",
+        icon: Unlink,
+      }))
+    )
+      return
     startTransition(async () => {
       await disconnectGithub()
       router.refresh()
@@ -36,6 +49,7 @@ export function ConnectGitHubButton({ connected, username }: ConnectGitHubButton
         >
           {isPending ? "Disconnecting…" : "Disconnect"}
         </button>
+        {confirmDialog}
       </div>
     )
   }

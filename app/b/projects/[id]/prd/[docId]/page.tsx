@@ -3,7 +3,6 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { getPrdById } from "@/lib/actions/prds";
 import { PrdDashboard } from "@/components/prd/dashboard/prd-dashboard";
-import { BusinessContactCard } from "@/components/doc/business-contact-card";
 
 export const metadata = { title: "PRD" };
 
@@ -26,7 +25,6 @@ export default async function ProjectPrdPage({
   return (
     <main className="krowe-page">
       <div className="krowe-page-inner">
-        <BusinessContactCard contact={project} label="Prepared for" variant="card" className="mb-6 prd-print-hide" />
         <PrdDashboard
           prd={prd}
           backHref={`/b/projects/${id}`}

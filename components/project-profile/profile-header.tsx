@@ -48,7 +48,7 @@ export function ProfileHeader({ context }: ProfileHeaderProps) {
             <ExternalLink className="h-3.5 w-3.5" aria-hidden />
           </a>
           <Link
-            href="/b/github/settings"
+            href="/b/settings/github"
             className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:border-neutral-300 hover:text-neutral-900"
           >
             <Settings className="h-3.5 w-3.5" aria-hidden />

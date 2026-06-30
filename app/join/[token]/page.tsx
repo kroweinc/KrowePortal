@@ -26,7 +26,7 @@ export default async function JoinPage({ params }: Props) {
       "id, status, expires_at, engagement:engagements(id, title, operator_id, builder:profiles!builder_id(display_name))"
     )
     .eq("token", token)
-    .single();
+    .maybeSingle();
 
   if (!invitation) return <ErrorCard message="This invite link is invalid." />;
 

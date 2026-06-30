@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowRight, CalendarDays, Check, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
 import { updateTaskStatus, deleteTask } from "@/lib/actions/tasks";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { ApprovalPill } from "@/components/approval-pill";
@@ -33,6 +34,7 @@ interface TaskCardProps {
 export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
   const router = useRouter();
   const [isDragging, setIsDragging] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
   const menu = useContextMenu();
@@ -51,8 +53,18 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
     }
   }
 
-  function handleDelete() {
-    if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+  async function handleDelete() {
+    if (
+      !(await confirm({
+        title: `Delete “${task.title}”?`,
+        description: "This permanently removes the task. This can’t be undone.",
+        confirmText: "Delete task",
+        cancelText: "Cancel",
+        icon: Trash2,
+        tone: "danger",
+      }))
+    )
+      return;
     deleteTask(task.id)
       .then((res) => {
         if (res && typeof res === "object" && "error" in res && res.error) {
@@ -87,6 +99,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
   ];
 
   return (
+    <>
     <div
       className={`krowe-card priority-${task.priority} status-${task.status} ${isDragging ? "dragging" : ""}`}
       draggable
@@ -187,5 +200,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
         </span>
       </div>
     </div>
+    {confirmDialog}
+    </>
   );
 }

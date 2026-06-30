@@ -200,7 +200,7 @@ export function TaskBuildPrompt({ task }: Props) {
           {error.needsRepo ? (
             <>
               <p>{error.message}</p>
-              <Link href="/b/github/settings" className="krowe-btn-pill primary">
+              <Link href="/b/settings/github" className="krowe-btn-pill primary">
                 Connect a repo
               </Link>
             </>

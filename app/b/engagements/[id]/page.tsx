@@ -5,15 +5,15 @@ import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getMyPendingInvites } from "@/lib/actions/invitations";
 import { getMyBuilderIdentity } from "@/lib/actions/builder-profile";
-import { getPrdsByProject } from "@/lib/actions/prds";
+import { getPrdSummariesByProject } from "@/lib/actions/prds";
 import { getQuotesByProject } from "@/lib/actions/quote-docs";
 import { getContractsByProject } from "@/lib/actions/contracts";
 import { EngagementSettingsCard } from "@/components/engagement-admin/engagement-settings-card";
 import { DeleteEngagementCard } from "@/components/engagement-admin/delete-engagement-card";
 import { RepoSelector } from "@/components/github/repo-selector";
 import { BusinessContactCard } from "@/components/doc/business-contact-card";
-import { BusinessContextCard } from "@/components/dashboard/business-context-card";
 import { BusinessLinksEditor } from "@/components/engagement/business-links-editor";
+import { BusinessContextCard } from "@/components/dashboard/business-context-card";
 import { getBusinessContext } from "@/lib/actions/engagement";
 import { getContextItems } from "@/lib/actions/context";
 import { getClientGraph } from "@/lib/actions/context-graph";
@@ -107,7 +107,7 @@ export default async function BuilderEngagementPage({
   let docItems: EngagementDocItem[] = [];
   if (projectId) {
     const [prds, quotes, contracts] = await Promise.all([
-      getPrdsByProject(projectId),
+      getPrdSummariesByProject(projectId),
       getQuotesByProject(projectId),
       getContractsByProject(projectId),
     ]);

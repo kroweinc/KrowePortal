@@ -213,7 +213,7 @@ export function CommitPicker({ taskId, selected, onChange, disabled }: Props) {
       {state.kind === "no_repo" && (
         <p className="text-xs text-neutral-500">
           No GitHub repo connected for this engagement.{" "}
-          <a href="/b/github/settings" className="underline hover:text-neutral-700">
+          <a href="/b/settings/github" className="underline hover:text-neutral-700">
             Set one up
           </a>
           .
@@ -222,7 +222,7 @@ export function CommitPicker({ taskId, selected, onChange, disabled }: Props) {
       {state.kind === "auth" && (
         <p className="text-xs text-neutral-500">
           GitHub session expired.{" "}
-          <a href="/b/github/settings" className="underline hover:text-neutral-700">
+          <a href="/b/settings/github" className="underline hover:text-neutral-700">
             Reconnect GitHub
           </a>
           .

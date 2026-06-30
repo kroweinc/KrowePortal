@@ -71,7 +71,7 @@ export function CreateInvitationDialog({ existingToken, operatorName, engagement
         {!token ? (
           <div className="space-y-4 pt-2">
             <p className="text-sm text-neutral-500">
-              Generate a link and share it with your operator. Once they sign in, they'll join your
+              Generate a link and share it with your operator. Once they sign in, they&apos;ll join your
               shared space and can see your tasks.
             </p>
             {error && <p className="text-xs text-red-600">{error}</p>}

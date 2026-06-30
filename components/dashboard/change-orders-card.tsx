@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { GitPullRequest, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { usePrompt } from "@/components/ui/confirm-dialog";
 import { signChangeOrder, rejectChangeOrder } from "@/lib/actions/change-orders";
 import type { ChangeOrder } from "@/lib/types";
 
@@ -59,6 +60,7 @@ export function ChangeOrdersCard({
 function ChangeOrderRow({ co, canSign }: { co: ChangeOrder; canSign: boolean }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [prompt, promptDialog] = usePrompt();
   const [signing, setSigning] = useState(false);
   const [name, setName] = useState("");
   const [consent, setConsent] = useState(false);
@@ -77,10 +79,18 @@ function ChangeOrderRow({ co, canSign }: { co: ChangeOrder; canSign: boolean }) 
     });
   }
 
-  function reject() {
-    const note = window.prompt("Optional note for your builder:") ?? null;
+  async function reject() {
+    const note = await prompt({
+      title: "Reject this change order?",
+      description: "Optionally add a note for your builder explaining why.",
+      placeholder: "e.g. Out of budget this quarter…",
+      confirmText: "Reject change order",
+      cancelText: "Cancel",
+      multiline: true,
+    });
+    if (note === null) return; // cancelled — don't reject
     startTransition(async () => {
-      const result = await rejectChangeOrder(co.id, note);
+      const result = await rejectChangeOrder(co.id, note.trim() || null);
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -151,6 +161,7 @@ function ChangeOrderRow({ co, canSign }: { co: ChangeOrder; canSign: boolean }) 
           )}
         </div>
       )}
+      {promptDialog}
     </li>
   );
 }

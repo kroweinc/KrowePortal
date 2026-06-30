@@ -7,6 +7,7 @@ import { Plus, X, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createChangeOrder, sendChangeOrder } from "@/lib/actions/change-orders";
 import { DEFAULT_QUOTE_HOURLY_RATE } from "@/lib/quote/totals";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { ChangeOrder } from "@/lib/types";
 
 function fmt(n: number): string {
@@ -37,6 +38,7 @@ export function ChangeOrderManager({
   defaultRate?: number;
 }) {
   const router = useRouter();
+  const [confirm, confirmDialog] = useConfirm();
   const rateDefault = defaultRate ?? DEFAULT_QUOTE_HOURLY_RATE;
   const [isPending, startTransition] = useTransition();
   const [creating, setCreating] = useState(false);
@@ -73,8 +75,15 @@ export function ChangeOrderManager({
     });
   }
 
-  function send(id: string) {
-    if (!confirm("Send this change order to the operator to sign?")) return;
+  async function send(id: string) {
+    const confirmed = await confirm({
+      title: "Send this change order to sign?",
+      description: "The operator will be asked to review and sign it before the work is billed.",
+      confirmText: "Send for signature",
+      icon: Send,
+      tone: "brand",
+    });
+    if (!confirmed) return;
     startTransition(async () => {
       const result = await sendChangeOrder(id);
       if ("error" in result) {
@@ -87,6 +96,7 @@ export function ChangeOrderManager({
   }
 
   return (
+    <>
     <div className="space-y-3">
       <ul className="space-y-2">
         {changeOrders.map((co) => (
@@ -143,6 +153,8 @@ export function ChangeOrderManager({
         </div>
       )}
     </div>
+    {confirmDialog}
+    </>
   );
 }
 

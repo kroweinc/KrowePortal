@@ -1,4 +1,4 @@
-import type { Prd, Quote, Contract } from "@/lib/types";
+import type { Prd, Quote } from "@/lib/types";
 
 // One-line summaries for a document row — date created plus the latest lifecycle
 // event, and (for quotes) the grand total. Mirrors the inline helpers on the
@@ -29,7 +29,7 @@ export function quoteDocMeta(q: Quote): string {
   return parts.join(" · ");
 }
 
-export function docMeta(d: Prd | Contract): string {
+export function docMeta(d: Pick<Prd, "created_at" | "signed_at" | "sent_at">): string {
   const parts: string[] = [`Created ${formatDocDate(d.created_at)}`];
   if (d.signed_at) parts.push(`Signed ${formatDocDate(d.signed_at)}`);
   else if (d.sent_at) parts.push(`Sent ${formatDocDate(d.sent_at)}`);

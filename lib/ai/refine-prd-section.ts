@@ -1,13 +1,14 @@
 /* Refines a SINGLE section of an existing PRD. Mirrors generate-prd.ts: OpenAI
-   JSON mode + Zod validation with one retry. Unlike generatePrd (which drafts the
-   whole document), this is scoped — it sees the full current PRD for context but
-   may only ask about, and rewrite, the target section's keys. The caller
-   whitelists the returned patch to those keys as a second guard. */
+   JSON mode + Zod validation. Unlike generatePrd (which drafts the whole
+   document), this is scoped — it sees the full current PRD for context but may
+   only ask about, and rewrite, the target section's keys. The caller whitelists
+   the returned patch to those keys as a second guard. */
 
 import { runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
 import { RefineSectionResult as RefineSchema, RefineSectionFinalResult } from "./schemas";
 import type { Question } from "./schemas";
+import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import type { PrdAnswer } from "./generate-prd";
 import type { PrdContent } from "@/lib/types";
 
@@ -95,11 +96,17 @@ function buildUserPrompt(input: RefineSectionInput): string {
   return lines.join("\n");
 }
 
-async function callOpenAI(systemPrompt: string, userPrompt: string, maxTokens: number, meta?: AiCallMeta): Promise<string> {
+async function callOpenAI(
+  systemPrompt: string,
+  userPrompt: string,
+  maxTokens: number,
+  responseFormat: ReturnType<typeof jsonResponseFormat>,
+  meta?: AiCallMeta
+): Promise<string> {
   const response = await runChat({
     model: AI_MODEL,
     max_completion_tokens: maxTokens,
-    response_format: { type: "json_object" },
+    response_format: responseFormat,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -116,42 +123,22 @@ function whitelist(patch: Record<string, unknown>, fields: string[]): Partial<Pr
   return out as Partial<PrdContent>;
 }
 
-export async function refinePrdSection(input: RefineSectionInput, meta?: AiCallMeta): Promise<RefineSectionResult> {
+/** Non-throwing parse of a refine response: returns null on a parse or schema
+    failure so the caller can resample once. The question round uses lenient
+    json_object (its root is a union, illegal for strict json_schema) and the model
+    occasionally drifts outside that union on the first sample — it reliably
+    self-corrects on a resample, mirroring tryParsePrdResult in generate-prd.ts. */
+function tryParseRefine(raw: string, input: RefineSectionInput): RefineSectionResult | null {
   const schema = input.forceFinal ? RefineSectionFinalResult : RefineSchema;
-  const systemPrompt = buildSystemPrompt(input);
-  const userPrompt = buildUserPrompt(input);
-  const maxTokens = 8000;
-
-  let raw = await callOpenAI(systemPrompt, userPrompt, maxTokens, meta);
-
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw || "{}");
   } catch {
-    parsed = {};
+    return null;
   }
 
-  let result = schema.safeParse(parsed);
-  if (!result.success) {
-    const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    raw = await callOpenAI(
-      systemPrompt,
-      `${userPrompt}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`,
-      maxTokens,
-      meta
-    );
-    try {
-      parsed = JSON.parse(raw || "{}");
-    } catch {
-      parsed = {};
-    }
-    result = schema.safeParse(parsed);
-  }
-
-  if (!result.success) {
-    if (input.forceFinal) return { kind: "section", patch: {} };
-    throw new Error("AI response validation failed");
-  }
+  const result = schema.safeParse(stripNullsDeep(parsed));
+  if (!result.success) return null;
 
   const data = result.data;
   if (data.kind === "questions") {
@@ -161,4 +148,30 @@ export async function refinePrdSection(input: RefineSectionInput, meta?: AiCallM
     kind: "section",
     patch: whitelist(data.patch as Record<string, unknown>, input.sectionFields),
   };
+}
+
+export async function refinePrdSection(input: RefineSectionInput, meta?: AiCallMeta): Promise<RefineSectionResult> {
+  const systemPrompt = buildSystemPrompt(input);
+  const userPrompt = buildUserPrompt(input);
+  const maxTokens = 8000;
+  // Strict json_schema on the single-object final patch; the question round is a
+  // root union and stays lenient json_object.
+  const responseFormat = input.forceFinal
+    ? jsonResponseFormat(RefineSectionFinalResult, "prd_section_patch")
+    : ({ type: "json_object" } as const);
+  const callOnce = () => callOpenAI(systemPrompt, userPrompt, maxTokens, responseFormat, meta);
+
+  // The lenient question round occasionally drifts outside the union on the first
+  // sample; resample once before degrading (the model reliably self-corrects).
+  // The forced-final round is strict-schema-constrained, so it skips the retry.
+  let result = tryParseRefine(await callOnce(), input);
+  if (!result && !input.forceFinal) result = tryParseRefine(await callOnce(), input);
+  if (result) return result;
+
+  // Still unparseable: degrade rather than surface a hard error. A forced-final
+  // failure becomes an empty (no-op) patch; a failed question round finalizes the
+  // section directly — the forceFinal path is strict-schema-constrained, so this
+  // resolves to a section and cannot recurse or dead-end.
+  if (input.forceFinal) return { kind: "section", patch: {} };
+  return refinePrdSection({ ...input, forceFinal: true }, meta);
 }

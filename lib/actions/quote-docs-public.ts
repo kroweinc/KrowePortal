@@ -19,9 +19,14 @@ export async function getQuoteByToken(token: string): Promise<PublicQuote | null
   if (!TOKEN_RE.test(token)) return null;
 
   const admin = createAdminClient();
+  // Explicit allow-list, NOT select("*"): the public page must never receive
+  // signer_ip (third-party PII), signed_by_user_id, created_by, or source_notes
+  // (builder-internal AI notes). source_prd_id is also internal so it's omitted.
   const { data } = await admin
     .from("quotes")
-    .select("*, project:projects(name, owner_id, owner:profiles!owner_id(display_name))")
+    .select(
+      "id, project_id, title, status, content, token, token_expires_at, token_revoked_at, sent_at, signed_by_name, signed_at, signature_consent, accepted_at, rejected_at, rejection_note, created_at, updated_at, project:projects(name, owner_id, owner:profiles!owner_id(display_name))"
+    )
     .eq("token", token)
     .maybeSingle();
 
@@ -35,11 +40,14 @@ export async function getQuoteByToken(token: string): Promise<PublicQuote | null
     } | null;
   };
   if (row.status === "draft" || row.status === "rejected") return null;
+  // Reject revoked or expired share links (see migration 0062).
+  if (row.token_revoked_at) return null;
+  if (row.token_expires_at && new Date(row.token_expires_at as string) < new Date()) return null;
 
   const builderName = row.project?.owner?.display_name ?? "Your builder";
   const projectName = row.project?.name ?? null;
   const builder = await getBuilderIdentityForOwner(admin, row.project?.owner_id, builderName);
 
-  const { project: _p, ...quoteRow } = row;
+  const { project: _p, token_expires_at: _te, token_revoked_at: _tr, ...quoteRow } = row;
   return { quote: quoteRow as unknown as Quote, builderName, projectName, builder };
 }

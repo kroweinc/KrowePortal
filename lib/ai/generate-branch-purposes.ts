@@ -45,26 +45,34 @@ async function callOnce(
 ): Promise<Record<string, string>> {
   if (inputs.length === 0) return {};
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
-    max_completion_tokens: 900,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: buildUserPrompt(repoFullName, inputs) },
-    ],
-  });
+  const requestRaw = async (): Promise<string> => {
+    const response = await openai.chat.completions.create({
+      model: AI_MODEL,
+      max_completion_tokens: 900,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: buildUserPrompt(repoFullName, inputs) },
+      ],
+    });
+    return response.choices[0]?.message?.content ?? "";
+  };
 
-  const raw = response.choices[0]?.message?.content ?? "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  // json_object very occasionally returns non-JSON (or truncates); resample once
+  // before failing — the model reliably self-corrects.
+  const parsePurposes = (raw: string): Record<string, unknown> | null => {
+    try {
+      return (JSON.parse(raw) as { purposes?: Record<string, unknown> }).purposes ?? {};
+    } catch {
+      return null;
+    }
+  };
+
+  const purposes = parsePurposes(await requestRaw()) ?? parsePurposes(await requestRaw());
+  if (!purposes) {
     throw new Error("Branch purposes: AI returned non-JSON");
   }
 
-  const obj = parsed as { purposes?: Record<string, unknown> };
-  const purposes = obj.purposes ?? {};
   const out: Record<string, string> = {};
   for (const input of inputs) {
     const val = purposes[input.name];

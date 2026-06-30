@@ -1,8 +1,9 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/server";
+import { checkRate } from "@/lib/rate-limit";
 import { getCurrentProfile } from "@/lib/auth";
-import { deriveProfileTags } from "@/lib/builder-profile/derive-tags";
+import { resolveTechBadges, type ResolvedTechBadge } from "@/lib/builder-profile/tech-icons";
 import type {
   BuilderProfileCodingTool,
   BuilderProfileExperience,
@@ -11,9 +12,19 @@ import type {
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
 
-// Manual + derived badges, manual first, deduped case-insensitively. Capped so
-// a rich profile can't produce an unbounded badge row.
+// Per-minute cap on public resume fetches per share token (env-tunable). A
+// 64-hex token is itself the capability, so a per-token bucket is sufficient.
+const RESUME_PER_TOKEN = Number(process.env.RATE_LIMIT_RESUME_TOKEN_PER_MIN ?? 20);
+
+// Builder-added badges, capped so a rich profile can't produce an unbounded
+// badge row.
 const MAX_DISPLAY_TAGS = 14;
+
+// A profile project with its tech tags pre-resolved to brand icons on the server,
+// so the public view never imports the heavy `simple-icons` glyph table.
+export type PublicBuilderProfileProject = BuilderProfileProject & {
+  techBadges: ResolvedTechBadge[];
+};
 
 export interface PublicBuilderProfile {
   displayName: string;
@@ -30,7 +41,7 @@ export interface PublicBuilderProfile {
   hasResume: boolean;
   githubUsername: string | null;
   githubSyncedAt: string | null;
-  projects: BuilderProfileProject[];
+  projects: PublicBuilderProfileProject[];
   experience: BuilderProfileExperience[];
   codingTools: BuilderProfileCodingTool[];
 }
@@ -51,6 +62,9 @@ export async function getBuilderProfileByToken(
     .maybeSingle();
 
   if (!data || !data.is_published) return null;
+  // Reject revoked or expired share links (see migration 0062).
+  if (data.token_revoked_at) return null;
+  if (data.token_expires_at && new Date(data.token_expires_at as string) < new Date()) return null;
 
   return assemblePublicProfile(admin, data);
 }
@@ -123,24 +137,17 @@ async function assemblePublicProfile(
     avatarUrl = signed?.signedUrl ?? null;
   }
 
-  const projectList = (projects ?? []) as BuilderProfileProject[];
+  // Resolve each project's tech tags to brand icons here on the server so the
+  // public view (and the in-app live preview) never bundle `simple-icons`.
+  const projectList: PublicBuilderProfileProject[] = (
+    (projects ?? []) as BuilderProfileProject[]
+  ).map((project) => ({ ...project, techBadges: resolveTechBadges(project.tech) }));
   const experienceList = (experience ?? []) as BuilderProfileExperience[];
   const codingToolList = (codingTools ?? []) as BuilderProfileCodingTool[];
 
-  // Show manual badges plus any derived from the rest of the profile.
-  const manualTags = (data.tags ?? []) as string[];
-  const seenTags = new Set(manualTags.map((t) => t.toLowerCase()));
-  const derivedTags = deriveProfileTags({
-    headline: data.headline ?? null,
-    bio: data.bio ?? null,
-    educationSchool: data.education_school ?? null,
-    educationMajor: data.education_major ?? null,
-    educationYear: data.education_year ?? null,
-    experience: experienceList,
-    projects: projectList,
-    codingTools: codingToolList,
-  }).filter((t) => !seenTags.has(t.toLowerCase()));
-  const tags = [...manualTags, ...derivedTags].slice(0, MAX_DISPLAY_TAGS);
+  // Show only the badges the builder has added. Derived badges are surfaced as
+  // recommendations in the editor; they appear here only once the builder adds them.
+  const tags = ((data.tags ?? []) as string[]).slice(0, MAX_DISPLAY_TAGS);
 
   return {
     // Profile-level override wins; otherwise fall back to the account name.
@@ -171,16 +178,29 @@ export async function getPublicResumeUrl(
   token: string
 ): Promise<{ url?: string; error?: string }> {
   if (!TOKEN_RE.test(token)) return { error: "Invalid link." };
+  const rate = await checkRate({
+    key: `resume:token:${token}`,
+    limit: RESUME_PER_TOKEN,
+    windowSeconds: 60,
+  });
+  if (!rate.allowed) return { error: "Too many requests. Please wait a moment." };
 
   const admin = createAdminClient();
   const { data } = await admin
     .from("builder_profiles")
-    .select("is_published, resume_storage_path, user_id")
+    .select("is_published, resume_storage_path, user_id, token_expires_at, token_revoked_at")
     .eq("token", token)
     .maybeSingle();
 
   if (!data || !data.resume_storage_path) {
     return { error: "Resume not available." };
+  }
+  // Reject revoked or expired share links (see migration 0062).
+  if (
+    data.token_revoked_at ||
+    (data.token_expires_at && new Date(data.token_expires_at as string) < new Date())
+  ) {
+    return { error: "This link has expired." };
   }
 
   // Unpublished resumes are visible only to the owner (profile preview).

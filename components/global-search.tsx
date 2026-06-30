@@ -44,15 +44,21 @@ const BUILDER_NAV: NavCommand[] = [
   { id: "nav-b-projects", title: "Documents", href: "/b/projects", keywords: "documents projects prospects" },
   { id: "nav-b-new", title: "New document", href: "/b/projects/new", keywords: "new document project create" },
   { id: "nav-b-repo", title: "Repo", href: "/b/github", keywords: "repo github code repositories" },
-  { id: "nav-b-repo-settings", title: "Repo settings", href: "/b/github/settings", keywords: "github settings connect repo" },
   { id: "nav-b-profile", title: "Profile", href: "/b/profile", keywords: "profile resume portfolio" },
-  { id: "nav-b-settings", title: "Settings", href: "/b/settings", keywords: "settings account display name" },
+  { id: "nav-b-settings", title: "Settings", href: "/b/settings", keywords: "settings account display name email" },
+  { id: "nav-b-settings-security", title: "Security", href: "/b/settings/security", keywords: "security password sign out sessions settings" },
+  { id: "nav-b-settings-notifications", title: "Notifications", href: "/b/settings/notifications", keywords: "notifications email preferences settings" },
+  { id: "nav-b-settings-quotes", title: "Quote Defaults", href: "/b/settings/quotes", keywords: "quote defaults pricing hourly rate payment terms settings" },
+  { id: "nav-b-settings-github", title: "GitHub settings", href: "/b/settings/github", keywords: "github settings connect repo repositories" },
 ];
 
 const OPERATOR_NAV: NavCommand[] = [
   { id: "nav-o-tasks", title: "Tasks", href: "/o", keywords: "tasks home" },
   { id: "nav-o-engagement", title: "Builder", href: "/o/engagement", keywords: "builder profile contact documents" },
   { id: "nav-o-project", title: "Project", href: "/o/project", keywords: "project repo overview milestones" },
+  { id: "nav-o-settings", title: "Settings", href: "/o/settings", keywords: "settings account display name email" },
+  { id: "nav-o-settings-security", title: "Security", href: "/o/settings/security", keywords: "security password sign out sessions settings" },
+  { id: "nav-o-settings-notifications", title: "Notifications", href: "/o/settings/notifications", keywords: "notifications email preferences settings" },
 ];
 
 const GROUP_ORDER: { key: string; label: string; types: CommandItemType[] }[] = [

@@ -67,7 +67,7 @@ export function DocRow({
   meta: string;
   token: string | null;
 }) {
-  const { menu, items } = useDocMenu({ kind: docKind, id, title, status, token, href });
+  const { menu, items, dialogs } = useDocMenu({ kind: docKind, id, title, status, token, href });
 
   return (
     <div className="row ctx-host" onContextMenu={menu.openAtEvent}>
@@ -100,6 +100,7 @@ export function DocRow({
         <MoreHorizontal size={16} strokeWidth={2} />
       </button>
       <ContextMenu state={menu.state} items={items} onClose={menu.close} />
+      {dialogs}
     </div>
   );
 }

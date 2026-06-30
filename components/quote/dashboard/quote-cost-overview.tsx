@@ -8,7 +8,7 @@
    percent of the build subtotal. The grand total = build subtotal + extras and
    stays live because patch() wraps recomputeTotals. */
 
-import type { QuoteContent, QuoteExtraCostKind } from "@/lib/types";
+import type { QuoteExtraCostKind } from "@/lib/types";
 import { InlineText, InlineSelect, AddButton, useEditing } from "@/components/prd/dashboard/inline-edit";
 import { MoneyInput } from "./money-input";
 import { formatUSD } from "@/lib/quote/format";

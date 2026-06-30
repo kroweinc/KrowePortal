@@ -3,7 +3,6 @@
 import { useTransition } from "react";
 import { toast } from "sonner";
 import {
-  ArrowUpRight,
   BadgeCheck,
   FileText,
   GitCommitHorizontal,
@@ -25,7 +24,6 @@ import { findCodingToolPreset } from "@/lib/coding-tools";
 import { companyInitials } from "@/lib/company";
 import { findUniversityDomain } from "@/lib/education";
 import { safeExternalHref } from "@/lib/project/business-context";
-import { CODING_TOOL_CATEGORIES } from "@/lib/types";
 
 interface PublicProfileViewProps {
   data: PublicBuilderProfile;
@@ -259,51 +257,40 @@ export function PublicProfileContent({ data, token }: PublicProfileViewProps) {
         </section>
       )}
 
-      {/* Coding tools */}
+      {/* Coding tools — flat, ungrouped pill list (Krowe Design "Live Mirror"). */}
       {data.codingTools.length > 0 && (
         <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-neutral-900">Coding tools</h2>
-          <div className="space-y-4">
-            {groupCodingTools(data.codingTools).map((group) => (
-              <div key={group.label}>
-                <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-neutral-400">
-                  {group.label}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {group.tools.map((tool) =>
-                    tool.url ? (
-                      <a
-                        key={tool.id}
-                        href={safeExternalHref(tool.url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-50 py-1 pl-2 pr-3 text-xs font-medium text-neutral-700 hover:border-neutral-300 hover:text-neutral-900"
-                      >
-                        <BrandLogo
-                          domain={findCodingToolPreset(tool.name)?.domain}
-                          name={tool.name}
-                          size={14}
-                        />
-                        {tool.name}
-                        <ArrowUpRight className="h-3 w-3 text-neutral-400" />
-                      </a>
-                    ) : (
-                      <span
-                        key={tool.id}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-neutral-50 py-1 pl-2 pr-3 text-xs font-medium text-neutral-700"
-                      >
-                        <BrandLogo
-                          domain={findCodingToolPreset(tool.name)?.domain}
-                          name={tool.name}
-                          size={14}
-                        />
-                        {tool.name}
-                      </span>
-                    )
-                  )}
-                </div>
-              </div>
-            ))}
+          <div className="flex flex-wrap gap-3">
+            {data.codingTools.map((tool) => {
+              const logo = (
+                <BrandLogo
+                  domain={findCodingToolPreset(tool.name)?.domain}
+                  name={tool.name}
+                  size={18}
+                />
+              );
+              return tool.url ? (
+                <a
+                  key={tool.id}
+                  href={safeExternalHref(tool.url)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-neutral-200 bg-neutral-50 pl-[7px] pr-3 text-xs font-medium text-neutral-700 hover:border-neutral-300 hover:text-neutral-900"
+                >
+                  {logo}
+                  {tool.name}
+                </a>
+              ) : (
+                <span
+                  key={tool.id}
+                  className="inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full border border-neutral-200 bg-neutral-50 pl-[7px] pr-3 text-xs font-medium text-neutral-700"
+                >
+                  {logo}
+                  {tool.name}
+                </span>
+              );
+            })}
           </div>
         </section>
       )}
@@ -369,8 +356,8 @@ function ProjectCard({
             <Star className="h-3 w-3" /> {project.stars.toLocaleString()}
           </span>
         )}
-        {project.tech.map((t) => (
-          <TechBadge key={t} tech={t} />
+        {project.techBadges.map((badge) => (
+          <TechBadge key={badge.tech} tech={badge.tech} icon={badge.icon} />
         ))}
       </div>
       {project.languages && project.languages.length > 0 && (
@@ -380,21 +367,4 @@ function ProjectCard({
       )}
     </li>
   );
-}
-
-// Bucket tools by category in the canonical display order; uncategorized tools
-// (or any unknown category) fall into "Other". Empty buckets are dropped.
-function groupCodingTools(tools: PublicBuilderProfile["codingTools"]) {
-  const order = CODING_TOOL_CATEGORIES;
-  const buckets = new Map<string, PublicBuilderProfile["codingTools"]>();
-  for (const tool of tools) {
-    const label =
-      tool.category && (order as readonly string[]).includes(tool.category) ? tool.category : "Other";
-    const arr = buckets.get(label) ?? [];
-    arr.push(tool);
-    buckets.set(label, arr);
-  }
-  return order
-    .filter((label) => buckets.has(label))
-    .map((label) => ({ label, tools: buckets.get(label)! }));
 }

@@ -1,4 +1,3 @@
-import { EmberGlyph } from "./ember-glyph";
 import { Icon } from "./icon";
 import type { RepoContext } from "@/lib/github/types";
 

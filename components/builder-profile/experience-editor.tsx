@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { BrandLogo } from "@/components/prd/brand-logo";
 import { CompanySuggestInput } from "@/components/builder-profile/company-suggest-input";
 import { companyInitials } from "@/lib/company";
@@ -27,6 +28,7 @@ import type { BuilderProfileExperience } from "@/lib/types";
 export function ExperienceEditor({ entries }: { entries: BuilderProfileExperience[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   function move(index: number, dir: -1 | 1) {
     const next = [...entries];
@@ -43,8 +45,18 @@ export function ExperienceEditor({ entries }: { entries: BuilderProfileExperienc
     });
   }
 
-  function remove(id: string) {
-    if (!confirm("Delete this experience entry?")) return;
+  async function remove(id: string) {
+    if (
+      !(await confirm({
+        title: "Delete this experience entry?",
+        description: "This can’t be undone.",
+        confirmText: "Delete",
+        cancelText: "Cancel",
+        icon: Trash2,
+        tone: "danger",
+      }))
+    )
+      return;
     startTransition(async () => {
       const result = await deleteExperience(id);
       if (result.error) {
@@ -135,6 +147,7 @@ export function ExperienceEditor({ entries }: { entries: BuilderProfileExperienc
         </ul>
       )}
       <ExperienceForm />
+      {confirmDialog}
     </div>
   );
 }

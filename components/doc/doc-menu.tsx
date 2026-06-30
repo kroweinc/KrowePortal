@@ -5,17 +5,38 @@
    useDocMenu(doc) returns the menu state + the MenuItem[] for that doc, wiring
    each item to its existing server action. Reused by both doc surfaces (the
    project document list and the engagement document list) so they behave
-   identically. Builder-only — only mounted where builder actions are allowed. */
+   identically. Builder-only — only mounted where builder actions are allowed.
+
+   Rename / share / delete confirmations use the branded useConfirm / usePrompt
+   modals (not native window.* popups); the row mounts the returned `dialogs`. */
 
 import { useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Pencil, Copy, Link2, Download, Trash2 } from "lucide-react";
+import { Pencil, Link2, Link2Off, RotateCw, Download, Trash2 } from "lucide-react";
 import { useContextMenu, type MenuItem } from "@/components/ui/context-menu";
-import { deletePrd, updatePrdContent, sendPrd } from "@/lib/actions/prds";
-import { deleteQuote, updateQuoteContent, sendQuote } from "@/lib/actions/quote-docs";
-import { deleteContract, updateContractContent, sendContract } from "@/lib/actions/contracts";
-import { duplicatePrd, duplicateQuote, duplicateContract } from "@/lib/actions/duplicate-docs";
+import { useConfirm, usePrompt } from "@/components/ui/confirm-dialog";
+import {
+  deletePrd,
+  updatePrdContent,
+  sendPrd,
+  revokePrdShareLink,
+  reissuePrdShareLink,
+} from "@/lib/actions/prds";
+import {
+  deleteQuote,
+  updateQuoteContent,
+  sendQuote,
+  revokeQuoteShareLink,
+  reissueQuoteShareLink,
+} from "@/lib/actions/quote-docs";
+import {
+  deleteContract,
+  updateContractContent,
+  sendContract,
+  revokeContractShareLink,
+  reissueContractShareLink,
+} from "@/lib/actions/contracts";
 
 export type DocKind = "prd" | "quote" | "contract";
 
@@ -35,13 +56,10 @@ interface KindHandlers {
   publish: (
     id: string
   ) => Promise<{ success: true } | { success: true; effectiveDate: string } | { error: string }>;
-  dup: (id: string) => Promise<{ id: string } | { error: string }>;
+  revoke: (id: string) => Promise<{ success: true } | { error: string }>;
+  reissue: (id: string) => Promise<{ success: true; token: string } | { error: string }>;
   /** Public share path segment: /{path}/{token}. */
   path: string;
-  /** Whether a doc of this kind may be deleted while in `status`. PRDs can be
-   *  removed even after they're sent; quotes/contracts stay draft-only so a
-   *  client-accepted quote or signed contract can't be silently destroyed. */
-  canDelete: (status: string) => boolean;
 }
 
 const KIND: Record<DocKind, KindHandlers> = {
@@ -49,25 +67,25 @@ const KIND: Record<DocKind, KindHandlers> = {
     del: deletePrd,
     rename: (id, t) => updatePrdContent(id, { title: t }),
     publish: sendPrd,
-    dup: duplicatePrd,
+    revoke: revokePrdShareLink,
+    reissue: reissuePrdShareLink,
     path: "prd",
-    canDelete: () => true,
   },
   quote: {
     del: deleteQuote,
     rename: (id, t) => updateQuoteContent(id, { title: t }),
     publish: sendQuote,
-    dup: duplicateQuote,
+    revoke: revokeQuoteShareLink,
+    reissue: reissueQuoteShareLink,
     path: "quotes",
-    canDelete: (s) => s === "draft",
   },
   contract: {
     del: deleteContract,
     rename: (id, t) => updateContractContent(id, { title: t }),
     publish: (id) => sendContract(id),
-    dup: duplicateContract,
+    revoke: revokeContractShareLink,
+    reissue: reissueContractShareLink,
     path: "contract",
-    canDelete: (s) => s === "draft",
   },
 };
 
@@ -79,6 +97,8 @@ export function useDocMenu(doc: DocRef) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const menu = useContextMenu();
+  const [confirm, confirmDialog] = useConfirm();
+  const [promptInput, promptDialog] = usePrompt();
 
   const items = useMemo<MenuItem[]>(() => {
     const k = KIND[doc.kind];
@@ -92,8 +112,14 @@ export function useDocMenu(doc: DocRef) {
         icon: <Pencil size={15} strokeWidth={1.9} />,
         disabled: renameLocked,
         disabledReason: "Signed contracts can't be renamed",
-        onSelect: () => {
-          const next = window.prompt("Rename document", doc.title)?.trim();
+        onSelect: async () => {
+          const entered = await promptInput({
+            title: "Rename document",
+            defaultValue: doc.title,
+            confirmText: "Rename",
+            required: true,
+          });
+          const next = entered?.trim();
           if (!next || next === doc.title) return;
           startTransition(async () => {
             const r = await k.rename(doc.id, next);
@@ -106,25 +132,16 @@ export function useDocMenu(doc: DocRef) {
         },
       },
       {
-        label: "Duplicate",
-        icon: <Copy size={15} strokeWidth={1.9} />,
-        onSelect: () =>
-          startTransition(async () => {
-            const r = await k.dup(doc.id);
-            if (isErr(r)) toast.error(r.error);
-            else {
-              toast.success("Duplicated");
-              router.refresh();
-            }
-          }),
-      },
-      {
         label: "Copy share link",
         icon: <Link2 size={15} strokeWidth={1.9} />,
-        onSelect: () => {
+        onSelect: async () => {
           if (
             isDraft &&
-            !window.confirm("Sharing a link makes this visible to the client. Continue?")
+            !(await confirm({
+              title: "Share this link?",
+              description: "Sharing a link makes this document visible to the client.",
+              confirmText: "Share",
+            }))
           )
             return;
           startTransition(async () => {
@@ -148,6 +165,66 @@ export function useDocMenu(doc: DocRef) {
         },
       },
       {
+        label: "Generate new link",
+        icon: <RotateCw size={15} strokeWidth={1.9} />,
+        // A draft has never been shared — nothing to rotate yet.
+        disabled: isDraft,
+        disabledReason: "Share the document first",
+        onSelect: async () => {
+          if (
+            !(await confirm({
+              title: "Generate a new share link?",
+              description: "Anyone using the old link will lose access. You'll get a fresh link to share.",
+              confirmText: "Generate new link",
+              cancelText: "Keep current link",
+            }))
+          )
+            return;
+          startTransition(async () => {
+            const r = await k.reissue(doc.id);
+            if (isErr(r)) {
+              toast.error(r.error);
+              return;
+            }
+            const url = `${window.location.origin}/${k.path}/${r.token}`;
+            try {
+              await navigator.clipboard.writeText(url);
+              toast.success("New share link copied");
+            } catch {
+              toast.message("Copy this link", { description: url });
+            }
+            router.refresh();
+          });
+        },
+      },
+      {
+        label: "Revoke share link",
+        icon: <Link2Off size={15} strokeWidth={1.9} />,
+        destructive: true,
+        // A draft has never been shared — nothing to revoke yet.
+        disabled: isDraft,
+        disabledReason: "Share the document first",
+        onSelect: async () => {
+          if (
+            !(await confirm({
+              title: "Revoke this share link?",
+              description: "Anyone with the current link will lose access. Generate a new link to re-share.",
+              tone: "danger",
+              confirmText: "Revoke link",
+            }))
+          )
+            return;
+          startTransition(async () => {
+            const r = await k.revoke(doc.id);
+            if (isErr(r)) toast.error(r.error);
+            else {
+              toast.success("Share link revoked");
+              router.refresh();
+            }
+          });
+        },
+      },
+      {
         // PDF export is client-side print on the doc page (no server route), so
         // there's nothing to print from a list row — navigate to the doc instead.
         label: "Download PDF",
@@ -159,14 +236,18 @@ export function useDocMenu(doc: DocRef) {
         icon: <Trash2 size={15} strokeWidth={1.9} />,
         destructive: true,
         separatorBefore: true,
-        disabled: !k.canDelete(doc.status),
+        disabled: !isDraft,
         disabledReason: "Only drafts can be deleted",
-        onSelect: () => {
-          // A sent PRD has been shared with the client — warn before removing it.
-          const confirmMsg = isDraft
-            ? "Delete this draft? This cannot be undone."
-            : "This PRD has already been sent to the client. Delete it anyway? This cannot be undone.";
-          if (!window.confirm(confirmMsg)) return;
+        onSelect: async () => {
+          if (
+            !(await confirm({
+              title: "Delete this draft?",
+              description: "This can't be undone.",
+              tone: "danger",
+              confirmText: "Delete",
+            }))
+          )
+            return;
           startTransition(async () => {
             const r = await k.del(doc.id);
             if (isErr(r)) toast.error(r.error);
@@ -178,9 +259,16 @@ export function useDocMenu(doc: DocRef) {
         },
       },
     ];
-    // doc is the only input; router/startTransition are stable.
+    // doc is the only data input; router/startTransition/confirm/promptInput are stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.kind, doc.id, doc.title, doc.status, doc.token, doc.href]);
 
-  return { menu, items, isPending };
+  const dialogs = (
+    <>
+      {confirmDialog}
+      {promptDialog}
+    </>
+  );
+
+  return { menu, items, isPending, dialogs };
 }

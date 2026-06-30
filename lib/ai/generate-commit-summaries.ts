@@ -88,28 +88,39 @@ async function callOnce(
 ): Promise<Record<string, CommitSummary>> {
   if (inputs.length === 0) return {};
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
-    max_completion_tokens: 1500,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: buildUserPrompt(repoFullName, inputs) },
-    ],
-  });
+  const requestRaw = async (): Promise<string> => {
+    const response = await openai.chat.completions.create({
+      model: AI_MODEL,
+      max_completion_tokens: 1500,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: buildUserPrompt(repoFullName, inputs) },
+      ],
+    });
+    return response.choices[0]?.message?.content ?? "";
+  };
 
-  const raw = response.choices[0]?.message?.content ?? "";
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  // json_object very occasionally returns non-JSON (or truncates); resample once
+  // before failing — the model reliably self-corrects.
+  const parseCommits = (
+    raw: string
+  ): Record<string, { summary?: unknown; category?: unknown }> | null => {
+    try {
+      return (
+        JSON.parse(raw) as {
+          commits?: Record<string, { summary?: unknown; category?: unknown }>;
+        }
+      ).commits ?? {};
+    } catch {
+      return null;
+    }
+  };
+
+  const commits = parseCommits(await requestRaw()) ?? parseCommits(await requestRaw());
+  if (!commits) {
     throw new Error("Commit summaries: AI returned non-JSON");
   }
-
-  const obj = parsed as {
-    commits?: Record<string, { summary?: unknown; category?: unknown }>;
-  };
-  const commits = obj.commits ?? {};
 
   const out: Record<string, CommitSummary> = {};
   for (const input of inputs) {

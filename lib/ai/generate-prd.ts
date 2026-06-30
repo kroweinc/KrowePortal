@@ -1,14 +1,12 @@
-import { openai, runChat, AI_MODEL, reasoningEffortFor, type ReasoningEffort } from "./client";
+import { openai, runChat, AI_MODEL, AI_REASONING_EFFORT } from "./client";
 import { recordAiUsage, type AiCallMeta } from "./usage";
 import { PrdGenerationResult, PrdFinalResult } from "./schemas";
 import type { Question } from "./schemas";
+import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
+import { SCOPE_STAGE_COUNT, scopeStageAt } from "@/lib/prd/scope-stages";
 import type { PrdContent } from "@/lib/types";
 
 export type PrdAnswer = { question: string; answer: string };
-
-// Set once if the model/endpoint rejects the reasoning_effort param (400), so we
-// stop sending it for the rest of the process instead of paying the retry repeatedly.
-let reasoningEffortDisabled = false;
 
 export type PrdGenInput = {
   title: string;
@@ -17,8 +15,10 @@ export type PrdGenInput = {
   answers?: PrdAnswer[];
   /** When true, the model must return a finished PRD and may NOT ask more questions. */
   forceFinal: boolean;
-  /** No written notes were given — interview broad→specific over more rounds and emit a contextSummary. */
+  /** No written notes were given — run the staged scope intake and emit a contextSummary. */
   deepContext?: boolean;
+  /** Deep mode only: which fixed scope stage this round covers (0-based; maps to SCOPE_STAGES). */
+  stageIndex?: number;
   /** Today's date as an ISO calendar date (YYYY-MM-DD). Anchors the back-planned timeline. */
   currentDate: string;
 };
@@ -26,6 +26,19 @@ export type PrdGenInput = {
 export type PrdGenResult =
   | { kind: "questions"; items: Question[] }
   | { kind: "prd"; content: PrdContent; contextSummary?: string };
+
+/** The fixed free-text opener for the no-notes "deep context" intake (round 0).
+    It never depends on prior context, so the server returns it directly — no AI
+    call — and every later round is generated with this answer in hand. Built as a
+    complete, valid Question so it bypasses the AI question schema entirely (which
+    requires 2+ items per round). */
+export const OPENER_QUESTION: Question = {
+  id: "opener-idea",
+  text: "In a sentence or two, what's your idea — what is the product and the main problem it solves?",
+  options: [],
+  inputType: "text",
+  multiSelect: false,
+};
 
 const SECTIONS = `The PRD uses these JSON keys. Write for a small-business owner who must recognize THEIR product — be specific and concrete, never generic. A shallow, one-line-per-section PRD is a FAILURE; aim for the depth of a polished, client-ready document.
 
@@ -67,6 +80,7 @@ const SECTIONS = `The PRD uses these JSON keys. Write for a small-business owner
 
 const COST_RULES = `Cost rules for sections 8 and 9:
 - monthlyCost is the third party's / provider's own published subscription rate per month, phrased like "~$25/mo" or "$0/mo + 2.9% per txn". It is NEVER the developer's fee or setup time.
+- ONE provider's subscription is billed ONCE even when it spans several stack items/layers. When the SAME platform appears as multiple entries (e.g. Supabase used for both Auth and Postgres, or Firebase for Auth + Firestore + Storage), that is ONE plan, not one per layer. Put the platform's monthly plan price on a SINGLE representative item and set every other same-platform item's monthlyCost to "$0/mo (incl.)". NEVER repeat the full plan price on each layer — that double-counts a single subscription and overstates the bill.
 - You MAY fill monthlyCost from typical published rates you know, but set "estimated": true on that item so it is flagged for the builder to verify.
 - If you don't know a price, ASK the builder to confirm it during the interview. Only when you are finalizing without an answer, fill a clearly-marked estimate (estimated: true) — never leave the price as an open question in the finished PRD.`;
 
@@ -87,45 +101,41 @@ const CONDITIONAL_RULES = `Depth and examples:
 - Never include a project price or payment terms anywhere in the PRD — those live in the separate quote.
 - The finished PRD must contain NO open questions — every unknown should have been resolved by asking. If you are forced to finalize and a minor detail is still unknown, make a sensible, clearly-stated assumption and record it under "assumptions" (e.g. "Assumes Stripe for payments unless told otherwise"). Leave openQuestions empty.`;
 
-// Lean framing for QUESTION rounds: the model only needs to ask the next
-// question, not author the PRD, so it gets the interview rules below instead of
-// the full ~3.5k-token authoring spec (SECTIONS/COST_RULES/STACK_RULES/…).
-const LEAN_FRAMING = `You are interviewing a builder to gather everything needed to draft an OUTBOUND Product Requirements Document (PRD) for a software product they are pitching to a prospective client. RIGHT NOW your only job is to ask the single most valuable next question — you are NOT writing the PRD yet. There is no existing codebase.
+// Whose words define the product. The project's saved "Business context" is
+// carried over from earlier work on the same client and is frequently STALE — it
+// can describe a DIFFERENT or earlier product than the one being specified now
+// (e.g. a prior CRM PRD's synthesized summary bleeding into a new chatbot PRD).
+// Without this rule the model treats that context as ground truth, overrides the
+// builder's actual stated idea, finds "nothing left to ask", and finalizes the
+// wrong product. The builder's current notes + answers MUST win on any conflict.
+const SCOPE_AUTHORITY = `Scope authority — whose words define the product (READ FIRST):
+- The builder's notes and their ANSWERS to your questions in THIS interview are the AUTHORITATIVE definition of the product to spec. Build EXACTLY the product they describe, in their own words.
+- The "Business context" block is background that may have been carried over from EARLIER work on this client. It can be STALE or describe a DIFFERENT or earlier product than the one the builder is specifying now. Trust it ONLY where it is CONSISTENT with the builder's stated idea/answers (e.g. the client's name, industry, prior hard constraints).
+- When the business context CONFLICTS with the builder's stated idea or answers — e.g. the context describes a lead CRM but the builder said the product is "an AI chatbot" — the BUILDER'S CURRENT ANSWERS WIN. Spec the product they actually described; do NOT silently substitute the product the business context describes, and do NOT add an assumption claiming the builder's stated idea "was not the intended scope." If the saved context describes a different product, treat it as NOT APPLICABLE and disregard it entirely for scope, users, features, and data.`;
 
-Voice: clear, concrete, non-technical. A small-business owner should recognize their own product. No marketing fluff. You may use illustrative EXAMPLES freely in your options, but never invent confirmed client-specific FACTS — ask for any real, load-bearing fact you don't have.`;
+function buildStagedBlock(stageIndex: number): string {
+  const stage = scopeStageAt(stageIndex);
+  const stepNum = Math.min(Math.max(stageIndex, 0), SCOPE_STAGE_COUNT - 1) + 1;
+  return `
 
-// Compact map of what the interview must eventually cover, so the model still
-// steers toward a fillable PRD without the full per-section authoring spec.
-const COVERAGE_CHECKLIST = `The interview must eventually gather enough to fill every PRD section. Drive your questions toward whichever of these are still genuinely unknown:
-- Named user groups / roles and their exact permissions
-- The end-to-end core user flow (first touch → final state)
-- Each feature's concrete specifics: form fields, table columns, email contents, status values
-- Pages/screens and what each one displays
-- Data model (what is stored / imported / exported) and integrations (3rd-party software)
-- A right-sized tech stack (the simplest that fully delivers — do not over-engineer)
-- Hard constraints: budget, branding, security, and the EXACT go-live date
-- Testable success criteria`;
+Staged scope interview — you are running a FIXED step-by-step intake, ONE step per round. The builder already told you their idea in their own words (it is the FIRST answer above) — treat that idea as the ANCHOR and make every question SPECIFIC to it (its product type, domain, and users), never generic. This idea answer OUTRANKS any saved "Business context": if that context describes a different product, IGNORE it and build this interview around the idea answer. This round is STEP ${stepNum} of ${SCOPE_STAGE_COUNT}: "${stage.label}". Ask ONLY about: ${stage.focus}. Do NOT jump ahead to later steps' topics — keep every question in this round on this step. Return 2–4 questions for this step (this overrides the 2–5 guidance above).`;
+}
 
-function buildSystemPrompt(forceFinal: boolean, deepContext = false): string {
-  // Sequencing guidance steers question ORDER (question rounds need it); the
-  // contextSummary instruction only matters when returning the finished PRD.
-  const deepSequencing = deepContext
+function buildSystemPrompt(forceFinal: boolean, deepContext = false, stageIndex?: number): string {
+  // Deep "no-context" mode always asks the model to synthesize a reusable
+  // business-context narrative when it finalizes the PRD (both the staged
+  // question rounds and the forced final share this).
+  const contextSummaryBlock = deepContext
     ? `
 
-No-context mode (the builder provided NO written notes):
-- Sequence your questions foundational → specific, one at a time. Your FIRST question (no answers yet) must be the single broadest foundational one — what the business does or the core problem this product solves. Do NOT open with a detailed per-field question. Then, as each answer comes in, progressively drill from broad (who the users are, the single most important outcome, the rough scope/scale) into the per-section specifics (features and their fields, pages/screens, data, integrations, and the exact deadline) — each question informed by the answers before it.`
-    : "";
-  const deepSummary = deepContext
-    ? `
-- Whenever you return the finished PRD (kind:"prd"), ALSO include a top-level "contextSummary": a concise 1–2 paragraph business-context narrative (what the business does, the problem being solved, who the users are, and the goal) synthesized from the answers, written so it can be saved and reused as the starting context for future documents about this client.`
+No-context mode (the builder provided NO written notes): whenever you return the finished PRD (kind:"prd"), ALSO include a top-level "contextSummary" — a concise 1–2 paragraph business-context narrative (what the business does, the problem being solved, who the users are, and the goal) synthesized from the answers, written so it can be saved and reused as the starting context for future documents about this client.`
     : "";
 
-  // Final PRD: the model authors the whole document, so it gets the full
-  // authoring spec (sections, cost/stack rules, depth rules).
-  if (forceFinal) {
-    const base = `You are drafting an OUTBOUND Product Requirements Document (PRD) for a prospective software product, working from a builder's notes about a client they are pitching, plus answers the builder gave to your clarifying questions. The builder refines it and sends it to the prospect to align on scope before any contract. There is no existing codebase.
+  const base = `You are drafting an OUTBOUND Product Requirements Document (PRD) for a prospective software product, working from a builder's notes about a client they are pitching, plus answers the builder gave to your clarifying questions. The builder refines it and sends it to the prospect to align on scope before any contract. There is no existing codebase.
 
 Voice: clear, concrete, non-technical where possible. A small-business owner should recognize their own product. No marketing fluff.
+
+${SCOPE_AUTHORITY}
 
 ${SECTIONS}
 
@@ -133,10 +143,16 @@ ${COST_RULES}
 
 ${STACK_RULES}
 
-${CONDITIONAL_RULES}${deepSequencing}${deepSummary}
+${CONDITIONAL_RULES}${contextSummaryBlock}
 
 Output ONLY valid JSON.`;
 
+  // While still interviewing in deep mode, drive the fixed step-by-step scope
+  // backbone (idea → users → flows → security) — appended last so its per-step
+  // focus overrides the generic interview guidance.
+  const staged = deepContext && stageIndex != null ? buildStagedBlock(stageIndex) : "";
+
+  if (forceFinal) {
     return `${base}
 
 You have reached the question limit. Return a finished PRD now:
@@ -144,24 +160,19 @@ You have reached the question limit. Return a finished PRD now:
 Fill every section from the notes + answers, with rich, concrete content. Do NOT ask any more questions, and do NOT leave any open questions — for anything still unknown, state a sensible assumption under "assumptions" and keep openQuestions empty. If an exact deadline date was provided, set constraintsDetail.deadline to that date in MM/DD/YYYY format, set milestoneDueDate to that date in MM/DD/YYYY format, and back-plan milestoneList so the final milestone's dueDate equals it and every dueDate is a real calendar date in MM/DD/YYYY format.`;
   }
 
-  // Question round: lean interviewer prompt — no heavy authoring spec.
-  return `${LEAN_FRAMING}${deepSequencing}
-
-${COVERAGE_CHECKLIST}
+  return `${base}
 
 Your goal is to interview the builder until you can fill EVERY section richly with NO open questions remaining.
-- BEFORE asking anything, mine the business context (especially any "SOP / Discovery Call Transcript"), the builder's notes, and the answers so far for facts already stated. NEVER ask a question whose answer is already given there or can be reasonably inferred from it — treat it as known and write it straight into the PRD. Re-asking something discovery already captured is a failure. Example: if the SOP says "mainly me, the front desk, and our instructors — I'd want admin access and instructors should add notes and update cases," the staff roles ARE established → do NOT ask "which staff roles should have accounts." When a topic is only PARTIALLY answered, ask ONLY about the missing slice (e.g. the front desk's exact permissions), never the part already answered.
-- ASK ONE QUESTION AT A TIME. Return EXACTLY ONE multiple-choice question per response — the single most valuable thing to learn next given everything answered so far. This is a live, ADAPTIVE interview: each question MUST build on the previous answers. Read the latest answer, then choose the next question and tailor BOTH its options and its recommended pick to what the builder has now told you (e.g. once you learn the product is a returns-desk tool for a furniture retailer, the next "who is it for" question's options must be specific to that — not generic roles). The "items" array must contain exactly one question:
+- BEFORE asking anything, mine the business context (especially any "SOP / Discovery Call Transcript"), the builder's notes, and the answers so far for facts already stated — but only facts about the SAME product the builder is specifying now (see "Scope authority" above). If the saved business context describes a DIFFERENT product than the builder's stated idea, DISREGARD it for scope and interview around the stated idea as if there were no prior context. NEVER ask a question whose answer is already given (in matching context, the notes, or the answers) or can be reasonably inferred from it — treat it as known and write it straight into the PRD. Re-asking something discovery already captured is a failure. Example: if the SOP says "mainly me, the front desk, and our instructors — I'd want admin access and instructors should add notes and update cases," the staff roles ARE established → do NOT ask "which staff roles should have accounts." When a topic is only PARTIALLY answered, ask ONLY about the missing slice (e.g. the front desk's exact permissions), never the part already answered.
+- If ANY section still has a GENUINE unknown (not answered by the SOP/notes/answers), ask about it. Return 2–5 concrete multiple-choice questions per round that close the remaining gaps (each offers 3–5 options, ranked most→least likely; the builder can also type their own):
   { "kind": "questions", "items": [ { "id": "q1", "text": "…", "options": ["…","…","…"], "multiSelect": false, "recommended": "…", "recommendation": "Best for you because …" } ] }
-- Keep the interview as SHORT as it honestly can be. Ask only about GENUINE unknowns that a section still needs; the moment every section can be filled responsibly, STOP asking and return the finished PRD instead of another question. Do not pad with low-value questions.
+  (Omit "inputType" on normal pick-list questions — it defaults to "choice". Use "inputType": "date" only for the exact go-live date question described below.)
 - For EACH question, set "multiSelect": true when the builder could legitimately choose more than one option (e.g. which integrations are needed, which data sources feed the product, which user roles exist, which platforms to support). Set "multiSelect": false for single-answer questions (e.g. the primary deadline, the main budget tier, the single most important goal). Always include the multiSelect field.
 - For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the strings in "options"), and set "recommendation" to one short, plain-language sentence telling a non-technical builder WHY it is the best default for THIS product (tie it to their notes/answers — not generic advice). Choose the option you genuinely judge best, not always the first. For technical/implementation questions (e.g. how to connect an AI phone assistant to a phone line, which auth method, which hosting), reason about the best real-world method and recommend a concrete, proven default. For multi-select questions, set "recommended" to the single option most worth including. Omit both fields only if no option is meaningfully better than the others.
-- You MUST capture the client's EXACT target launch / go-live DATE before finalizing — it drives the entire delivery timeline. Ask a single-select ("multiSelect": false) question for it (e.g. "What is the client's exact target go-live date?") and tell the builder to enter the precise calendar date. You may offer example timeframe options, but make clear they should type the exact date in MM/DD/YYYY format in their own answer. Do not finalize the PRD with only a vague deadline if you have not yet asked for the exact date.
+- You MUST capture the client's EXACT target launch / go-live DATE before finalizing — it drives the entire delivery timeline. Ask for it as a dedicated DATE question so the builder types the precise calendar date: set "inputType": "date", "multiSelect": false, and "options": [] (the builder gets an MM/DD/YYYY input — do NOT offer timeframe options for this one). Example: { "id": "qN", "text": "What is the client's exact target go-live date?", "inputType": "date", "multiSelect": false, "options": [] }. Do not finalize the PRD with only a vague deadline if you have not yet asked for the exact date.
 - Only return the finished PRD once every section can be filled from the notes + answers and you have NO questions left to ask:
   { "kind": "prd", "content": { ...the full section object, openQuestions empty... } }
-Prioritize questions that unlock DEPTH on what is still genuinely unknown after mining the SOP / notes / answers — especially: the named user groups and their permissions; the per-feature specifics needed to write mini-specs (the exact form fields, table columns, email contents, and status values); the pages/screens; data / integrations / tech stack; and hard constraints. Ask for the concrete specifics that let you write deep feature mini-specs rather than guessing them as facts. Prefer asking over guessing.
-
-Output ONLY valid JSON.`;
+Prioritize questions that unlock DEPTH on what is still genuinely unknown after mining the SOP / notes / answers — especially: the named user groups and their permissions (§3); the per-feature specifics needed to write mini-specs (the exact form fields, table columns, email contents, and status values for §5); the pages/screens (§7); data/integrations/tech stack (§12–14); and hard constraints (§17). Ask for the concrete specifics that let you write deep feature mini-specs rather than guessing them as facts. Prefer asking over guessing.${staged}`;
 }
 
 function buildUserPrompt(input: PrdGenInput): string {
@@ -188,15 +199,14 @@ async function callOpenAI(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
-  meta?: AiCallMeta,
-  reasoningEffort?: ReasoningEffort
+  responseFormat: ReturnType<typeof jsonResponseFormat>,
+  meta?: AiCallMeta
 ): Promise<string> {
   const response = await runChat(
     {
       model: AI_MODEL,
       max_completion_tokens: maxTokens,
-      response_format: { type: "json_object" },
-      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+      response_format: responseFormat,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -218,8 +228,7 @@ async function callOpenAIWithResearch(
   systemPrompt: string,
   userPrompt: string,
   maxTokens: number,
-  meta?: AiCallMeta,
-  reasoningEffort?: ReasoningEffort
+  meta?: AiCallMeta
 ): Promise<string> {
   try {
     const response = await openai.responses.create({
@@ -231,9 +240,7 @@ async function callOpenAIWithResearch(
       tools: [{ type: "web_search" }],
       text: { format: { type: "json_object" } },
       max_output_tokens: maxTokens,
-      // The Responses API spells reasoning effort as `reasoning: { effort }`
-      // (not the chat-completions `reasoning_effort`).
-      ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
+      ...(AI_REASONING_EFFORT ? { reasoning: { effort: AI_REASONING_EFFORT } } : {}),
     });
     // The Responses API reports usage as input/output tokens — map onto the
     // shared prompt/completion ledger shape.
@@ -246,48 +253,50 @@ async function callOpenAIWithResearch(
     }
     const out = response.output_text ?? "";
     if (out.trim()) return out;
-    return await callOpenAI(systemPrompt, userPrompt, maxTokens, meta, reasoningEffort);
+    return await callOpenAI(systemPrompt, userPrompt, maxTokens, { type: "json_object" }, meta);
   } catch (err) {
     console.warn("[generatePrd] web_search research call failed; falling back to chat completions", err);
-    return await callOpenAI(systemPrompt, userPrompt, maxTokens, meta, reasoningEffort);
+    return await callOpenAI(systemPrompt, userPrompt, maxTokens, { type: "json_object" }, meta);
   }
 }
 
-export async function generatePrd(input: PrdGenInput, meta?: AiCallMeta): Promise<PrdGenResult> {
-  const schema = input.forceFinal ? PrdFinalResult : PrdGenerationResult;
-  const systemPrompt = buildSystemPrompt(input.forceFinal, input.deepContext);
-  const userPrompt = buildUserPrompt(input);
-  // The final PRD is now far richer (deep feature mini-specs, examples, more
-  // sections); 6000 truncated the JSON and silently fell back to an empty PRD.
-  // Either path can emit a full PRD (the model may finalize before the question
-  // limit), so both need the headroom. OpenAI bills on actual completion tokens,
-  // not the cap, so a high ceiling on question rounds costs nothing extra.
-  const maxTokens = 16000;
+// Output-token cap for PRD generations. gpt-5.x is a REASONING model: its reasoning
+// tokens and the visible JSON share ONE output budget, and max_completion_tokens is
+// what bounds the reasoning pass so the request actually terminates. Omitting it
+// entirely (true "uncapped") leaves the model with no ceiling — on the heavy rounds
+// it reasons without end and the request never returns, so the wizard hangs in
+// "loading" forever. So we keep a GENEROUS finite ceiling instead: 32000 is ~4-6x a
+// real PRD's output (a full document is ~4-8k tokens), so it never truncates a real
+// PRD, while still guaranteeing the model stops. The empty-draft guard + final-round
+// retry catch any rare truncation regardless. Set OPENAI_PRD_MAX_TOKENS to a positive
+// integer to tune the ceiling without a code change.
+export const PRD_MAX_TOKENS: number = (() => {
+  const raw = (process.env.OPENAI_PRD_MAX_TOKENS ?? "").trim();
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : 32000;
+})();
 
-  // When OPENAI_ENABLE_WEB_SEARCH is on, ground recommendations in live web
-  // research (with graceful fallback); otherwise use the plain chat call.
-  const call = process.env.OPENAI_ENABLE_WEB_SEARCH === "true" ? callOpenAIWithResearch : callOpenAI;
-
-  // Question rounds run at a lighter reasoning effort (faster); the final PRD
-  // keeps the model default. Defensive: if the model/endpoint rejects the
-  // reasoning_effort param (400), retry once without it and remember not to send
-  // it again for the rest of the process.
-  const effort = reasoningEffortDisabled ? undefined : reasoningEffortFor(input.forceFinal);
-  const safeCall = async (sys: string, usr: string): Promise<string> => {
-    try {
-      return await call(sys, usr, maxTokens, meta, effort);
-    } catch (err) {
-      const e = err as { status?: number; message?: string } | undefined;
-      if (effort && e?.status === 400 && /reasoning/i.test(e?.message ?? "")) {
-        reasoningEffortDisabled = true;
-        return await call(sys, usr, maxTokens, meta, undefined);
-      }
-      throw err;
-    }
+/** The system + user prompts for a generation round. Shared by the blocking
+    generatePrd and the streaming route handler. */
+export function buildPrdPrompts(input: PrdGenInput): { systemPrompt: string; userPrompt: string } {
+  return {
+    systemPrompt: buildSystemPrompt(input.forceFinal, input.deepContext, input.stageIndex),
+    userPrompt: buildUserPrompt(input),
   };
+}
 
-  let raw = await safeCall(systemPrompt, userPrompt);
+/** Strict json_schema on the single-object final PRD; json_object on the question
+    round (root discriminated union, illegal for strict). */
+export function prdResponseFormat(forceFinal: boolean): ReturnType<typeof jsonResponseFormat> {
+  return forceFinal ? jsonResponseFormat(PrdFinalResult, "prd_document") : { type: "json_object" };
+}
 
+/** Non-throwing parse: validates a raw generation response against the round's
+    schema and shapes it into the wizard result, or returns null when the model
+    output can't be parsed/validated (truncation, drift outside the strict Question
+    bounds, bad discriminator). Lets callers decide whether to retry or degrade. */
+function tryParsePrdResult(raw: string, forceFinal: boolean): PrdGenResult | null {
+  const schema = forceFinal ? PrdFinalResult : PrdGenerationResult;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw || "{}");
@@ -295,31 +304,188 @@ export async function generatePrd(input: PrdGenInput, meta?: AiCallMeta): Promis
     parsed = {};
   }
 
-  let result = schema.safeParse(parsed);
-  if (!result.success) {
-    const errorDesc = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    raw = await safeCall(
-      systemPrompt,
-      `${userPrompt}\n\nYour previous response did not match the required JSON schema. Errors: ${errorDesc}\nReturn corrected JSON only.`
-    );
-    try {
-      parsed = JSON.parse(raw || "{}");
-    } catch {
-      parsed = {};
-    }
-    result = schema.safeParse(parsed);
-  }
-
-  if (!result.success) {
-    // Last-resort: never throw on the question path — fall through to an empty PRD
-    // so the wizard can still hand the builder an editable draft.
-    if (input.forceFinal) return { kind: "prd", content: {} };
-    throw new Error("AI response validation failed");
-  }
+  const result = schema.safeParse(stripNullsDeep(parsed));
+  if (!result.success) return null;
 
   const data = result.data;
   if (data.kind === "questions") {
     return { kind: "questions", items: data.items };
   }
   return { kind: "prd", content: data.content as PrdContent, contextSummary: data.contextSummary };
+}
+
+/** A schema-valid, generic question round used when the model's interview output
+    can't be parsed even after a retry. Keeps the wizard moving (especially the
+    no-notes "deep context" path, where blank context makes the model most prone
+    to drift outside the strict Question schema) instead of dead-ending the builder
+    on "AI response validation failed".
+
+    It MUST NOT re-ask what's already on record. The fallback only ever runs on a
+    LATER round — round 0 serves the fixed OPENER_QUESTION directly and never hits
+    this path — so the product/idea is already captured (by the opener in deep mode,
+    or the builder's notes in standard mode). It asks only the two things still worth
+    capturing late — the EXACT go-live date and the hard constraints. The go-live
+    question is a dedicated DATE input (inputType "date", no options) so the builder
+    types a precise MM/DD/YYYY — mirroring the date question the model asks on the
+    normal interview path — and that exact date flows straight into
+    constraintsDetail.deadline and the back-planned milestoneList when the PRD
+    finalizes. It is marked skippable so a builder with no fixed date yet is never
+    blocked. The constraints question stays a pick-list; the wizard auto-appends an
+    "Other" option to every choice question, so it's always-answerable. Both never
+    block regardless of which round fires them.
+
+    It deliberately does NOT include an open-ended "anything about scope/users/
+    features we missed?" catch-all. The fallback can fire on more than one round
+    (blank deep-context context makes the model most prone to drift outside the
+    strict Question schema), and a vague catch-all gets re-shown verbatim each time —
+    so the builder saw the same "anything we haven't covered?" question early, skipped
+    it, then hit it again later. It captured nothing concrete and only added friction,
+    so it's gone; the two specific questions below are the whole fallback. */
+function fallbackQuestionResult(): PrdGenResult {
+  return {
+    kind: "questions",
+    items: [
+      {
+        id: "fallback-golive",
+        text: "What is the client's exact target go-live date?",
+        // Empty options + inputType "date" → the wizard renders the masked
+        // MM/DD/YYYY field (same as the model's date question), so the builder
+        // types a precise calendar date that back-plans the milestone timeline.
+        options: [],
+        inputType: "date",
+        multiSelect: false,
+        // Skippable: the degraded fallback must never block a builder who has no
+        // fixed date yet — when they do type one it lands as MM/DD/YYYY and feeds
+        // constraintsDetail.deadline + the back-planned milestoneList.
+        skippable: true,
+      },
+      {
+        id: "fallback-constraints",
+        text: "Are there any hard constraints we need to design around? (Select all that apply)",
+        options: [
+          "Budget ceiling we must stay under",
+          "Specific branding / design requirements",
+          "Security or compliance requirements",
+          "No hard constraints",
+        ],
+        inputType: "choice",
+        multiSelect: true,
+      },
+    ],
+  };
+}
+
+/** A resolved go-live date answer is a bare US calendar date (MM/DD/YYYY) — the
+    only shape the wizard's date input produces (whether the builder picked a
+    timeframe preset or typed an exact date). No other question type yields that
+    exact string, so a bare US date among the prior answers is the reliable signal
+    that the exact go-live date is already on record. */
+const US_DATE_RE = /^\d{2}\/\d{2}\/\d{4}$/;
+
+function hasDateAnswer(priorAnswers?: PrdAnswer[]): boolean {
+  return !!priorAnswers?.some((a) => US_DATE_RE.test(a.answer.trim()));
+}
+
+/** Normalize a question's text for verbatim-repeat comparison: trim, lowercase, and
+    collapse internal whitespace. Deliberately conservative — it matches only exact
+    re-asks (the fixed fallback questions re-served across rounds, or a model
+    copy-paste), never rephrasings, so genuinely distinct questions are never
+    collapsed. */
+function normalizeQuestionText(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Drop questions the builder has effectively already handled, so the interview never
+    re-asks something it already captured (the prompt calls re-asking "a failure";
+    this enforces it server-side). Two rules:
+    1. Date questions: the prompt requests the exact go-live date EVERY round and the
+       staged "security" step names it again, so a round can repeat it (across two
+       rounds, or twice within one). A PRD needs exactly ONE go-live date — keep at
+       most the FIRST date question, and drop every date question once a date
+       (MM/DD/YYYY) is already on record.
+    2. Any other question whose normalized text matches one already answered in a prior
+       round, or one already kept earlier in THIS round, is a verbatim repeat — drop
+       it. The canonical case is the fixed `fallback-constraints` question being
+       re-served on a later degraded round, which is what made the builder answer the
+       same "hard constraints" question twice.
+    May return an EMPTY array when every question was already handled (e.g. a second
+    fallback round whose date + constraints are both answered). Callers finalize the
+    PRD in that case rather than re-showing answered questions. */
+export function dedupeQuestions(items: Question[], priorAnswers?: PrdAnswer[]): Question[] {
+  const dateAnswered = hasDateAnswer(priorAnswers);
+  const answeredText = new Set((priorAnswers ?? []).map((a) => normalizeQuestionText(a.question)));
+  const seenThisRound = new Set<string>();
+  let keptDate = false;
+  return items.filter((q) => {
+    if (q.inputType === "date") {
+      if (dateAnswered || keptDate) return false;
+      keptDate = true;
+      return true;
+    }
+    const key = normalizeQuestionText(q.text);
+    if (answeredText.has(key) || seenThisRound.has(key)) return false;
+    seenThisRound.add(key);
+    return true;
+  });
+}
+
+/** Parse a raw generation response into the wizard result shape, degrading rather
+    than throwing on a validation failure: a forced-final failure becomes an empty
+    editable draft, and a question-round failure becomes a generic (schema-valid)
+    question set so the interview never dead-ends. Both are warn-logged. Shared by
+    the blocking action and the streaming route. */
+export function parsePrdResult(raw: string, forceFinal: boolean): PrdGenResult {
+  const parsed = tryParsePrdResult(raw, forceFinal);
+  if (parsed) return parsed;
+
+  if (forceFinal) {
+    console.warn("[generatePrd] schema validation failed; returning empty PRD draft");
+    return { kind: "prd", content: {} };
+  }
+  console.warn("[generatePrd] question-round validation failed; returning fallback questions");
+  return fallbackQuestionResult();
+}
+
+export async function generatePrd(input: PrdGenInput, meta?: AiCallMeta): Promise<PrdGenResult> {
+  const { systemPrompt, userPrompt } = buildPrdPrompts(input);
+
+  // When OPENAI_ENABLE_WEB_SEARCH is on, ground recommendations in live web
+  // research (json_object, with graceful fallback); otherwise use the plain chat
+  // call with strict structured outputs on the final round.
+  const useResearch = process.env.OPENAI_ENABLE_WEB_SEARCH === "true";
+  const callOnce = () =>
+    useResearch
+      ? callOpenAIWithResearch(systemPrompt, userPrompt, PRD_MAX_TOKENS, meta)
+      : callOpenAI(systemPrompt, userPrompt, PRD_MAX_TOKENS, prdResponseFormat(input.forceFinal), meta);
+
+  const raw = await callOnce();
+  let result = tryParsePrdResult(raw, input.forceFinal);
+
+  // A failed parse is usually transient and worth one retry before degrading:
+  //  - a question round drifting outside the strict Question schema (the round
+  //    uses plain json_object, not a json_schema), which the model self-corrects;
+  //  - a forced-final round whose JSON was TRUNCATED mid-document (the reasoning
+  //    pass + a deep PRD overran the token budget). That truncation is exactly
+  //    what produced the silent empty-draft fallback, so retrying the final round
+  //    too — rather than degrading straight to a blank PRD — is worth the second
+  //    generation. Both retry against the same (now headroom-bumped) cap.
+  if (!result) {
+    result = tryParsePrdResult(await callOnce(), input.forceFinal);
+  }
+
+  // Still unparseable: degrade gracefully (empty draft / fallback questions) via
+  // the shared, non-throwing parse path rather than surfacing a hard error.
+  if (!result) result = parsePrdResult(raw, input.forceFinal);
+
+  if (result.kind !== "questions") return result;
+
+  // Drop questions already answered in a prior round (or repeated within this round)
+  // so the interview never re-asks them — notably the fixed fallback questions, which
+  // can be re-served on a later degraded round. If that leaves nothing new to ask,
+  // there is no question round left to run: finalize the PRD instead of returning an
+  // empty round. forceFinal is strict-schema-constrained and resolves only to a "prd"
+  // result, so this cannot recurse.
+  const items = dedupeQuestions(result.items, input.answers);
+  if (items.length === 0) return generatePrd({ ...input, forceFinal: true }, meta);
+  return { kind: "questions", items };
 }

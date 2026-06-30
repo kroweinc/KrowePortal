@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { FileText, Sparkles, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { uploadResume, deleteResume, importFromResume } from "@/lib/actions/builder-profile";
 
 interface ResumeUploadProps {
@@ -15,6 +16,7 @@ export function ResumeUpload({ resumeFileName }: ResumeUploadProps) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -41,8 +43,18 @@ export function ResumeUpload({ resumeFileName }: ResumeUploadProps) {
     });
   }
 
-  function remove() {
-    if (!confirm("Remove your resume from the profile?")) return;
+  async function remove() {
+    if (
+      !(await confirm({
+        title: "Remove your resume?",
+        description: "It’ll be removed from your profile. You can upload a new one anytime.",
+        confirmText: "Remove resume",
+        cancelText: "Cancel",
+        icon: Trash2,
+        tone: "danger",
+      }))
+    )
+      return;
     startTransition(async () => {
       const result = await deleteResume();
       if (result.error) {
@@ -111,6 +123,7 @@ export function ResumeUpload({ resumeFileName }: ResumeUploadProps) {
           </Button>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }

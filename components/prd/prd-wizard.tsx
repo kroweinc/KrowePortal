@@ -23,12 +23,15 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { draftPrd } from "@/lib/actions/prds";
+import type { DraftPrdResult } from "@/lib/prd/draft-core";
+import { streamDraft } from "@/lib/ai/stream-client";
 import {
   addSopTranscriptText,
   uploadSopTranscript,
   deleteSopTranscript,
 } from "@/lib/actions/project-sop";
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
+import { SCOPE_STAGE_COUNT, SCOPE_OPENER, deepStageIndex, scopeStageAt } from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
 import type { ProjectSopTranscript } from "@/lib/types";
 
@@ -48,21 +51,68 @@ const isRealOption = (opt: string) => {
 const matchesRecommended = (opt: string, rec?: string) =>
   !!rec && opt.trim().toLowerCase() === rec.trim().toLowerCase();
 
-// Soft caps mirroring the server's question limits (lib/actions/prds.ts) so the
-// progress track reflects roughly how far along the sequential interview is.
-// Cosmetic only — the server owns the real cap and forced-final behavior.
-const SOFT_TARGET = 10;
-const SOFT_TARGET_DEEP = 14;
+// Mask free typing into MM/DD/YYYY: digits only, slashes auto-inserted as the
+// builder types so they never have to enter the separators themselves.
+function maskDate(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  const segs = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean);
+  return segs.join("/");
+}
+
+// Strict MM/DD/YYYY check: a real calendar date with a 4-digit year. Gates the
+// Next button on a "date" question so partial/invalid dates can't be submitted.
+function isValidDate(s: string): boolean {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s.trim());
+  if (!m) return false;
+  const mm = +m[1];
+  const dd = +m[2];
+  const yyyy = +m[3];
+  const d = new Date(yyyy, mm - 1, dd);
+  return d.getMonth() === mm - 1 && d.getDate() === dd && d.getFullYear() === yyyy;
+}
+
+// ── Date question: timeframe presets ──────────────────────────────────────
+// A "date" question is rendered as a multiple-choice section: the builder
+// first picks a rough window (weeks/months) which resolves to a concrete
+// target date within it, OR picks EXACT to type a precise MM/DD/YYYY. Either
+// way a real calendar date lands in otherText[q.id], which is what the rest of
+// the flow (validation, the AI's back-planned timeline) consumes.
+const EXACT = "__exact__";
+
+type DatePreset = { id: string; label: string; days: number };
+
+// `days` is a representative point inside each window (midpoint for ranges), so
+// the resolved date always falls within the window the label promises.
+const DATE_PRESETS: DatePreset[] = [
+  { id: "wk2", label: "In about 2 weeks", days: 14 },
+  { id: "mo2", label: "In 1–2 months", days: 45 },
+  { id: "mo3", label: "In 2–3 months", days: 75 },
+  { id: "mo6", label: "In 3–6 months", days: 135 },
+];
+
+function fmtUS(d: Date): string {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${mm}/${dd}/${d.getFullYear()}`;
+}
+
+// Today + N days as MM/DD/YYYY. Called only from click/keyboard handlers and
+// render of the questions phase (never during SSR — the wizard boots at the
+// "intro" state), so a client-side `new Date()` is hydration-safe here.
+function addDaysUS(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return fmtUS(d);
+}
 
 type AnswerEntry = { questionId: string; question: string; answer: string };
 
-// One answered step of the sequential interview, retained so "Back" can restore
-// the exact prior question + the builder's selection without a server round-trip.
-type Step = {
+// A generated round retained so the builder can step back into it: the questions
+// plus the live selections/free-text for each. Kept in the back/forward history.
+type RoundData = {
   items: Question[];
   selections: Record<string, string[]>;
   otherText: Record<string, string>;
-  answers: AnswerEntry[];
 };
 
 type WizardState =
@@ -135,7 +185,7 @@ function WzProgress({ label, index, total }: { label: string; index: number; tot
           {label}
         </span>
         <span className="wz-progress-count">
-          Question <b>{String(index + 1).padStart(2, "0")}</b>
+          <b>{String(Math.min(index + 1, total)).padStart(2, "0")}</b> / {String(total).padStart(2, "0")}
         </span>
       </div>
       <div className="wz-progress-track">
@@ -165,8 +215,8 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
             <span className="ed-doc-meta">{docMeta}</span>
           </div>
           <div className="ed-fill">
-            {facts.map((f, i) => (
-              <div key={`${i}-${f.key}`} className={`ed-fact ${f.status}`}>
+            {facts.map((f) => (
+              <div key={f.key} className={`ed-fact ${f.status}`}>
                 <span className="ed-fact-k">
                   {f.status === "done" ? (
                     <Check size={12} strokeWidth={3} />
@@ -189,39 +239,72 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
   );
 }
 
-// Full-screen "putting it together" panel, shown in the right sheet while the
-// next round (or the final PRD) generates so the left draft stays visible.
-function WizLoading({ label }: { label: string }) {
-  const lines = ["Reading your answers", "Sizing the market", "Drafting requirements", "Writing the verdict"];
-  const [step, setStep] = useState(0);
+// Expected generation durations (ms) driving the progress estimate. The bar eases
+// toward an asymptote, so finishing early just snaps to done — these are generous
+// upper-ish guesses, deliberately set so the estimate under-promises. Tune by
+// timing a few real runs once reasoning-effort tuning is live.
+const EXPECTED_FIRST_MS = 9000; // round 0: reading notes / preparing questions
+const EXPECTED_GENERATE_MS = 22000; // later rounds: may be the full PRD (the long one)
+
+// m:ss for a duration in ms.
+function fmtClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+// "Putting it together" panel with an estimated time-progress bar. Shown in the
+// right sheet (or the first-load spinner spot) while a round generates. The fill
+// eases toward a 92% cap so it never sits at 100% before the server responds; the
+// parent redirects/unmounts the instant generation resolves, which reads as done.
+function WizLoading({
+  label,
+  expectedMs,
+  onCancel,
+}: {
+  label: string;
+  expectedMs: number;
+  onCancel?: () => void;
+}) {
+  const [elapsed, setElapsed] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+
   useEffect(() => {
-    const reduce =
-      typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduce) return;
-    const t = setInterval(() => setStep((s) => (s + 1) % lines.length), 900);
+    setReduceMotion(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+    const start = Date.now();
+    const t = setInterval(() => setElapsed(Date.now() - start), 250);
     return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const ratio = elapsed / expectedMs;
+  const pct = Math.min(92, (1 - Math.exp(-1.6 * ratio)) * 92);
+  const over = elapsed >= expectedMs;
+
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 16,
-        minHeight: 360,
-        textAlign: "center",
-      }}
-    >
+    <div className="prd-progress">
       <Ember size={40} />
-      <p style={{ fontFamily: "var(--font-serif)", fontSize: 26, letterSpacing: "-0.01em", color: "var(--foreground)" }}>
-        {label}
-      </p>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, color: "var(--muted-foreground)", fontSize: 13.5 }}>
-        <Loader2 size={16} className="animate-spin" style={{ color: "var(--primary)" }} />
-        {lines[step]}…
+      <p className="prd-progress-title">{label}</p>
+
+      <div
+        className="prd-progress-bar"
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={label}
+      >
+        <span className={`prd-progress-fill ${reduceMotion ? "" : "shimmer"}`} style={{ width: `${pct}%` }} />
       </div>
+
+      <div className="prd-progress-meta">
+        <span>{fmtClock(elapsed)} elapsed</span>
+        <span>{over ? "Taking a little longer than usual…" : `~${fmtClock(expectedMs - elapsed)} left`}</span>
+      </div>
+
+      {onCancel && (
+        <button type="button" className="prd-progress-cancel" onClick={onCancel}>
+          Cancel · Esc
+        </button>
+      )}
     </div>
   );
 }
@@ -232,6 +315,9 @@ interface Props {
   backHref: string;
   initialTitle: string;
   initialSopTranscripts: ProjectSopTranscript[];
+  /** When true, the final generation streams progressively via the SSE route
+      (OPENAI_ENABLE_STREAMING). Off ⇒ the blocking draftPrd action path. */
+  streamingEnabled?: boolean;
 }
 
 export function PrdWizard({
@@ -240,29 +326,38 @@ export function PrdWizard({
   backHref,
   initialTitle,
   initialSopTranscripts,
+  streamingEnabled = false,
 }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
   const [title, setTitle] = useState(initialTitle);
   const [notes, setNotes] = useState("");
-  // Answered steps, newest last — drives "Back" between sequential questions.
-  const [history, setHistory] = useState<Step[]>([]);
-  const [answers, setAnswers] = useState<AnswerEntry[]>([]);
+  // Completed earlier rounds (back) and rounds we've stepped back out of but can
+  // step forward into again without regenerating (forward). The current round
+  // lives in `state` while answering; on submit it moves into `back`. The round
+  // index the builder is on is simply how many rounds sit behind them.
+  const [back, setBack] = useState<RoundData[]>([]);
+  const [forward, setForward] = useState<RoundData[]>([]);
+  const round = back.length;
   const [state, setState] = useState<WizardState>({ kind: "intro" });
   // Always points at the latest state so queued auto-advance timers and the
   // global keydown handler read fresh selections/cursor, never a stale closure.
   const stateRef = useRef(state);
   stateRef.current = state;
-  // Mirror latest answers/history too: the keydown handler and queued auto-advance
-  // timers only re-subscribe on a state.kind change, but "Back" mutates these
-  // WITHOUT one — so reading the live ref is the only stale-proof source.
-  const answersRef = useRef(answers);
-  answersRef.current = answers;
-  const historyRef = useRef(history);
-  historyRef.current = history;
-  // Pending single-select auto-advance timer.
-  const advTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirror the history into refs so the keydown handler and queued callbacks read
+  // fresh back/forward, never a stale closure (same pattern as stateRef).
+  const backRef = useRef<RoundData[]>([]);
+  backRef.current = back;
+  const forwardRef = useRef<RoundData[]>([]);
+  forwardRef.current = forward;
+  // Generation token: bumping it abandons the in-flight draft so a cancelled
+  // round can't navigate away or overwrite the screen when it finally resolves.
+  const genId = useRef(0);
+  // Aborts the in-flight streaming fetch on cancel — stops server work too.
+  const abortRef = useRef<AbortController | null>(null);
+  // Snapshot of the screen + round history to restore if a round is cancelled or fails.
+  const restoreRef = useRef<{ state: WizardState; back: RoundData[]; forward: RoundData[] } | null>(null);
   // Cosmetic only — the server decides behavior from the (empty) notes each round.
   const [deepMode, setDeepMode] = useState(false);
 
@@ -341,40 +436,50 @@ export function PrdWizard({
     });
   }
 
-  function run(nextAnswers: AnswerEntry[], nextRound: number, label: string, finalize = false) {
+  function run(nextAnswers: AnswerEntry[], nextRound: number, label: string) {
+    const myGen = ++genId.current;
     setState({ kind: "loading", label });
-    startTransition(async () => {
-      const result = await draftPrd({
-        projectId,
-        title: title.trim() || `${projectName} — PRD`,
-        notes: notes.trim() || undefined,
-        answers: nextAnswers,
-        round: nextRound,
-        finalize: finalize || undefined,
-      });
+
+    const payload = {
+      projectId,
+      title: title.trim() || `${projectName} — PRD`,
+      notes: notes.trim() || undefined,
+      answers: nextAnswers,
+      round: nextRound,
+    };
+
+    // One result handler for both the streaming and blocking paths.
+    const handle = (result: DraftPrdResult) => {
+      if (myGen !== genId.current) return; // cancelled — abandon the result
 
       if ("error" in result) {
         toast.error(result.error);
-        // Return to the question screen if we were mid-interview, else intro.
-        setState((prev) => (prev.kind === "loading" ? { kind: "intro" } : prev));
+        // Roll back to the screen the round was launched from, answers intact.
+        restoreScreen();
         return;
       }
 
       if (result.kind === "questions") {
+        // The model often reuses question ids ("q1", "q2") across rounds — and
+        // occasionally within one round — which collides React keys and the
+        // id-keyed selection/answer state (answering one question would bleed
+        // into another). Reassign a globally-unique id per question; the id is
+        // cosmetic (the server keys answers off question TEXT, not id).
+        const items = result.items.map((q, i) => ({ ...q, id: `r${nextRound}q${i}` }));
         setState({
           kind: "questions",
-          items: result.items,
+          items,
           // Pre-select the AI's recommended option (when it matches a real
           // option) so the builder just confirms; fully overridable.
           selections: Object.fromEntries(
-            result.items.map((q) => [
+            items.map((q) => [
               q.id,
               q.recommended && q.options.some((o) => matchesRecommended(o, q.recommended))
                 ? [q.recommended]
                 : ([] as string[]),
             ])
           ),
-          otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
+          otherText: Object.fromEntries(items.map((q) => [q.id, ""])),
           cursor: 0,
         });
         return;
@@ -382,21 +487,85 @@ export function PrdWizard({
 
       // Finished PRD — go to the editor.
       router.push(`${backHref}/prd/${result.prdId}`);
+    };
+
+    if (streamingEnabled) {
+      // Stream the generation for true server-side cancellation via
+      // AbortController. Falls back to an error toast on failure.
+      const controller = new AbortController();
+      abortRef.current = controller;
+      void (async () => {
+        try {
+          const evt = await streamDraft("/api/ai/prd/stream", payload, {
+            signal: controller.signal,
+          });
+          if (myGen !== genId.current) return;
+          if (evt.type === "questions") handle({ kind: "questions", items: evt.items });
+          else if (evt.type === "done" && evt.prdId) handle({ kind: "prd", prdId: evt.prdId });
+          else handle({ error: evt.type === "error" ? evt.error : "Generation failed." });
+        } catch (err) {
+          if (myGen !== genId.current) return; // aborted by cancelLoading — ignore
+          handle({ error: err instanceof Error ? err.message : "Generation failed." });
+        }
+      })();
+      return;
+    }
+
+    startTransition(async () => {
+      handle(await draftPrd(payload));
     });
   }
 
-  function start() {
-    if (!title.trim()) {
-      toast.error("Give the PRD a title first.");
-      return;
+  // Restore the pre-generation screen + round history from the snapshot.
+  function restoreScreen() {
+    const r = restoreRef.current;
+    if (r) {
+      setBack(r.back);
+      setForward(r.forward);
+      setState(r.state);
+    } else {
+      setState({ kind: "intro" });
     }
+  }
+
+  // Cancel an in-progress generation: abandon the draft and return to the
+  // screen the round was launched from, with the latest round rolled back out.
+  function cancelLoading() {
+    if (stateRef.current.kind !== "loading") return;
+    genId.current += 1;
+    // Abort the streaming fetch so the server stops generating (and skips the save).
+    abortRef.current?.abort();
+    abortRef.current = null;
+    restoreScreen();
+  }
+
+  // Esc cancels an in-progress generation, mirroring the on-screen Cancel button.
+  useEffect(() => {
+    if (state.kind !== "loading") return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelLoading();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state.kind]);
+
+  function start() {
+    // No title needed to begin — an empty title falls back to the project name in
+    // run(), so a no-notes builder can start straight from "what's your idea?".
     setDeepMode(!notes.trim());
-    setAnswers([]);
-    setHistory([]);
+    setBack([]);
+    setForward([]);
+    // Cancelling or failing the first round returns to this setup screen.
+    restoreRef.current = { state: { kind: "intro" }, back: [], forward: [] };
     run([], 0, notes.trim() ? "Reading your notes…" : "Preparing questions…");
   }
 
   function answerFor(q: Question, selections: Record<string, string[]>, otherText: Record<string, string>): string {
+    // Date and free-text questions store the typed value in otherText (no options).
+    if (q.inputType === "date" || q.inputType === "text") return (otherText[q.id] ?? "").trim();
     const sel = selections[q.id] ?? [];
     const parts: string[] = [];
     for (const s of sel) {
@@ -408,6 +577,13 @@ export function PrdWizard({
       }
     }
     return parts.join(", ");
+  }
+
+  // Whether the question has a usable answer. A date question requires a complete,
+  // valid MM/DD/YYYY; a free-text or choice question just needs a non-empty answer.
+  function isAnswered(q: Question, selections: Record<string, string[]>, otherText: Record<string, string>): boolean {
+    if (q.inputType === "date") return isValidDate(otherText[q.id] ?? "");
+    return answerFor(q, selections, otherText).length > 0;
   }
 
   function toggleOption(qId: string, opt: string, multi: boolean) {
@@ -423,61 +599,54 @@ export function PrdWizard({
     });
   }
 
+  // The flat answer list for a set of rounds, in order — what the server sees.
+  // Skipped/blank answers (e.g. an optional gap-filler the builder skipped) are
+  // dropped so they neither reach the model as empty Q/A nor show as "facts".
+  function roundToAnswers(rounds: RoundData[]): AnswerEntry[] {
+    return rounds.flatMap((r) =>
+      r.items
+        .map((q) => ({
+          questionId: q.id,
+          question: q.text,
+          answer: answerFor(q, r.selections, r.otherText),
+        }))
+        .filter((a) => a.answer.length > 0)
+    );
+  }
+
   function submitAnswers() {
     const s = stateRef.current;
     if (s.kind !== "questions") return;
-    const roundAnswers: AnswerEntry[] = s.items.map((q) => ({
-      questionId: q.id,
-      question: q.text,
-      answer: answerFor(q, s.selections, s.otherText),
-    }));
-    // Remember this step so the next question can be left via "Back".
-    const step: Step = {
-      items: s.items,
-      selections: s.selections,
-      otherText: s.otherText,
-      answers: roundAnswers,
-    };
-    const merged = [...answersRef.current, ...roundAnswers];
-    // The server forces the final PRD once the answer count hits the cap; mirror
-    // that here only to choose the right loading label.
-    const cap = deepMode ? SOFT_TARGET_DEEP : SOFT_TARGET;
-    const finalizing = merged.length >= cap;
-    setHistory((h) => [...h, step]);
-    setAnswers(merged);
-    run(merged, merged.length, finalizing ? "Putting your PRD together…" : "Reading your answer…");
-  }
+    const current: RoundData = { items: s.items, selections: s.selections, otherText: s.otherText };
 
-  // Escape hatch: stop interviewing and generate the PRD from whatever's been
-  // answered so far (including the current question if it's been answered).
-  function finishNow() {
-    clearAdvTimer();
-    const s = stateRef.current;
-    let merged = answersRef.current;
-    if (s.kind === "questions") {
-      const answeredNow = s.items
-        .map((q) => ({ questionId: q.id, question: q.text, answer: answerFor(q, s.selections, s.otherText) }))
-        .filter((a) => a.answer.length > 0);
-      if (answeredNow.length) {
-        merged = [...answersRef.current, ...answeredNow];
-        setAnswers(merged);
-      }
+    // Not at the frontier: the next round was already generated and we stepped
+    // back out of it. Move forward into it again instead of regenerating.
+    if (forwardRef.current.length > 0) {
+      const [next, ...rest] = forwardRef.current;
+      setBack((b) => [...b, current]);
+      setForward(rest);
+      setState({
+        kind: "questions",
+        items: next.items,
+        selections: next.selections,
+        otherText: next.otherText,
+        cursor: 0,
+      });
+      return;
     }
-    run(merged, merged.length, "Putting your PRD together…", true);
-  }
 
-  function clearAdvTimer() {
-    if (advTimer.current) {
-      clearTimeout(advTimer.current);
-      advTimer.current = null;
-    }
+    // Frontier: bank this round and generate the next round (or the final PRD).
+    const nextBack = [...backRef.current, current];
+    restoreRef.current = { state: s, back: backRef.current, forward: forwardRef.current };
+    setBack(nextBack);
+    setForward([]);
+    run(roundToAnswers(nextBack), nextBack.length, "Putting your PRD together…");
   }
 
   // Advance to the next question, or submit the whole round on the last one.
-  // Reads the latest state via stateRef so a queued auto-advance never acts on
-  // stale selections.
+  // Reads the latest state via stateRef so the handler never acts on stale
+  // selections.
   function goToNext() {
-    clearAdvTimer();
     const s = stateRef.current;
     if (s.kind !== "questions") return;
     if (s.cursor < s.items.length - 1) {
@@ -487,47 +656,81 @@ export function PrdWizard({
     }
   }
 
-  // Back one question; on the first question, leave the wizard (never silently
-  // drop already-merged answers from prior rounds).
+  // Back one question. At the first question of a round, step into the previous
+  // round (landing on its last question) so earlier answers can be reviewed and
+  // changed; at the very first question of the first round, return to setup.
   function goToPrev() {
-    clearAdvTimer();
     const s = stateRef.current;
     if (s.kind !== "questions") return;
     if (s.cursor > 0) {
       setState((prev) => (prev.kind === "questions" ? { ...prev, cursor: prev.cursor - 1 } : prev));
       return;
     }
-    // First question of the current step — step back to the previous question,
-    // restoring its options + the builder's prior selection without a server
-    // call. Its follow-up is discarded and regenerated on the way forward.
-    if (historyRef.current.length > 0) {
-      const prev = historyRef.current[historyRef.current.length - 1];
-      setHistory((h) => h.slice(0, -1));
-      setAnswers((a) => a.slice(0, Math.max(0, a.length - prev.answers.length)));
+    if (backRef.current.length > 0) {
+      const prev = backRef.current[backRef.current.length - 1];
+      const current: RoundData = { items: s.items, selections: s.selections, otherText: s.otherText };
+      setBack((b) => b.slice(0, -1));
+      setForward((f) => [current, ...f]);
       setState({
         kind: "questions",
         items: prev.items,
         selections: prev.selections,
         otherText: prev.otherText,
-        cursor: 0,
+        cursor: prev.items.length - 1,
       });
       return;
     }
-    router.push(backHref);
+    setState({ kind: "intro" });
   }
 
-  // Pick an option. Single-select auto-advances ~440ms after the choice;
-  // multi-select toggles and waits for an explicit Next.
+  // Pick an option. First click on a single-select option just selects it;
+  // clicking the option that's already selected confirms and advances. Multi-
+  // select always toggles and waits for an explicit Next.
   function pickOption(opt: string) {
-    clearAdvTimer();
     const s = stateRef.current;
     if (s.kind !== "questions") return;
     const q = s.items[s.cursor];
     if (!q) return;
-    toggleOption(q.id, opt, q.multiSelect);
-    if (!q.multiSelect && opt !== OTHER) {
-      advTimer.current = setTimeout(goToNext, 440);
+    if (q.multiSelect) {
+      toggleOption(q.id, opt, q.multiSelect);
+      return;
     }
+    // Single-select: a second click on the current choice moves on.
+    if ((s.selections[q.id] ?? []).includes(opt)) {
+      goToNext();
+      return;
+    }
+    toggleOption(q.id, opt, q.multiSelect);
+  }
+
+  // Date question — pick a timeframe window. The window resolves to a concrete
+  // calendar date (stored in otherText so it flows downstream); selections only
+  // tracks which option is highlighted.
+  function pickDatePreset(qId: string, presetId: string, resolved: string) {
+    setState((prev) =>
+      prev.kind === "questions"
+        ? {
+            ...prev,
+            selections: { ...prev.selections, [qId]: [presetId] },
+            otherText: { ...prev.otherText, [qId]: resolved },
+          }
+        : prev
+    );
+  }
+
+  // Date question — switch to the exact-date input. Clears any preset-resolved
+  // date so the builder types into an empty field (and the Next button re-locks
+  // until a full, valid MM/DD/YYYY is entered).
+  function selectExactDate(qId: string) {
+    setState((prev) =>
+      prev.kind === "questions"
+        ? {
+            ...prev,
+            selections: { ...prev.selections, [qId]: [EXACT] },
+            otherText: { ...prev.otherText, [qId]: "" },
+          }
+        : prev
+    );
   }
 
   // Keyboard interview controls: 1–N pick, Enter advances when answered,
@@ -549,6 +752,38 @@ export function PrdWizard({
       if (s.kind !== "questions") return;
       const q = s.items[s.cursor];
       if (!q) return;
+      // Date questions are a multiple-choice section: timeframe presets plus a
+      // trailing "exact date" option. 1–N picks one (the last index reveals the
+      // exact input); Enter advances once a date has resolved; ← goes back.
+      if (q.inputType === "date") {
+        const total = DATE_PRESETS.length + 1; // presets + exact
+        const n = parseInt(e.key, 10);
+        if (!Number.isNaN(n) && n >= 1 && n <= total) {
+          e.preventDefault();
+          if (n === total) selectExactDate(q.id);
+          else {
+            const p = DATE_PRESETS[n - 1];
+            pickDatePreset(q.id, p.id, addDaysUS(p.days));
+          }
+        } else if (e.key === "Enter" && isAnswered(q, s.selections, s.otherText)) {
+          e.preventDefault();
+          goToNext();
+        } else if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          goToPrev();
+        }
+        return;
+      }
+      // Free-text questions leave Enter to the textarea (newlines) and advance
+      // via the Next button. ← goes back. Typing is handled by the field itself,
+      // since the guard above already ignores text inputs.
+      if (q.inputType === "text") {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          goToPrev();
+        }
+        return;
+      }
       const opts = [...q.options.filter(isRealOption), OTHER];
       const n = parseInt(e.key, 10);
       if (!Number.isNaN(n) && n >= 1 && n <= opts.length) {
@@ -557,7 +792,7 @@ export function PrdWizard({
         if (opt === OTHER) toggleOption(q.id, OTHER, q.multiSelect);
         else pickOption(opt);
       } else if (e.key === "Enter") {
-        if (answerFor(q, s.selections, s.otherText).length > 0) {
+        if (isAnswered(q, s.selections, s.otherText)) {
           e.preventDefault();
           goToNext();
         }
@@ -570,14 +805,6 @@ export function PrdWizard({
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.kind]);
-
-  // Clear any pending auto-advance timer on unmount.
-  useEffect(
-    () => () => {
-      if (advTimer.current) clearTimeout(advTimer.current);
-    },
-    []
-  );
 
   const hasNotes = notes.trim().length > 0;
 
@@ -822,12 +1049,12 @@ export function PrdWizard({
       )}
 
       {state.kind === "loading" &&
-        (answers.length > 0 ? (
+        (back.length > 0 ? (
           // Mid-interview: keep the editorial overlay up with the draft visible
           // on the left while the next round (or the final PRD) generates.
           <div className="ed">
             <DraftStage
-              facts={answers.map((a) => ({
+              facts={roundToAnswers(back).map((a) => ({
                 key: a.questionId,
                 label: factLabel(a.question),
                 value: a.answer,
@@ -839,18 +1066,15 @@ export function PrdWizard({
             <section className="ed-sheet">
               <div className="ed-sheet-body">
                 <div className="ed-sheet-inner">
-                  <WizLoading label={state.label} />
+                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} />
                 </div>
               </div>
             </section>
           </div>
         ) : (
-          // First load (no answers yet): simple in-page spinner.
+          // First load (no answers yet): in-page progress meter.
           <div className="prd-loading">
-            <span className="spin">
-              <Loader2 size={22} />
-            </span>
-            <p>{state.label}</p>
+            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} />
           </div>
         ))}
 
@@ -858,20 +1082,33 @@ export function PrdWizard({
         (() => {
           const q = state.items[state.cursor];
           if (!q) return null;
+          const total = state.items.length;
           const selected = state.selections[q.id] ?? [];
           const otherOn = selected.includes(OTHER);
-          const answered = answerFor(q, state.selections, state.otherText).length > 0;
+          const isLast = state.cursor === total - 1;
+          // Only the last question of the newest round actually generates; a last
+          // question with a round still ahead just steps forward into it.
+          const isFinalSubmit = isLast && forward.length === 0;
+          const answered = isAnswered(q, state.selections, state.otherText);
+          // Optional questions (e.g. the catch-all gap-filler) can be skipped: the
+          // Skip control shows until the builder starts typing an answer.
+          const canSkip = !!q.skippable && !answered;
+          const isDate = q.inputType === "date";
+          const isText = q.inputType === "text";
           const optList = [...q.options.filter(isRealOption), OTHER];
-          // Sequential interview: position of THIS question across the whole run,
-          // and whether answering it will trip the server's forced-final cap.
-          const cap = deepMode ? SOFT_TARGET_DEEP : SOFT_TARGET;
-          const answeredCount = answers.length + state.cursor;
-          const isRoundLast = state.cursor === state.items.length - 1;
-          const willFinalize = isRoundLast && answeredCount + 1 >= cap;
+          // No-notes flow runs the fixed scope backbone. Round 0 is the unnumbered
+          // free-text opener ("Your idea"); rounds 1..N are the numbered stages
+          // ("Step 2 of 4 · Users & roles") via deepStageIndex(round).
+          const stageIdx = deepMode ? deepStageIndex(round) : null;
+          const progressLabel = !deepMode
+            ? "Sharpening the PRD"
+            : stageIdx === null
+              ? SCOPE_OPENER.label
+              : `Step ${stageIdx + 1} of ${SCOPE_STAGE_COUNT} · ${scopeStageAt(stageIdx).label}`;
 
           // Left "draft" doc grows across rounds: answered facts from prior
           // rounds (always done) + this round's questions (active/done/pending).
-          const priorFacts: Fact[] = answers.map((a) => ({
+          const priorFacts: Fact[] = roundToAnswers(back).map((a) => ({
             key: a.questionId,
             label: factLabel(a.question),
             value: a.answer,
@@ -900,26 +1137,118 @@ export function PrdWizard({
                     <span className="ci">
                       <ArrowLeft size={15} strokeWidth={2} />
                     </span>
-                    {state.cursor === 0 && history.length === 0 ? "Setup" : "Back"}
+                    {state.cursor === 0 && back.length === 0 ? "Setup" : "Back"}
                   </button>
                   <button type="button" className="linkbtn" onClick={() => router.push(backHref)}>
-                    Save &amp; exit
+                    Cancel
                   </button>
                 </div>
 
                 <div className="ed-sheet-body">
-                  <div key={answeredCount} className="ed-sheet-inner ed-anim">
-                    <WzProgress
-                      label={deepMode ? "Building the context" : "Sharpening the PRD"}
-                      index={answeredCount}
-                      total={cap}
-                    />
+                  <div key={state.cursor} className="ed-sheet-inner ed-anim">
+                    <WzProgress label={progressLabel} index={state.cursor} total={total} />
                     <h1 className="ed-q-text">
                       {q.text}
-                      {q.multiSelect && <span className="ed-q-multi">— all that apply</span>}
                     </h1>
                     <div className="ed-opts">
-                      {optList.map((opt) => {
+                      {isDate ? (
+                        <>
+                          {/* Timeframe windows — each resolves to a concrete date. */}
+                          {DATE_PRESETS.map((p) => {
+                            const resolved = addDaysUS(p.days);
+                            const on = selected.includes(p.id);
+                            return (
+                              <label key={p.id} className={`ed-opt ${on ? "on" : ""}`}>
+                                <input
+                                  className="ed-opt-input"
+                                  type="radio"
+                                  name={q.id}
+                                  checked={on}
+                                  readOnly
+                                  onClick={() => pickDatePreset(q.id, p.id, resolved)}
+                                />
+                                <span className="ed-radio">
+                                  <Check size={12} strokeWidth={3} />
+                                </span>
+                                <span className="ed-opt-main">
+                                  <span className="ed-opt-line">
+                                    <span className="ed-opt-label">{p.label}</span>
+                                  </span>
+                                  <span className="ed-opt-sub">Targets {resolved}</span>
+                                </span>
+                              </label>
+                            );
+                          })}
+                          {/* Escape hatch — reveals the precise MM/DD/YYYY input. */}
+                          <label className={`ed-opt ${selected.includes(EXACT) ? "on" : ""}`}>
+                            <input
+                              className="ed-opt-input"
+                              type="radio"
+                              name={q.id}
+                              checked={selected.includes(EXACT)}
+                              readOnly
+                              onClick={() => selectExactDate(q.id)}
+                            />
+                            <span className="ed-radio">
+                              <Check size={12} strokeWidth={3} />
+                            </span>
+                            <span className="ed-opt-main">
+                              <span className="ed-opt-line">
+                                <span className="ed-opt-label">I have an exact date</span>
+                              </span>
+                              <span className="ed-opt-sub">Type the precise go-live date</span>
+                            </span>
+                          </label>
+                          {selected.includes(EXACT) && (
+                            <div className="ed-date">
+                              <input
+                                className="ed-date-input"
+                                type="text"
+                                inputMode="numeric"
+                                autoFocus
+                                maxLength={10}
+                                placeholder="MM/DD/YYYY"
+                                value={state.otherText[q.id] ?? ""}
+                                onChange={(e) =>
+                                  setState((prev) =>
+                                    prev.kind === "questions"
+                                      ? {
+                                          ...prev,
+                                          otherText: { ...prev.otherText, [q.id]: maskDate(e.target.value) },
+                                        }
+                                      : prev
+                                  )
+                                }
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && answered) {
+                                    e.preventDefault();
+                                    goToNext();
+                                  }
+                                }}
+                              />
+                              <span className="ed-date-hint">
+                                Type the exact date — e.g. 09/15/2026
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      ) : isText ? (
+                        <textarea
+                          className="ed-other-area"
+                          autoFocus
+                          value={state.otherText[q.id] ?? ""}
+                          onChange={(e) =>
+                            setState((prev) =>
+                              prev.kind === "questions"
+                                ? { ...prev, otherText: { ...prev.otherText, [q.id]: e.target.value } }
+                                : prev
+                            )
+                          }
+                          placeholder="Describe it in your own words — a sentence or two is plenty…"
+                        />
+                      ) : (
+                        <>
+                          {optList.map((opt) => {
                         const on = selected.includes(opt);
                         const isOther = opt === OTHER;
                         const isRecommended = matchesRecommended(opt, q.recommended);
@@ -930,7 +1259,11 @@ export function PrdWizard({
                               type={q.multiSelect ? "checkbox" : "radio"}
                               name={q.id}
                               checked={on}
-                              onChange={() =>
+                              readOnly
+                              // onClick (not onChange): re-clicking the already-selected
+                              // radio fires no change event, but that second click is
+                              // exactly what should confirm the choice and advance.
+                              onClick={() =>
                                 isOther ? toggleOption(q.id, OTHER, q.multiSelect) : pickOption(opt)
                               }
                             />
@@ -975,25 +1308,37 @@ export function PrdWizard({
                           placeholder="Type the answer in your own words…"
                         />
                       )}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="ed-sheet-foot">
-                  <span className="foot-hint">
-                    <span className="ed-kbd">1–{optList.length}</span>&nbsp;to pick
-                  </span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                    {answers.length >= 1 && !willFinalize && (
-                      <button type="button" className="linkbtn" onClick={finishNow}>
-                        Generate now
+                  <div className="ed-foot-left">
+                    <span className="foot-hint">
+                      {isDate ? (
+                        <>
+                          <span className="ed-kbd">1–{DATE_PRESETS.length + 1}</span>&nbsp;to pick
+                        </>
+                      ) : isText ? (
+                        <>type your answer, then&nbsp;Next</>
+                      ) : (
+                        <>
+                          <span className="ed-kbd">1–{optList.length}</span>&nbsp;to pick
+                        </>
+                      )}
+                    </span>
+                    {canSkip && (
+                      <button type="button" className="linkbtn" onClick={goToNext}>
+                        Skip
                       </button>
                     )}
-                    <button className="btn-primary" disabled={!answered} onClick={goToNext}>
-                      {willFinalize ? "Generate my report" : "Next question"}
-                      <ArrowRight size={16} strokeWidth={2} />
-                    </button>
                   </div>
+                  <button className="btn-primary" disabled={!answered} onClick={goToNext}>
+                    {isFinalSubmit ? "Generate my report" : "Next question"}
+                    <ArrowRight size={16} strokeWidth={2} />
+                  </button>
                 </div>
               </section>
             </div>

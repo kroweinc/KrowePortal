@@ -60,6 +60,7 @@ function defaultRepoFrom(conn: ConnectionRow): {
 type EngagementRow = {
   id: string;
   builder_id: string;
+  operator_id: string | null;
   github_repo_owner: string | null;
   github_repo_name: string | null;
   github_repo_full_name: string | null;
@@ -70,6 +71,19 @@ async function resolveFromEngagement(
   engagement: EngagementRow | null,
   currentProfileId: string
 ): Promise<EngagementRepo | null> {
+  // Authorization gate: when this resolves an actual engagement, the caller must
+  // be a member of it (builder or operator). Without this, any authenticated user
+  // could pass another engagement's task/engagement id and read its commits —
+  // and the builder-token fallback below would even fetch them with the builder's
+  // token (confused deputy). The fallback is safe only because we gate here first.
+  if (
+    engagement &&
+    currentProfileId !== engagement.builder_id &&
+    currentProfileId !== engagement.operator_id
+  ) {
+    return null;
+  }
+
   const supabase = createAdminClient();
 
   const currentConn = await loadConnection(supabase, currentProfileId);
@@ -144,7 +158,7 @@ export async function getEngagementRepoForTask(
     ? await supabase
         .from("engagements")
         .select(
-          "id, builder_id, github_repo_owner, github_repo_name, github_repo_full_name, github_default_branch"
+          "id, builder_id, operator_id, github_repo_owner, github_repo_name, github_repo_full_name, github_default_branch"
         )
         .eq("id", task.engagement_id)
         .maybeSingle<EngagementRow>()

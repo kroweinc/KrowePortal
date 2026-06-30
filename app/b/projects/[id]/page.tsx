@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { getCurrentProfile } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
-import { getPrdsByProject } from "@/lib/actions/prds";
+import { getPrdSummariesByProject } from "@/lib/actions/prds";
 import { getQuotesByProject } from "@/lib/actions/quote-docs";
 import { getContractsByProject } from "@/lib/actions/contracts";
 import { getProjectMaterials } from "@/lib/actions/project-materials";
@@ -48,7 +48,7 @@ export default async function ProjectDetailPage({
 
   const [quoteDocs, prds, contracts, materials, sopTranscripts, engagement] = await Promise.all([
     getQuotesByProject(id),
-    getPrdsByProject(id),
+    getPrdSummariesByProject(id),
     getContractsByProject(id),
     getProjectMaterials(id),
     getProjectSopTranscripts(id),

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Sparkles, Wand2, X } from "lucide-react";
+import { Plus, Sparkles, Wand2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { BUILDER_TAG_PRESETS } from "@/lib/types";
 import { useProfileDraft } from "./profile-draft-context";
@@ -97,25 +97,28 @@ export function TagsEditor() {
         </p>
       </div>
 
-      {shownAutoTags.length > 0 && (
+      {shownAutoTags.length > 0 && tags.length < MAX_TAGS && (
         <div className="space-y-1.5 rounded-md border border-emerald-100 bg-emerald-50/50 p-2.5">
           <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-700">
-            <Wand2 className="h-3 w-3" /> Added automatically from your profile
+            <Wand2 className="h-3 w-3" /> Recommended from your profile
           </p>
           <div className="flex flex-wrap gap-1.5">
             {shownAutoTags.map((tag) => (
-              <span
+              <button
                 key={tag}
-                className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800"
+                type="button"
+                onClick={() => addTag(tag)}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 hover:bg-emerald-200"
+                aria-label={`Add ${tag}`}
               >
-                <Sparkles className="h-3 w-3" />
+                <Plus className="h-3 w-3" />
                 {tag}
-              </span>
+              </button>
             ))}
           </div>
           <p className="text-[11px] text-emerald-600/80">
-            These update on their own as you fill out your profile. Edit the matching
-            section to change them.
+            Suggested from your projects, experience, and tools. Click one to add it to
+            your profile.
           </p>
         </div>
       )}

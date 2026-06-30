@@ -3,7 +3,9 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { CalendarOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { setAvailability, clearAvailability } from "@/lib/actions/engagement";
 import type { BuilderAvailability, AvailabilityStatus } from "@/lib/types";
 
@@ -16,6 +18,7 @@ export function AvailabilityEditor({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
   const [status, setStatus] = useState<AvailabilityStatus>(availability?.status ?? "available");
   const [hours, setHours] = useState<string>(
     availability?.weekly_hours != null ? String(availability.weekly_hours) : ""
@@ -38,10 +41,15 @@ export function AvailabilityEditor({
     });
   }
 
-  function clear() {
-    const confirmed = window.confirm(
-      "Remove your availability for this client? The operator will no longer see a status."
-    );
+  async function clear() {
+    const confirmed = await confirm({
+      title: "Clear your availability?",
+      description: "The operator will no longer see a status for this client. You can set it again anytime.",
+      confirmText: "Clear availability",
+      cancelText: "Cancel",
+      icon: CalendarOff,
+      tone: "danger",
+    });
     if (!confirmed) return;
     startTransition(async () => {
       const result = await clearAvailability(engagementId);
@@ -103,6 +111,7 @@ export function AvailabilityEditor({
           {isPending ? "Saving…" : "Save"}
         </Button>
       </div>
+      {confirmDialog}
     </div>
   );
 }

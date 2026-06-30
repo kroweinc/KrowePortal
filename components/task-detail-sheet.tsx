@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   AlignLeft,
   ArrowRight,
+  Check,
   GitBranch,
   Info,
   Link2,
@@ -28,7 +29,7 @@ import {
   InlineTextarea,
   InlineSelect,
 } from "@/components/inline-edit";
-import { updateTask, updateTaskStatus } from "@/lib/actions/tasks";
+import { approveTask, updateTask, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
 import { TaskSubtasks } from "@/components/task-subtasks";
@@ -165,8 +166,27 @@ function TaskDetailBody({
         });
       });
     }
-    await updateTaskStatus(task.id, value);
+    const result = await updateTaskStatus(task.id, value);
+    if (result && "error" in result) {
+      setToast(result.error || "Couldn't update status");
+      return;
+    }
     setToast(`Moved to ${statusLabel(value)}`);
+    router.refresh();
+  }
+
+  // Operators don't drive the pipeline — they only sign off on work the builder
+  // sent for approval.
+  const awaitingApproval =
+    role === "operator" && !!task.approval_sent_at && !task.approval_approved_at;
+
+  async function handleApprove() {
+    const result = await approveTask(task.id);
+    if (result && "error" in result) {
+      setToast(result.error || "Couldn't approve");
+      return;
+    }
+    setToast("Approved");
     router.refresh();
   }
 
@@ -184,9 +204,6 @@ function TaskDetailBody({
   const nextStatus = currentIndex >= 0 ? STATUS_FLOW[currentIndex + 1] : undefined;
   const deliverableAttachments = (task.task_attachments ?? []).filter(
     (a) => a.is_deliverable,
-  );
-  const regularAttachments = (task.task_attachments ?? []).filter(
-    (a) => !a.is_deliverable,
   );
   const hasDeliverable = task.status === "done";
   const hasDeliverableSummary =
@@ -302,7 +319,7 @@ function TaskDetailBody({
         </header>
 
         {/* STATUS PIPELINE */}
-        <StatusPipeline status={task.status} onChange={saveStatus} />
+        <StatusPipeline status={task.status} role={role} onChange={saveStatus} />
 
         {/* Operator-only plain-English control */}
         {role === "operator" && (
@@ -363,7 +380,7 @@ function TaskDetailBody({
                 taskId={task.id}
                 role={role}
                 currentUserId={currentUserId}
-                initial={deliverableAttachments}
+                initial={[]}
                 isDeliverable={true}
                 readOnly={true}
               />
@@ -400,7 +417,7 @@ function TaskDetailBody({
               taskId={task.id}
               role={role}
               currentUserId={currentUserId}
-              initial={regularAttachments}
+              initial={[]}
               isDeliverable={false}
             />
           </div>
@@ -424,16 +441,27 @@ function TaskDetailBody({
           variant="ghost"
           onSuccess={() => onOpenChange(false)}
         />
-        {nextStatus && (
-          <button
-            type="button"
-            className="krowe-btn-pill primary"
-            onClick={() => saveStatus(nextStatus.value)}
-          >
-            <ArrowRight className="h-3.5 w-3.5" />
-            Move to {nextStatus.label}
-          </button>
-        )}
+        {role === "operator"
+          ? awaitingApproval && (
+              <button
+                type="button"
+                className="krowe-btn-pill primary"
+                onClick={handleApprove}
+              >
+                <Check className="h-3.5 w-3.5" />
+                Approve deliverable
+              </button>
+            )
+          : nextStatus && (
+              <button
+                type="button"
+                className="krowe-btn-pill primary"
+                onClick={() => saveStatus(nextStatus.value)}
+              >
+                <ArrowRight className="h-3.5 w-3.5" />
+                Move to {nextStatus.label}
+              </button>
+            )}
       </footer>
 
       {toast && <div className="krowe-toast">{toast}</div>}
@@ -443,12 +471,17 @@ function TaskDetailBody({
 
 function StatusPipeline({
   status,
+  role,
   onChange,
 }: {
   status: TaskStatus;
+  role: Role;
   onChange: (s: TaskStatus) => void;
 }) {
   const active = statusIndex(status);
+  // Operators don't drive the pipeline — for them it's a read-only status
+  // indicator. Their only status action is "Move to Approval" in the footer.
+  const interactive = role !== "operator";
   return (
     <div className="krowe-pipeline" role="group" aria-label="Task status">
       {STATUS_FLOW.map((s, i) => {
@@ -458,8 +491,9 @@ function StatusPipeline({
             key={s.value}
             type="button"
             className={`krowe-pipe-step ${cls}`}
-            onClick={() => onChange(s.value)}
+            onClick={interactive ? () => onChange(s.value) : undefined}
             aria-pressed={i === active}
+            style={interactive ? undefined : { cursor: "default", pointerEvents: "none" }}
           >
             <span className="num">{String(i + 1).padStart(2, "0")}</span>
             <span className="lbl">{s.label}</span>

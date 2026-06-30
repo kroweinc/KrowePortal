@@ -11,7 +11,7 @@
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Check, Link2, Plus, X } from "lucide-react";
+import { Send, Check, Link2, Plus, X, Trash2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import {
   updateContractContent,
@@ -28,9 +28,11 @@ import { ContractDocument } from "@/components/contract/contract-document";
 import { useTodayISODate } from "@/lib/contract/use-today";
 import { formatEffectiveDate } from "@/lib/contract/effective-date";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
+import { ShareLinkControls } from "@/components/doc/share-link-controls";
 import { EditContext, InlineText } from "@/components/prd/dashboard/inline-edit";
 import { EditorSection, TextField, StringListEditor } from "@/components/doc/editor-primitives";
 import { formatUSD, parseMoney } from "@/lib/quote/format";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import "@/components/prd/dashboard/prd-dashboard.css";
 import "@/components/quote/quote.css";
 
@@ -74,6 +76,7 @@ interface ContractDashboardProps {
 export function ContractDashboard({ contract, backHref, projectName }: ContractDashboardProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [confirm, confirmDialog] = useConfirm();
 
   const isDraft = contract.status === "draft";
   const [mode, setMode] = useState<"edit" | "preview">(isDraft ? "edit" : "preview");
@@ -173,8 +176,18 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
     return true;
   }
 
-  function send() {
-    if (!confirm("Send this contract to the client? You can still edit it afterward.")) return;
+  async function send() {
+    if (
+      !(await confirm({
+        title: "Send this contract to the client?",
+        description:
+          "They’ll get a link to the live document. You can still edit it afterward — changes appear instantly.",
+        confirmText: "Send to client",
+        icon: Send,
+        tone: "brand",
+      }))
+    )
+      return;
     startTransition(async () => {
       if (!(await publish())) return;
       toast.success("Contract sent");
@@ -182,8 +195,19 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
     });
   }
 
-  function copyLink() {
-    if (isDraft && !confirm("Sharing a link makes this contract visible to the client. Continue?")) return;
+  async function copyLink() {
+    if (
+      isDraft &&
+      !(await confirm({
+        title: "Share this contract with the client?",
+        description:
+          "Copying the link publishes this draft so the client can open it. You can keep editing afterward.",
+        confirmText: "Copy share link",
+        icon: Link2,
+        tone: "brand",
+      }))
+    )
+      return;
     const wasDraft = isDraft;
     startTransition(async () => {
       if (!(await publish())) return;
@@ -198,8 +222,18 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
     });
   }
 
-  function remove() {
-    if (!confirm("Delete this draft? This cannot be undone.")) return;
+  async function remove() {
+    if (
+      !(await confirm({
+        title: "Delete this draft?",
+        description: "This permanently removes the contract. This can’t be undone.",
+        confirmText: "Delete draft",
+        cancelText: "Keep draft",
+        icon: Trash2,
+        tone: "danger",
+      }))
+    )
+      return;
     startTransition(async () => {
       const result = await deleteContract(contract.id);
       if ("error" in result) {
@@ -250,6 +284,14 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
             <button type="button" className="prd-btn prd-btn--outline" onClick={copyLink} disabled={isPending}>
               <Link2 className="h-3.5 w-3.5" /> Copy link
             </button>
+            <ShareLinkControls
+              kind="contract"
+              id={contract.id}
+              token={contract.token}
+              expiresAt={contract.token_expires_at}
+              revokedAt={contract.token_revoked_at}
+              isDraft={isDraft}
+            />
             {editing && (
               <div className="dash-actions">
                 {isDraft && (
@@ -381,6 +423,8 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
             </div>
           )}
         </div>
+
+        {confirmDialog}
       </div>
 
       {/* Print-only canonical document — surfaced on Download PDF so the PDF
