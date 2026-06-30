@@ -10,6 +10,8 @@ import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { ApprovalPill } from "@/components/approval-pill";
 import { DeliveryChips } from "@/components/design-atoms";
+import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
+import { submitterName } from "@/lib/utils";
 import type { Task, Role, TaskStatus } from "@/lib/types";
 
 const NEXT_STATUS: Record<TaskStatus, TaskStatus | null> = {
@@ -35,7 +37,6 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
   const nextStatus = NEXT_STATUS[task.status];
-  const sourceLabel = task.source === "operator_request" ? "operator" : "builder";
 
   async function handleAdvance() {
     if (!nextStatus) return;
@@ -107,7 +108,8 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
           <span className={`krowe-prio-dot ${task.priority}`}>
             <span className="d" />
           </span>
-          <span className={`krowe-chip krowe-chip-source ${sourceLabel}`}>{sourceLabel}</span>
+          <TaskTypeBadge type={task.type} />
+          <TaskTags tags={task.tags} />
         </div>
         <div className="krowe-card-actions">
           {role === "builder" && nextStatus && (
@@ -160,6 +162,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
             timeZone: "UTC",
           })}
         </span>
+        <span className="krowe-card-submitter">{submitterName(task.creator)}</span>
       </div>
     </div>
     {confirmDialog}

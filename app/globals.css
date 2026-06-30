@@ -637,6 +637,26 @@ button:focus-visible {
 .krowe-chip-source.builder  { background: color-mix(in srgb, #3b82f6 10%, white); color: #1d4ed8; }
 .krowe-chip-source.operator { background: color-mix(in srgb, #8b5cf6 10%, white); color: #6d28d9; }
 
+/* Linear-style change type. Feature=green, Bug=red, Change=blue. */
+.krowe-chip-type { font-size: 10.5px; padding: 2px 8px 2px 6px; }
+.krowe-chip-type svg { flex-shrink: 0; }
+.krowe-chip-type.feature { background: var(--success-soft); color: var(--success); }
+.krowe-chip-type.bug     { background: var(--danger-soft);  color: var(--danger);  }
+.krowe-chip-type.change  { background: color-mix(in srgb, #3b82f6 12%, white); color: #1d4ed8; }
+
+/* AI-generated area labels. */
+.krowe-chip-tag {
+  font-family: var(--font-mono); font-size: 10px; padding: 2px 7px;
+  background: var(--surface-subtle); color: var(--muted-foreground);
+  border-color: var(--border);
+}
+
+/* "Submitted by {name}" — replaces the old operator/builder source chip. */
+.krowe-card-submitter {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--muted-foreground); white-space: nowrap;
+}
+
 .krowe-chip-status { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 8px; }
 .krowe-chip-status.inbox       { background: var(--surface-subtle); color: var(--muted-foreground); border-color: var(--border); }
 .krowe-chip-status.in_progress { background: color-mix(in srgb, var(--primary) 10%, white); color: color-mix(in srgb, var(--primary) 90%, black); }

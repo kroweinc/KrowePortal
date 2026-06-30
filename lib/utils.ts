@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { TaskPriority, TaskStatus } from "@/lib/types";
+import type { TaskPriority, TaskStatus, TaskType } from "@/lib/types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -25,3 +25,27 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   blocked: "Approval",
   done: "Done",
 };
+
+export const TASK_TYPE_LABELS: Record<TaskType, string> = {
+  feature: "Feature",
+  bug: "Bug",
+  change: "Change",
+};
+
+// Option list for the InlineSelect type override in the task detail.
+export const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
+  { value: "feature", label: "Feature" },
+  { value: "bug", label: "Bug" },
+  { value: "change", label: "Change" },
+];
+
+/** Display name of whoever submitted a task (joined as `creator`). Falls back to
+ *  a capitalized role, then "Unknown" — used in place of the old source badge. */
+export function submitterName(
+  creator?: { display_name: string | null; role: "operator" | "builder" } | null
+): string {
+  const name = creator?.display_name?.trim();
+  if (name) return name;
+  if (creator?.role) return creator.role.charAt(0).toUpperCase() + creator.role.slice(1);
+  return "Unknown";
+}

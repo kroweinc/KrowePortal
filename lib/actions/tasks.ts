@@ -7,9 +7,10 @@ import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
+import { classifyAndSaveTask } from "@/lib/actions/classify-task";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
 import { isTaskMember } from "@/lib/actions/task-access";
-import type { TaskStatus } from "@/lib/types";
+import { TASK_TAGS, type TaskStatus } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -20,11 +21,26 @@ const createTaskSchema = z.object({
   title: z.string().min(1).max(300),
   description: z.string().optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).default("medium"),
+  // Optional Linear-style classification, supplied pre-classified by the AI draft
+  // flow (new-task-form). Absent on manual entry, which classifies after creation.
+  type: z.enum(["feature", "bug", "change"]).optional(),
+  tags: z.array(z.enum(TASK_TAGS)).max(1).optional(),
 });
 
 export async function createTask(formData: FormData) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+
+  // tags arrive as a JSON-encoded array from the AI draft form; parse leniently.
+  const rawTags = formData.get("tags");
+  let tags: unknown = undefined;
+  if (typeof rawTags === "string" && rawTags) {
+    try {
+      tags = JSON.parse(rawTags);
+    } catch {
+      tags = undefined;
+    }
+  }
 
   const rawEngagementId = formData.get("engagement_id");
   const parsed = createTaskSchema.safeParse({
@@ -32,6 +48,8 @@ export async function createTask(formData: FormData) {
     title: formData.get("title"),
     description: formData.get("description") || undefined,
     priority: formData.get("priority") || undefined,
+    type: formData.get("type") || undefined,
+    tags,
   });
 
   if (!parsed.success) return { error: "Invalid input" };
@@ -42,6 +60,10 @@ export async function createTask(formData: FormData) {
     title: parsed.data.title,
     description: parsed.data.description ?? null,
     priority: parsed.data.priority,
+    // Pre-classified by the AI draft; null/[] on manual entry (filled by the
+    // deferred classifier below).
+    type: parsed.data.type ?? null,
+    tags: parsed.data.tags ?? [],
     source: profile.role === "operator" ? "operator_request" : "builder_added",
     created_by: profile.id,
   }).select("id").single();
@@ -59,9 +81,9 @@ export async function createTask(formData: FormData) {
     },
   });
 
-  // The AI hours estimate is a 1-3s OpenAI round-trip that self-persists to the
-  // task row. Defer it past the response with after() so "Add task" returns
-  // instantly; the estimate fills in on the next revalidation/navigation.
+  // The AI hours estimate is an OpenAI round-trip that self-persists to the task
+  // row. Defer it past the response with after() so "Add task" returns instantly;
+  // it fills in on the next revalidation/navigation.
   const taskId = data.id as string;
   after(() =>
     estimateAndSaveTaskHours({
@@ -72,6 +94,19 @@ export async function createTask(formData: FormData) {
       userId: profile.id,
     })
   );
+  // Type/tags are classified inline during AI draft generation and inserted above,
+  // so a drafted task is already classified. Only manual entries (no type supplied)
+  // need the deferred classifier pass.
+  if (!parsed.data.type) {
+    after(() =>
+      classifyAndSaveTask({
+        taskId,
+        title: parsed.data.title,
+        description: parsed.data.description ?? null,
+        userId: profile.id,
+      })
+    );
+  }
 
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true, taskId };
@@ -83,6 +118,7 @@ const updateTaskSchema = z.object({
   description: z.string().optional(),
   builder_estimate_hours: z.coerce.number().min(0).optional(),
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
+  type: z.enum(["feature", "bug", "change"]).optional(),
 });
 
 export async function updateTask(formData: FormData) {
@@ -95,6 +131,7 @@ export async function updateTask(formData: FormData) {
     description: formData.get("description") || undefined,
     builder_estimate_hours: formData.get("builder_estimate_hours") || undefined,
     priority: formData.get("priority") || undefined,
+    type: formData.get("type") || undefined,
   });
 
   if (!parsed.success) return { error: "Invalid input" };
@@ -106,13 +143,26 @@ export async function updateTask(formData: FormData) {
 
   const { data: before } = await supabase
     .from("tasks")
-    .select("title, description, builder_estimate_hours, priority")
+    .select("title, description, builder_estimate_hours, priority, type")
     .eq("id", id)
     .single();
 
+  // A manual estimate edit collapses the AI range onto the entered midpoint, so
+  // the detail view — which prefers low/high over the midpoint — reads back
+  // exactly what was typed instead of a stale AI range. Kept out of `updates` so
+  // the audit loop below still logs a single "estimate" change, not three.
+  const patch: Record<string, unknown> = {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
+  if (updates.builder_estimate_hours != null) {
+    patch.builder_estimate_low_hours = updates.builder_estimate_hours;
+    patch.builder_estimate_high_hours = updates.builder_estimate_hours;
+  }
+
   const { error } = await supabase
     .from("tasks")
-    .update({ ...updates, updated_at: new Date().toISOString() })
+    .update(patch)
     .eq("id", id);
 
   if (error) return { error: error.message };

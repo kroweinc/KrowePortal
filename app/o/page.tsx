@@ -27,13 +27,19 @@ export default async function OperatorDashboard() {
   const engagementList = (engagements ?? []) as Engagement[];
   const engagementIds = engagementList.map((e) => e.id);
 
+  // Personal (no-engagement) tasks are scoped to their creator. In prod RLS
+  // enforces this; in dev the admin client bypasses RLS, so we scope explicitly
+  // here — otherwise the null branch would surface every user's personal tasks.
+  const personalFilter = `and(engagement_id.is.null,created_by.eq.${profile.id})`;
   const filter = engagementIds.length > 0
-    ? `engagement_id.in.(${engagementIds.join(",")}),engagement_id.is.null`
-    : "engagement_id.is.null";
+    ? `engagement_id.in.(${engagementIds.join(",")}),${personalFilter}`
+    : personalFilter;
 
   const { data } = await supabase
     .from("tasks")
-    .select("*, task_attachments(id, is_deliverable, file_name)")
+    .select(
+      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role)"
+    )
     .or(filter)
     .order("created_at", { ascending: false });
 

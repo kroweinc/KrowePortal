@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TASK_TAGS } from "@/lib/types";
 
 const Question = z
   .object({
@@ -36,33 +37,20 @@ const Question = z
     }
   });
 
-export const SubtaskDraft = z
-  .object({
-    title: z.string().min(3).max(200),
-    rationale: z.string().max(300).optional(),
-    estLowMin: z.number().int().min(5).max(2400),
-    estHighMin: z.number().int().min(5).max(2400),
-  })
-  .refine((d) => d.estHighMin >= d.estLowMin, {
-    message: "estHighMin must be >= estLowMin",
-    path: ["estHighMin"],
-  });
-
-export const GenerationResult = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("questions"), items: z.array(Question).min(2).max(4) }),
-  z.object({ kind: z.literal("subtasks"), items: z.array(SubtaskDraft).min(3).max(8) }),
-]);
-
-export const SubtasksOnlyResult = z.object({
-  kind: z.literal("subtasks"),
-  items: z.array(SubtaskDraft).min(3).max(8),
-});
-
+// Subtasks are intentionally NOT part of a generated task draft. The new-task AI
+// flow drafts title/description/priority plus the Linear-style classification;
+// subtasks are generated SEPARATELY, on demand, from the task sidebar (see
+// SubtasksResult below and lib/ai/generate-subtasks.ts).
 export const TaskDraft = z.object({
   title: z.string().min(3).max(300),
   description: z.string().min(20).max(2000),
   priority: z.enum(["low", "medium", "high", "urgent"]),
-  subtasks: z.array(SubtaskDraft).max(8).default([]),
+  // Classification folded into the draft (same taxonomy as TaskClassifyResult) so
+  // an AI-generated task carries its type/area on creation — no deferred classifier
+  // round-trip and no fill-in delay. `type` defaults to "change" so a rare omission
+  // degrades to the catch-all instead of failing the whole generation.
+  type: z.enum(["feature", "bug", "change"]).default("change"),
+  tags: z.array(z.enum(TASK_TAGS)).max(1).default([]),
 });
 
 export const TaskGenerationResult = z.discriminatedUnion("kind", [
@@ -75,6 +63,17 @@ export const TaskOnlyResult = z.object({
   item: TaskDraft,
 });
 
+// On-demand subtask breakdown. The "Generate" button in the task sidebar turns
+// a task (+ its linked repo) into a flat, ordered list of concrete subtasks.
+// Titles only — subtasks carry no AI estimate, matching manually-added ones.
+export const SubtaskDraft = z.object({
+  title: z.string().min(3).max(200),
+});
+
+export const SubtasksResult = z.object({
+  items: z.array(SubtaskDraft).min(1).max(12),
+});
+
 export const TaskEstimateResult = z
   .object({
     hoursLow: z.number().min(0.1).max(2000),
@@ -84,6 +83,15 @@ export const TaskEstimateResult = z
     message: "hoursHigh must be >= hoursLow",
     path: ["hoursHigh"],
   });
+
+// Linear-style classification: the single change type plus exactly ONE area
+// label drawn from the fixed TASK_TAGS taxonomy (e.g. "auth", "ui"). Kept as an
+// array (capped at 1) so the tasks.tags text[] column and TaskTags renderer stay
+// unchanged. Persisted by classifyAndSaveTask onto tasks.type / tasks.tags.
+export const TaskClassifyResult = z.object({
+  type: z.enum(["feature", "bug", "change"]),
+  tags: z.array(z.enum(TASK_TAGS)).max(1).default([]),
+});
 
 export const ProjectProfileResult = z.object({
   summary: z.string().min(20).max(600),
@@ -417,14 +425,14 @@ export const RefineQuoteSectionFinalResult = z.object({
   patch: QuoteSectionPatchSchema,
 });
 
-export type GenerationResult = z.infer<typeof GenerationResult>;
-export type SubtasksOnlyResult = z.infer<typeof SubtasksOnlyResult>;
 export type Question = z.infer<typeof Question>;
-export type SubtaskDraft = z.infer<typeof SubtaskDraft>;
 export type TaskDraft = z.infer<typeof TaskDraft>;
 export type TaskGenerationResult = z.infer<typeof TaskGenerationResult>;
 export type TaskOnlyResult = z.infer<typeof TaskOnlyResult>;
+export type SubtaskDraft = z.infer<typeof SubtaskDraft>;
+export type SubtasksResult = z.infer<typeof SubtasksResult>;
 export type TaskEstimateResult = z.infer<typeof TaskEstimateResult>;
+export type TaskClassifyResult = z.infer<typeof TaskClassifyResult>;
 export type SimplifiedSubtask = z.infer<typeof SimplifiedSubtask>;
 export type SimplifiedTask = z.infer<typeof SimplifiedTask>;
 export type SimplifyTasksResult = z.infer<typeof SimplifyTasksResult>;

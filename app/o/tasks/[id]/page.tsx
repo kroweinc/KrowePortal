@@ -5,9 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { DeleteTaskButton } from "@/components/delete-task-button";
 import { OperatorTaskActions } from "@/app/o/tasks/[id]/operator-task-actions";
 import { TaskAttachments } from "@/components/task-attachments";
+import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import Link from "next/link";
 import type { Task, TaskAttachment, TaskPriority } from "@/lib/types";
 import { formatHoursRange } from "@/lib/format-estimate";
+import { submitterName } from "@/lib/utils";
 
 const STATUS_LABELS: Record<string, string> = {
   inbox: "In Progress",
@@ -42,7 +44,7 @@ export default async function OperatorTaskDetail({
   const [{ data }, { data: attachmentRows }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("*, engagement:engagements(*)")
+      .select("*, engagement:engagements(*), creator:profiles!created_by(display_name, role)")
       .eq("id", id)
       .single(),
     supabase
@@ -71,6 +73,7 @@ export default async function OperatorTaskDetail({
               {task.title}
             </h1>
             <div className="flex items-center gap-1.5">
+              <TaskTypeBadge type={task.type} />
               <Badge variant={task.priority}>{PRIORITY_LABELS[task.priority]}</Badge>
               <Badge variant={task.status as "inbox" | "in_progress" | "blocked" | "done"}>
                 {STATUS_LABELS[task.status]}
@@ -82,13 +85,14 @@ export default async function OperatorTaskDetail({
             <p className="text-sm text-neutral-600 leading-relaxed">{task.description}</p>
           )}
 
+          {task.tags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <TaskTags tags={task.tags} />
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-3 border-t border-neutral-100 pt-4 text-xs text-neutral-400">
-            <span>
-              Source:{" "}
-              <Badge variant={task.source === "operator_request" ? "operator" : "builder"}>
-                {task.source === "operator_request" ? "You requested this" : "Builder added"}
-              </Badge>
-            </span>
+            <span>Submitted by: {submitterName(task.creator)}</span>
             {(() => {
               const label = formatHoursRange(
                 task.builder_estimate_low_hours,

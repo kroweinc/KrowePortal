@@ -9,10 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { createTask } from "@/lib/actions/tasks";
 import { uploadAttachment } from "@/lib/actions/attachments";
-import { generateTaskDraft, acceptGeneratedTask } from "@/lib/actions/ai-tasks";
-import type { Question, SubtaskDraft, TaskDraft } from "@/lib/ai/schemas";
-import type { TaskPriority } from "@/lib/types";
-import { formatEstimate } from "@/lib/format-estimate";
+import { generateTaskDraft } from "@/lib/actions/ai-tasks";
+import type { Question, TaskDraft } from "@/lib/ai/schemas";
+import type { TaskPriority, TaskType } from "@/lib/types";
 import { OPEN_NEW_TASK_EVENT } from "@/components/add-task-button";
 
 const MAX_SIZE = 25 * 1024 * 1024;
@@ -69,8 +68,7 @@ type AiMode =
       items: Question[];
       selections: Record<string, string>;
       otherText: Record<string, string>;
-    }
-  | { kind: "accepting" };
+    };
 
 export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuccess, tourId }: NewTaskFormProps) {
   const [expanded, setExpanded] = useState(false);
@@ -90,12 +88,22 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
 
-  // AI-generated subtasks (empty for manual flow)
-  const [subtasks, setSubtasks] = useState<SubtaskDraft[]>([]);
-  const [selectedSubtasks, setSelectedSubtasks] = useState<Set<number>>(new Set());
-  const [editedSubtasks, setEditedSubtasks] = useState<Record<number, string>>({});
+  // The Linear-style classification an AI draft carries. Set from the draft and
+  // submitted with the task so it persists inline at creation — no deferred
+  // classifier pass and no "type/tag fills in late" delay. Null on manual entry,
+  // where the server falls back to classifying after creation.
+  const [aiType, setAiType] = useState<TaskType | null>(null);
+  const [aiTags, setAiTags] = useState<string[]>([]);
 
-  const [aiMode, setAiMode] = useState<AiMode>({ kind: "idle" });
+  // True once an AI draft has prefilled the form, to drive the "Review AI draft"
+  // affordance. The AI never generates subtasks — they're added manually from the
+  // task's sidebar checklist.
+  const [aiDrafted, setAiDrafted] = useState(false);
+
+  // Default to the AI input the moment the "+" opens the form — the AI flow is
+  // the primary path, with "Manual entry" available as an escape hatch. resetForm
+  // returns here too, so every fresh open lands in AI mode.
+  const [aiMode, setAiMode] = useState<AiMode>({ kind: "input", prompt: "" });
   const askedOnceRef = useRef(false);
 
   useEffect(() => {
@@ -108,10 +116,10 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     setTitle("");
     setDescription("");
     setPriority("medium");
-    setSubtasks([]);
-    setSelectedSubtasks(new Set());
-    setEditedSubtasks({});
-    setAiMode({ kind: "idle" });
+    setAiType(null);
+    setAiTags([]);
+    setAiDrafted(false);
+    setAiMode({ kind: "input", prompt: "" });
     setFiles([]);
     setError(null);
     setEngagementChoice(undefined);
@@ -143,9 +151,9 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     setTitle(draft.title);
     setDescription(draft.description);
     setPriority(draft.priority);
-    setSubtasks(draft.subtasks);
-    setSelectedSubtasks(new Set(draft.subtasks.map((_, i) => i)));
-    setEditedSubtasks({});
+    setAiType(draft.type);
+    setAiTags(draft.tags);
+    setAiDrafted(true);
   }
 
   function generate(answers?: { questionId: string; answer: string }[]) {
@@ -239,55 +247,18 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
       return;
     }
 
-    const hasSubtasks = subtasks.length > 0;
-
-    if (hasSubtasks) {
-      const finalSubtasks = [...selectedSubtasks]
-        .sort((a, b) => a - b)
-        .map((i) => ({
-          title: (editedSubtasks[i] ?? subtasks[i].title).trim(),
-          estLowMin: subtasks[i].estLowMin,
-          estHighMin: subtasks[i].estHighMin,
-        }))
-        .filter((s) => s.title.length > 0);
-
-      setAiMode({ kind: "accepting" });
-      startTransition(async () => {
-        const result = await acceptGeneratedTask({
-          engagementId: effectiveEngagementId,
-          task: {
-            title: title.trim(),
-            description: description.trim() || undefined,
-            priority,
-          },
-          subtasks: finalSubtasks,
-        });
-
-        if ("error" in result) {
-          toast.error(result.error);
-          setAiMode({ kind: "idle" });
-          return;
-        }
-
-        await uploadAllAttachments(result.taskId);
-
-        toast.success(
-          finalSubtasks.length > 0
-            ? `Task created with ${finalSubtasks.length} subtask${finalSubtasks.length === 1 ? "" : "s"}`
-            : "Task created"
-        );
-        handleClose();
-        onSuccess?.();
-      });
-      return;
-    }
-
     startTransition(async () => {
       const fd = new FormData();
       if (effectiveEngagementId) fd.set("engagement_id", effectiveEngagementId);
       fd.set("title", title.trim());
       if (description.trim()) fd.set("description", description.trim());
       fd.set("priority", priority);
+      // Carry the AI draft's classification so it persists on insert. Absent on
+      // manual entry, where createTask classifies after creation instead.
+      if (aiType) {
+        fd.set("type", aiType);
+        fd.set("tags", JSON.stringify(aiTags));
+      }
 
       const result = await createTask(fd);
       if (result?.error) {
@@ -304,8 +275,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     });
   }
 
-  const isBusy = isPending || aiMode.kind === "loading" || aiMode.kind === "accepting";
-  const hasSubtasks = subtasks.length > 0;
+  const isBusy = isPending || aiMode.kind === "loading";
   const aiActive = aiMode.kind === "input";
   const canGenerate = aiActive
     ? aiMode.prompt.trim().length >= 5
@@ -329,7 +299,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   const header = (
     <div className="flex items-center justify-between">
       <span className="text-sm font-medium text-neutral-900">
-        {hasSubtasks ? "Review AI draft" : "New task"}
+        {aiDrafted ? "Review AI draft" : "New task"}
       </span>
       <div className="flex items-center gap-1">
         <button
@@ -513,7 +483,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     </div>
   );
 
-  const formView = (aiMode.kind === "idle" || aiMode.kind === "accepting") && (
+  const formView = aiMode.kind === "idle" && (
     <div className="space-y-3">
       {header}
       <form onSubmit={handleSubmit} className="space-y-3">
@@ -535,9 +505,9 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
 
         <div className="flex items-center justify-between">
           <span className="text-xs text-neutral-500">
-            {hasSubtasks ? "AI draft — edit anything before creating" : "Or let AI flesh it out"}
+            {aiDrafted ? "AI draft — edit anything before creating" : "Or let AI flesh it out"}
           </span>
-          {hasSubtasks ? (
+          {aiDrafted ? (
             <button
               type="button"
               onClick={() => generate()}
@@ -592,71 +562,6 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
           </Select>
         </div>
 
-        {hasSubtasks && (
-          <div>
-            <label className="block text-xs font-medium text-neutral-700 mb-1">Subtasks</label>
-            <p className="mb-2 text-xs text-neutral-500">
-              Uncheck or edit any subtask before creating.
-            </p>
-            <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
-              {subtasks.map((draft, i) => {
-                const chip = formatEstimate(draft.estLowMin, draft.estHighMin);
-                return (
-                  <div
-                    key={i}
-                    className="flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-neutral-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedSubtasks.has(i)}
-                      onChange={() => {
-                        const next = new Set(selectedSubtasks);
-                        if (next.has(i)) next.delete(i);
-                        else next.add(i);
-                        setSelectedSubtasks(next);
-                      }}
-                      className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700 cursor-pointer"
-                    />
-                    <div className="min-w-0 flex-1 space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={editedSubtasks[i] ?? draft.title}
-                          onChange={(e) =>
-                            setEditedSubtasks((prev) => ({ ...prev, [i]: e.target.value }))
-                          }
-                          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm text-neutral-800 outline-none focus:border-neutral-300 focus:bg-white"
-                        />
-                        {chip && (
-                          <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-500">
-                            {chip}
-                          </span>
-                        )}
-                      </div>
-                      {draft.rationale && (
-                        <p className="px-1 text-xs text-neutral-400">{draft.rationale}</p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              {(() => {
-                const selectedIdxs = [...selectedSubtasks];
-                if (selectedIdxs.length === 0) return null;
-                const totalLow = selectedIdxs.reduce((s, i) => s + subtasks[i].estLowMin, 0);
-                const totalHigh = selectedIdxs.reduce((s, i) => s + subtasks[i].estHighMin, 0);
-                const totalChip = formatEstimate(totalLow, totalHigh);
-                if (!totalChip) return null;
-                return (
-                  <div className="mt-2 flex items-center justify-end gap-2 border-t border-neutral-100 px-2 pt-2 text-xs text-neutral-500">
-                    <span>Total estimate:</span>
-                    <span className="font-medium text-neutral-700">~{totalChip}</span>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-xs font-medium text-neutral-700">Attachments</label>
@@ -700,7 +605,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
 
         {error && <p className="text-xs text-red-600">{error}</p>}
         <Button type="submit" size="sm" className="w-full" disabled={isBusy}>
-          {isBusy ? "Adding…" : hasSubtasks ? "Create task" : "Add task"}
+          {isBusy ? "Adding…" : aiDrafted ? "Create task" : "Add task"}
         </Button>
       </form>
     </div>

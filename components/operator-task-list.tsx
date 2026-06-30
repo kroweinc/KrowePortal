@@ -6,9 +6,10 @@ import { Trash2 } from "lucide-react";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { DeliveryChips } from "@/components/design-atoms";
 import { ApprovalPill } from "@/components/approval-pill";
+import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import { PlainEnglishProvider } from "@/components/plain-english-context";
 import { deleteTask } from "@/lib/actions/tasks";
-import { sortByPriority } from "@/lib/utils";
+import { sortByPriority, submitterName } from "@/lib/utils";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { Task } from "@/lib/types";
 
@@ -54,8 +55,6 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
     return acc;
   }, {} as Record<string, Task[]>);
 
-  const sourceLabel = (t: Task) => t.source === "operator_request" ? "operator" : "builder";
-
   return (
     <PlainEnglishProvider>
       <div className="krowe-op-list">
@@ -91,9 +90,11 @@ export function OperatorTaskList({ tasks, currentUserId }: OperatorTaskListProps
                     )}
                     <DeliveryChips task={task} />
                     <div className="krowe-op-card-foot">
-                      <span className={`krowe-chip krowe-chip-source ${sourceLabel(task)}`}>
-                        {sourceLabel(task)}
-                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
+                        <TaskTypeBadge type={task.type} />
+                        <TaskTags tags={task.tags} />
+                        <span className="krowe-card-submitter">{submitterName(task.creator)}</span>
+                      </div>
                       <button
                         className="krowe-iconbtn danger"
                         title="Delete task"
