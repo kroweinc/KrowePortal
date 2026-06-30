@@ -16,6 +16,20 @@ export function ConnectGitHubButton({ connected, username }: ConnectGitHubButton
   const [isPending, startTransition] = useTransition()
   const [confirm, confirmDialog] = useConfirm()
 
+  async function handleConnect() {
+    if (
+      !(await confirm({
+        title: "Connect your GitHub account?",
+        description:
+          "You'll be redirected to GitHub to authorize access. We use it to link repos and track commits against your tasks.",
+        confirmText: "Continue to GitHub",
+        cancelText: "Cancel",
+      }))
+    )
+      return
+    window.location.href = "/api/github/connect"
+  }
+
   async function handleDisconnect() {
     if (
       !(await confirm({
@@ -55,11 +69,16 @@ export function ConnectGitHubButton({ connected, username }: ConnectGitHubButton
   }
 
   return (
-    <a
-      href="/api/github/connect"
-      className="inline-flex items-center gap-2 rounded-md bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700 transition-colors"
-    >
-      Connect GitHub
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={handleConnect}
+        disabled={isPending}
+        className="inline-flex items-center gap-2 rounded-md bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700 transition-colors disabled:opacity-50"
+      >
+        Connect GitHub
+      </button>
+      {confirmDialog}
+    </>
   )
 }

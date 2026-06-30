@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 import type { GitHubRepo } from "@/lib/types"
 
 interface RepoSelectorProps {
@@ -12,6 +13,7 @@ interface RepoSelectorProps {
 
 export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSelectorProps) {
   const router = useRouter()
+  const [confirm, confirmDialog] = useConfirm()
   const [repos, setRepos] = useState<GitHubRepo[]>(initialRepos ?? [])
   const [selected, setSelected] = useState<string>(currentRepo ?? "")
   const [loading, setLoading] = useState(!initialRepos)
@@ -32,8 +34,19 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
   }, [initialRepos])
 
   async function handleSelect(fullName: string) {
+    if (!fullName || fullName === selected) return
     const repo = repos.find((r) => r.full_name === fullName)
     if (!repo) return
+
+    const relinking = !!selected
+    const target = engagementId ? "this client" : "your account"
+    const ok = await confirm({
+      title: relinking ? "Re-link this repository?" : "Link this repository?",
+      description: `Link ${repo.full_name} to ${target} and track its commits against tasks. You can change this anytime.`,
+      confirmText: relinking ? "Re-link repo" : "Link repo",
+    })
+    if (!ok) return
+
     setSelected(fullName)
     setSaving(true)
     const body: Record<string, unknown> = {
@@ -92,6 +105,7 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
       </select>
       {saving && <p className="text-xs text-neutral-400">Saving...</p>}
       {!saving && saved && <p className="text-xs text-green-600">Saved</p>}
+      {confirmDialog}
     </div>
   )
 }
