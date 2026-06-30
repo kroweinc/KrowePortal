@@ -21,6 +21,12 @@ import { createAdminClient } from "@/lib/supabase/server";
 
 export type DocEventKind = "prd" | "quote" | "contract" | "brief" | "change_order";
 
+// NOTE: every real document status transition emits exactly one of these
+// (created / sent / signed / accepted / rejected / changes_requested / deleted).
+// `viewed` and `re_sent` are intentionally UNEMITTED: passive views are out of
+// scope, and there is no draft↔sent round-trip state machine to resend from.
+// They remain in the enum (and the timeline icon set) for forward-compat only —
+// do not wire phantom events for them.
 export type DocEventType =
   | "created"
   | "sent"

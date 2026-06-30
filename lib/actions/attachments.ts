@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { TaskAttachment } from "@/lib/types";
 import { MAX_ATTACHMENT_SIZE, ALLOWED_ATTACHMENT_EXTENSIONS } from "@/lib/attachments-constants";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { syncTaskAttachmentContext, removeEntityContext } from "@/lib/context/sync-entity";
 
 const MAX_SIZE = MAX_ATTACHMENT_SIZE;
 const ALLOWED_EXTENSIONS = ALLOWED_ATTACHMENT_EXTENSIONS;
@@ -86,6 +87,9 @@ export async function uploadAttachment(formData: FormData): Promise<{ success?: 
 
   revalidatePath(`/o/tasks/${parsed.data.task_id}`);
   revalidatePath(`/b/tasks/${parsed.data.task_id}`);
+  // Mirror the file's extractable text into the engagement's context layer (RAG)
+  // + give it a graph node. Best-effort; skips personal tasks internally.
+  await syncTaskAttachmentContext(data.id as string);
   return { success: true, attachment: data as TaskAttachment };
 }
 
@@ -137,6 +141,7 @@ export async function addLinkAttachment(
 
   revalidatePath(`/o/tasks/${taskId}`);
   revalidatePath(`/b/tasks/${taskId}`);
+  await syncTaskAttachmentContext(data.id as string);
   return { success: true, attachment: data as TaskAttachment };
 }
 
@@ -185,6 +190,7 @@ export async function addTextAttachment(
 
   revalidatePath(`/o/tasks/${taskId}`);
   revalidatePath(`/b/tasks/${taskId}`);
+  await syncTaskAttachmentContext(data.id as string);
   return { success: true, attachment: data as TaskAttachment };
 }
 
@@ -218,6 +224,10 @@ export async function deleteAttachment(attachmentId: string): Promise<{ success?
     const adminClient = createAdminClient();
     await adminClient.storage.from("task-attachments").remove([attachment.storage_path]);
   }
+
+  // Drop the context mirror (chunks cascade). Matches by source_meta, so it works
+  // even though the attachment row is already gone.
+  await removeEntityContext("task_attachment", parsed.data.id);
 
   await writeAuditEntry({
     taskId: attachment.task_id as string,

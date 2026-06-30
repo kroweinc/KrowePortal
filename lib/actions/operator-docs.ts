@@ -76,6 +76,55 @@ export async function getSignedDocsForEngagements(
   };
 }
 
+export interface UnsentNotice {
+  /** document_events row id — stable React key. */
+  id: string;
+  title: string;
+  /** ISO timestamp the doc was unsent. */
+  when: string;
+}
+
+/**
+ * Documents the builder UNSENT — deleted after they'd been sent — across the
+ * operator's engagements. A sent doc that just vanishes from "Awaiting your
+ * signature" is confusing, so we read the `deleted` lifecycle events (flagged
+ * wasSent at delete time) and surface a short notice. Withdrawn drafts the
+ * operator never saw carry wasSent=false and are excluded.
+ *
+ * document_events is builder-only under RLS, so — like the other operator
+ * readers here — this goes through the admin client after authorizing each
+ * engagement against the caller (dev profiles bypass). Capped + newest-first so
+ * the notice list can't grow without bound.
+ */
+export async function getUnsentNoticesForEngagements(
+  engagements: EngagementRef[]
+): Promise<UnsentNotice[]> {
+  const profile = await getCurrentProfile();
+  if (!profile) return [];
+
+  const isDev = DEV_PROFILE_IDS.has(profile.id);
+  const engagementIds = engagements
+    .filter((e) => isDev || e.operator_id === profile.id) // authorize per engagement
+    .map((e) => e.id);
+  if (engagementIds.length === 0) return [];
+
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("document_events")
+    .select("id, payload, created_at")
+    .in("engagement_id", engagementIds)
+    .eq("event_type", "deleted")
+    .eq("payload->>wasSent", "true")
+    .order("created_at", { ascending: false })
+    .limit(10);
+
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    title: (r.payload as { title?: string } | null)?.title?.trim() || "A document",
+    when: r.created_at as string,
+  }));
+}
+
 export interface OperatorPendingDocs {
   quotes: Quote[];
   contracts: Contract[];

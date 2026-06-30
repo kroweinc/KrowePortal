@@ -20,6 +20,7 @@ import {
   type DocumentEventRow,
 } from "@/lib/actions/context-graph";
 import type { DocEventKind, DocEventType } from "@/lib/context/document-events";
+import { humanDuration } from "@/lib/context/duration";
 
 const EVENT_META: Record<
   DocEventType,
@@ -122,10 +123,14 @@ export function DocumentTimeline({
         <div className="ctx-timeline-empty">No history recorded yet.</div>
       ) : (
         <div className="ctx-timeline">
-          {events.map((ev) => {
+          {events.map((ev, i) => {
             const meta = EVENT_META[ev.event_type] ?? EVENT_META.created;
             const detail = eventDetail(ev);
             const actor = actorLine(ev);
+            const prev = i > 0 ? events[i - 1] : null;
+            const gapMs = prev
+              ? new Date(ev.created_at).getTime() - new Date(prev.created_at).getTime()
+              : null;
             return (
               <div key={ev.id} className="ctx-timeline-item">
                 <span className="ctx-timeline-dot" style={{ background: meta.color }}>
@@ -135,6 +140,9 @@ export function DocumentTimeline({
                   <div className="ctx-timeline-line">
                     <span className="ctx-timeline-label">{meta.label}</span>
                     <span className="ctx-timeline-when">{formatWhen(ev.created_at)}</span>
+                    {gapMs != null && gapMs > 0 && (
+                      <span className="ctx-timeline-gap">+{humanDuration(gapMs)}</span>
+                    )}
                   </div>
                   {actor && <div className="ctx-timeline-actor">{actor}</div>}
                   {detail && <div className="ctx-timeline-detail">{detail}</div>}
@@ -142,6 +150,15 @@ export function DocumentTimeline({
               </div>
             );
           })}
+          {events.length > 1 && (
+            <div className="ctx-timeline-total">
+              {humanDuration(
+                new Date(events[events.length - 1].created_at).getTime() -
+                  new Date(events[0].created_at).getTime()
+              )}{" "}
+              total
+            </div>
+          )}
         </div>
       )}
 

@@ -455,13 +455,20 @@ export async function deletePrd(id: string): Promise<{ success: true } | { error
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("prds")
-    .select("status, created_by, project_id")
+    .select("status, created_by, project_id, title")
     .eq("id", id)
     .single();
 
   if (!before) return { error: "PRD not found." };
   if (before.created_by !== profile.id) return { error: "Not your PRD." };
-  if (before.status !== "draft") return { error: "Only drafts can be deleted." };
+  // PRDs can be deleted at any stage (draft or already sent) — unlike quotes /
+  // contracts, a sent PRD isn't a binding agreement, so the builder may remove
+  // it. Cleanup below (context + quotes.source_prd_id → null) covers a sent doc.
+
+  // A sent PRD was visible in the operator's portal — flag the delete so we can
+  // surface an "unsent" notice to them. A deleted draft never reached them, so
+  // wasSent stays false and no operator notice is shown.
+  const wasSent = before.status !== "draft";
 
   const { error } = await supabase.from("prds").delete().eq("id", id);
   if (error) return { error: error.message };
@@ -473,6 +480,7 @@ export async function deletePrd(id: string): Promise<{ success: true } | { error
     eventType: "deleted",
     actorId: profile.id,
     actorRole: "builder",
+    payload: { wasSent, title: before.title as string },
   });
 
   await removeDocumentContext("prd", id, before.project_id as string);

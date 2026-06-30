@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
   FileText,
@@ -12,6 +13,7 @@ import {
   ChevronRight,
   MoreHorizontal,
   ExternalLink,
+  ArrowUpRight,
   Trash2,
 } from "lucide-react";
 import { useContextMenu, ContextMenu, type MenuItem } from "@/components/ui/context-menu";
@@ -26,6 +28,15 @@ import {
 } from "@/lib/actions/context";
 import { searchClientContext, type ContextSearchHit } from "@/lib/actions/context-search";
 import { safeExternalHref } from "@/lib/project/business-context";
+import {
+  CATS,
+  CAT_ORDER,
+  catOf,
+  noteOf,
+  isStandaloneContextItem,
+  type CatKey,
+} from "@/components/context/categories";
+import type { ClientGraph, GraphNode } from "@/lib/actions/context-graph";
 import type { ContextItem, ContextItemKind } from "@/lib/types";
 
 const inputClass =
@@ -61,12 +72,19 @@ function statusChip(item: ContextItem): { label: string; tone: string } | null {
 
 export function ContextPanel({
   engagementId,
-  initialItems,
+  items,
+  setItems,
+  graph,
+  showIndexStatus = false,
 }: {
   engagementId: string;
-  initialItems: ContextItem[];
+  // Owned by ContextView so the Graph and List share one source of truth — an
+  // add/delete here updates the Overview graph in the same render.
+  items: ContextItem[];
+  setItems: React.Dispatch<React.SetStateAction<ContextItem[]>>;
+  graph: ClientGraph;
+  showIndexStatus?: boolean;
 }) {
-  const [items, setItems] = useState<ContextItem[]>(initialItems);
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteBody, setNoteBody] = useState("");
@@ -81,20 +99,58 @@ export function ContextPanel({
   const [isSyncingDocs, setIsSyncingDocs] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Everything else the graph shows (client, people, project, the project
+  // documents, milestones, tasks…), bucketed by category. The "context"
+  // bucket is rendered separately from the live `items` state so adds/deletes
+  // and content previews stay interactive.
+  const nodesByCat = useMemo(() => {
+    const m = new Map<CatKey, GraphNode[]>();
+    for (const n of graph.nodes) {
+      const cat = catOf(n.group);
+      if (cat === "context") continue;
+      const arr = m.get(cat);
+      if (arr) arr.push(n);
+      else m.set(cat, [n]);
+    }
+    return m;
+  }, [graph]);
+
+  // The Context bucket lists *standalone* knowledge only. Auto-doc mirrors of a
+  // PRD/quote/contract — profile mirrors of the builder/operator — and the
+  // auto-entity mirrors of a task / milestone aren't shown here: they belong to
+  // their own node (a document, a person, or that task / milestone), matching
+  // the graph, where each mirror is folded into that node instead of drawn as a
+  // separate one. Other auto-entity mirrors (briefs, change orders, etc.) have
+  // no node of their own and stay listed here.
+  const standaloneItems = useMemo(() => items.filter(isStandaloneContextItem), [items]);
+
   // On load, mirror the project's PRD/quote/contract into this client's context
   // if they aren't already (covers docs authored before auto-sync, or drafted
-  // before the engagement was linked), then merge the refreshed list in. Server
-  // data wins by id; locally-added items are preserved if the fetch raced them.
+  // before the engagement was linked), then reconcile against the refreshed list.
+  // res.items is AUTHORITATIVE — it's the full list after the server's backfill
+  // and orphan reconcile (e.g. a brief whose source row was deleted is dropped).
+  // We take it as the source of truth and only re-add locally-created manual
+  // items the fetch may have raced (a note/link/upload added mid-sync, not yet
+  // visible to the read). Crucially we DON'T re-add server-managed mirrors that
+  // are absent — otherwise the merge would resurrect the orphan the server just
+  // cleaned up, leaving a ghost node in the Overview graph.
   useEffect(() => {
     let cancelled = false;
     setIsSyncingDocs(true);
     syncEngagementDocuments(engagementId)
       .then((res) => {
         if (cancelled || !res.items) return;
+        const serverItems = res.items;
         setItems((prev) => {
-          const byId = new Map(prev.map((i) => [i.id, i]));
-          for (const it of res.items) byId.set(it.id, it);
-          return [...byId.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+          const serverIds = new Set(serverItems.map((i) => i.id));
+          const localExtras = prev.filter((i) => {
+            if (serverIds.has(i.id)) return false;
+            const src = (i.source_meta as { source?: string } | null)?.source;
+            return src === "paste" || src === "link" || src === "upload";
+          });
+          return [...serverItems, ...localExtras].sort((a, b) =>
+            b.created_at.localeCompare(a.created_at)
+          );
         });
       })
       .finally(() => {
@@ -241,105 +297,7 @@ export function ContextPanel({
         </button>
       </form>
 
-      {hits !== null && (
-        <div className="rows" style={{ marginBottom: 12 }}>
-          {hits.length === 0 ? (
-            <div className="empty">No matches in this client&apos;s context.</div>
-          ) : (
-            <ul className="rows">
-              {hits.map((h) => (
-                <li key={h.chunkId} className="row" style={{ flexWrap: "wrap" }}>
-                  <span className="row-ico">{kindIcon(h.item.kind as ContextItemKind)}</span>
-                  <div className="row-main">
-                    <div className="row-titleline">
-                      <span className="row-name">{h.item.title}</span>
-                      <span className="chip chip-kind">{Math.round(h.similarity * 100)}% match</span>
-                    </div>
-                    <div className="row-sub">
-                      <span style={{ whiteSpace: "pre-wrap" }}>
-                        {h.content.length > 240 ? h.content.slice(0, 240) + "…" : h.content}
-                      </span>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {isSyncingDocs && items.length === 0 && (
-        <div className="empty">Syncing this client&apos;s documents…</div>
-      )}
-
-      {items.length > 0 ? (
-        <ul className="rows">
-          {items.map((item) => (
-            <ContextItemRow
-              key={item.id}
-              item={item}
-              expanded={expandedId === item.id}
-              onToggle={() => setExpandedId((cur) => (cur === item.id ? null : item.id))}
-              onOpen={onOpen}
-              onDelete={onDelete}
-              disabled={isPending}
-            />
-          ))}
-        </ul>
-      ) : (
-        !isSyncingDocs && (
-          <div className="empty">
-            Nothing here yet — upload a document, paste a note, or add a link. Text is indexed so AI
-            can use it later.
-          </div>
-        )
-      )}
-
-      {showNoteForm && (
-        <div className="mt-3 flex flex-col gap-2">
-          <input
-            value={noteTitle}
-            onChange={(e) => setNoteTitle(e.target.value)}
-            type="text"
-            placeholder="Title (optional) — e.g. Onboarding call notes"
-            className={inputClass}
-          />
-          <textarea
-            value={noteBody}
-            onChange={(e) => setNoteBody(e.target.value)}
-            rows={8}
-            maxLength={MAX_SOP_CHARS}
-            placeholder="Paste notes, an SOP, a transcript…"
-            className="w-full rounded border border-neutral-200 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-neutral-400"
-            autoFocus
-          />
-          <div className="text-xs text-neutral-400">
-            {noteBody.length.toLocaleString()} / {MAX_SOP_CHARS.toLocaleString()} chars
-          </div>
-        </div>
-      )}
-
-      {showLinkForm && (
-        <div className="mt-3 flex flex-col gap-2">
-          <input
-            value={linkUrl}
-            onChange={(e) => setLinkUrl(e.target.value)}
-            type="text"
-            placeholder="https://…"
-            className={inputClass}
-            autoFocus
-          />
-          <input
-            value={linkTitle}
-            onChange={(e) => setLinkTitle(e.target.value)}
-            type="text"
-            placeholder="Label (optional)"
-            className={inputClass}
-          />
-        </div>
-      )}
-
-      <div className="add-row">
+      <div className="add-row" style={{ marginTop: 0 }}>
         {showNoteForm ? (
           <>
             <button type="button" className="add-mini" onClick={onAddNote} disabled={isPending}>
@@ -395,6 +353,129 @@ export function ContextPanel({
           className="hidden"
         />
       </div>
+
+      {showNoteForm && (
+        <div className="mt-3 flex flex-col gap-2">
+          <input
+            value={noteTitle}
+            onChange={(e) => setNoteTitle(e.target.value)}
+            type="text"
+            placeholder="Title (optional) — e.g. Onboarding call notes"
+            className={inputClass}
+          />
+          <textarea
+            value={noteBody}
+            onChange={(e) => setNoteBody(e.target.value)}
+            rows={8}
+            maxLength={MAX_SOP_CHARS}
+            placeholder="Paste notes, an SOP, a transcript…"
+            className="w-full rounded border border-neutral-200 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-neutral-400"
+            autoFocus
+          />
+          <div className="text-xs text-neutral-400">
+            {noteBody.length.toLocaleString()} / {MAX_SOP_CHARS.toLocaleString()} chars
+          </div>
+        </div>
+      )}
+
+      {showLinkForm && (
+        <div className="mt-3 flex flex-col gap-2">
+          <input
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            type="text"
+            placeholder="https://…"
+            className={inputClass}
+            autoFocus
+          />
+          <input
+            value={linkTitle}
+            onChange={(e) => setLinkTitle(e.target.value)}
+            type="text"
+            placeholder="Label (optional)"
+            className={inputClass}
+          />
+        </div>
+      )}
+
+      {hits !== null && (
+        <div className="rows" style={{ marginBottom: 12 }}>
+          {hits.length === 0 ? (
+            <div className="empty">No matches in this client&apos;s context.</div>
+          ) : (
+            <ul className="rows">
+              {hits.map((h) => (
+                <li key={h.chunkId} className="row" style={{ flexWrap: "wrap" }}>
+                  <span className="row-ico">{kindIcon(h.item.kind as ContextItemKind)}</span>
+                  <div className="row-main">
+                    <div className="row-titleline">
+                      <span className="row-name">{h.item.title}</span>
+                      <span className="chip chip-kind">{Math.round(h.similarity * 100)}% match</span>
+                    </div>
+                    <div className="row-sub">
+                      <span style={{ whiteSpace: "pre-wrap" }}>
+                        {h.content.length > 240 ? h.content.slice(0, 240) + "…" : h.content}
+                      </span>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Everything the graph shows, grouped by category. Non-context buckets
+          come straight from the graph; the Context bucket renders the live,
+          editable context items. */}
+      <div className="ctx-list">
+        {CAT_ORDER.map((cat) => {
+          if (cat === "context") {
+            return (
+              <div key={cat} className="ctx-list-group">
+                <CatGroupHead cat={cat} count={standaloneItems.length} />
+                {standaloneItems.length > 0 ? (
+                  <ul className="rows">
+                    {standaloneItems.map((item) => (
+                      <ContextItemRow
+                        key={item.id}
+                        item={item}
+                        expanded={expandedId === item.id}
+                        onToggle={() =>
+                          setExpandedId((cur) => (cur === item.id ? null : item.id))
+                        }
+                        onOpen={onOpen}
+                        onDelete={onDelete}
+                        disabled={isPending}
+                        showStatus={showIndexStatus}
+                      />
+                    ))}
+                  </ul>
+                ) : isSyncingDocs ? (
+                  <div className="empty">Syncing this client&apos;s documents…</div>
+                ) : (
+                  <div className="empty">
+                    Nothing here yet — upload a document, paste a note, or add a link. Text is
+                    indexed so AI can use it later.
+                  </div>
+                )}
+              </div>
+            );
+          }
+          const ns = nodesByCat.get(cat);
+          if (!ns || ns.length === 0) return null;
+          return (
+            <div key={cat} className="ctx-list-group">
+              <CatGroupHead cat={cat} count={ns.length} />
+              <ul className="rows">
+                {ns.map((n) => (
+                  <GraphNodeRow key={n.id} node={n} />
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -409,6 +490,7 @@ function ContextItemRow({
   onOpen,
   onDelete,
   disabled,
+  showStatus,
 }: {
   item: ContextItem;
   expanded: boolean;
@@ -416,9 +498,10 @@ function ContextItemRow({
   onOpen: (item: ContextItem) => void;
   onDelete: (id: string) => void;
   disabled: boolean;
+  showStatus: boolean;
 }) {
   const menu = useContextMenu();
-  const chip = statusChip(item);
+  const chip = showStatus ? statusChip(item) : null;
   const canOpen = item.kind === "link" || !!item.storage_path;
 
   const menuItems: MenuItem[] = [
@@ -507,4 +590,56 @@ function ContextItemRow({
       <ContextMenu state={menu.state} items={menuItems} onClose={menu.close} />
     </li>
   );
+}
+
+/* Section header for a category — colored swatch + label + count, matching the
+   graph's legend so the two views read identically. */
+function CatGroupHead({ cat, count }: { cat: CatKey; count: number }) {
+  const meta = CATS[cat];
+  return (
+    <div className="ctx-list-head">
+      <span className="ctx-list-sw" style={{ background: meta.color }} />
+      <span className="ctx-list-title">{meta.label}</span>
+      <span className="ctx-list-count">{count}</span>
+    </div>
+  );
+}
+
+/* One row for a graph entity (everything the graph shows except the editable
+   context items). Links to the entity when it has a destination; otherwise a
+   static, informational row. The colored icon + one-line note mirror the
+   graph's node detail. */
+function GraphNodeRow({ node }: { node: GraphNode }) {
+  const cat = catOf(node.group);
+  const meta = CATS[cat];
+  const Icon = meta.Icon;
+  const href = typeof node.meta?.href === "string" ? node.meta.href : null;
+
+  const inner = (
+    <>
+      <span className="row-ico" style={{ color: meta.color }}>
+        <Icon size={17} strokeWidth={1.9} />
+      </span>
+      <div className="row-main">
+        <div className="row-titleline">
+          <span className="row-name">{node.label}</span>
+        </div>
+        <div className="row-sub">
+          <span>{noteOf(node)}</span>
+        </div>
+      </div>
+      {href && <ArrowUpRight className="row-go" size={16} strokeWidth={1.9} />}
+    </>
+  );
+
+  if (href) {
+    return (
+      <li>
+        <Link href={href} className="row">
+          {inner}
+        </Link>
+      </li>
+    );
+  }
+  return <li className="row static">{inner}</li>;
 }

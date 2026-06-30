@@ -1,33 +1,70 @@
 /* ============================================================
-   Context Graph — Obsidian-style force-directed client overview.
-   Dark canvas with light "glass" overlays (legend + selection panel) that
-   still read as Krowe via the shared design tokens.
+   Context Graph — warm, light, Obsidian-style client overview.
+   Ported from the Claude Design "Context Graph" prototype: a dotted
+   light stage with flat solid-disc nodes and floating white panels
+   (search, legend/filters, node detail, display settings, zoom).
    Namespaced .ctx-* so nothing collides with .eng-* / .krowe-*.
    ============================================================ */
 
-/* View toggle (Graph / List) — echoes .eng-tabbar */
+/* Header row: view toggle on the left, index-status switch on the right */
+.ctx-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.ctx-view-head .ctx-toggle {
+  margin-bottom: 0;
+}
+
+/* Index-status switch — reuses the .ctx-sw-track switch visual */
+.ctx-index-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  user-select: none;
+  transition: color 160ms var(--ease-out-smooth);
+}
+.ctx-index-toggle:hover {
+  color: var(--foreground);
+}
+
+/* View toggle (Graph / List) — the design's pill segmented control */
 .ctx-toggle {
   display: inline-flex;
-  gap: 3px;
   padding: 3px;
+  gap: 2px;
   margin-bottom: 14px;
-  background: var(--surface-subtle);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
+  background: var(--surface-subtle);
 }
 .ctx-toggle-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--muted-foreground);
-  background: transparent;
+  gap: 7px;
+  height: 32px;
+  padding: 0 15px;
   border: none;
-  border-radius: var(--radius-sm);
+  background: none;
+  border-radius: var(--radius-full);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted-foreground);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-out-smooth);
+  transition: all 160ms var(--ease-out-smooth);
+}
+.ctx-toggle-btn svg {
+  color: var(--faint-foreground);
+  transition: color 160ms var(--ease-out-smooth);
 }
 .ctx-toggle-btn:hover {
   color: var(--foreground);
@@ -37,145 +74,884 @@
   background: #fff;
   box-shadow: var(--shadow-1);
 }
+.ctx-toggle-btn.is-active svg {
+  color: var(--primary);
+}
 
-/* Canvas surface */
-.ctx-graph-wrap {
+/* ───────── Stage ───────── */
+.ctx-stage {
   position: relative;
   width: 100%;
-  height: 560px;
+  height: 600px;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-1);
-  /* Obsidian-ish deep slate */
-  background:
-    radial-gradient(120% 120% at 50% 0%, color-mix(in oklab, var(--foreground) 82%, #0b1020) 0%, color-mix(in oklab, var(--foreground) 92%, #05070d) 100%);
+  background: var(--background);
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--foreground) 5%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 26px 26px;
 }
 .ctx-graph-canvas {
   position: absolute;
   inset: 0;
+  /* Pin the *display* size to the stage. The canvas buffer is sized to
+     W*DPR × H*DPR for crisp HiDPI rendering; without an explicit CSS size the
+     canvas's presentational width/height attributes (= the buffer size, e.g.
+     2× on a Retina display) leak into layout and override `inset:0`, so the
+     canvas would render at 2× and every pointer ↔ draw coordinate would be off
+     by DPR — breaking node hit-testing, hover, zoom-to-cursor, and fit
+     centering. 100%/100% lets the browser downscale the buffer to the stage. */
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+.ctx-graph-canvas.is-grabbing {
+  cursor: grabbing;
+}
+.ctx-graph-canvas.is-pointing {
+  cursor: pointer;
 }
 
-/* Empty state inside the canvas */
+/* Empty state */
 .ctx-graph-empty {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--muted-foreground);
   font-size: 13.5px;
   text-align: center;
   padding: 24px;
 }
 
-/* Floating glass overlays shared look */
-.ctx-glass {
-  background: color-mix(in oklab, #fff 90%, transparent);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+/* ───────── Floating panels ───────── */
+.ctx-panel {
+  position: absolute;
+  background: #fff;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-2);
-}
-
-/* Legend */
-.ctx-legend {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  padding: 10px 12px;
-  max-width: 200px;
+  color: var(--foreground);
   z-index: 2;
 }
-.ctx-legend-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted-foreground);
-  margin-bottom: 8px;
-}
-.ctx-legend-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 5px 10px;
-}
-.ctx-legend-item {
-  display: inline-flex;
+
+/* search (top-left) */
+.ctx-search {
+  top: 16px;
+  left: 16px;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
+  gap: 8px;
+  height: 38px;
+  padding: 0 13px;
+  width: 256px;
+  border-radius: var(--radius-full);
+}
+.ctx-search svg {
+  color: var(--faint-foreground);
+  flex-shrink: 0;
+}
+.ctx-search input {
+  border: none;
+  background: none;
+  outline: none;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
   color: var(--foreground);
 }
-.ctx-legend-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: var(--radius-full);
-  flex: none;
+.ctx-search input::placeholder {
+  color: var(--faint-foreground);
+}
+.ctx-search kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint-foreground);
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  padding: 1px 5px;
 }
 
-/* Selection side panel */
-.ctx-graph-panel {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  bottom: 12px;
-  width: min(340px, 70%);
-  padding: 16px;
-  overflow-y: auto;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+/* legend / filters (top-left, below search) — collapsible dropdown */
+.ctx-legend {
+  top: 66px;
+  left: 16px;
+  width: 256px;
+  padding: 0;
+  overflow: hidden;
 }
-.ctx-panel-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: inline-flex;
-  padding: 4px;
-  color: var(--muted-foreground);
-  background: transparent;
+.ctx-lg-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  padding: 0 14px;
+  background: none;
   border: none;
-  border-radius: var(--radius-sm);
+  text-align: left;
   cursor: pointer;
 }
-.ctx-panel-close:hover { color: var(--foreground); }
-.ctx-panel-head {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-right: 22px;
-}
-.ctx-panel-kind {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+.ctx-lg-title {
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.13em;
   color: var(--muted-foreground);
 }
-.ctx-panel-title {
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--foreground);
+.ctx-lg-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  flex-shrink: 0;
 }
-.ctx-panel-link {
+.ctx-lg-chev {
+  margin-left: auto;
+  color: var(--faint-foreground);
+  transition: transform 200ms var(--ease-out-smooth);
+}
+.ctx-legend.open .ctx-lg-chev {
+  transform: rotate(180deg);
+}
+/* animated reveal — grid-rows trick so height auto-fits the content */
+.ctx-lg-body-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms var(--ease-out-smooth);
+}
+.ctx-legend.open .ctx-lg-body-wrap {
+  grid-template-rows: 1fr;
+}
+.ctx-lg-body {
+  /* No bottom padding here: with border-box, the element's own padding can't be
+     crushed below 0, which would leave a ghost gap when the grid-rows reveal is
+     collapsed. The bottom spacing lives on .ctx-lg-grid instead. */
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 14px;
+}
+.ctx-lg-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.ctx-lg-actions button {
+  background: none;
+  border: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint-foreground);
+  padding: 0;
+  cursor: pointer;
+  transition: color 140ms var(--ease-out-smooth);
+}
+.ctx-lg-actions button:hover {
+  color: var(--primary);
+}
+.ctx-lg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 8px;
+  padding-bottom: 12px;
+}
+.ctx-lg-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 28px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 130ms var(--ease-out-smooth), opacity 130ms var(--ease-out-smooth);
+}
+.ctx-lg-item:hover {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.ctx-lg-item .sw {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sw-c) 16%, transparent);
+}
+.ctx-lg-item .ct {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint-foreground);
+}
+.ctx-lg-item.off {
+  opacity: 0.34;
+}
+.ctx-lg-item.off .sw {
+  box-shadow: none;
+  background: var(--faint-foreground) !important;
+}
+
+/* node detail (top-right) */
+.ctx-detail {
+  top: 16px;
+  right: 16px;
+  width: 288px;
+  padding: 0;
+  max-height: calc(100% - 32px);
+  display: flex;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 200ms var(--ease-out-smooth), transform 200ms var(--ease-out-smooth);
+}
+.ctx-detail.show {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.ctx-detail-scroll {
+  overflow-y: auto;
+  width: 100%;
+}
+.ctx-gd-top {
+  position: relative;
+  padding: 15px 15px 13px;
+  border-bottom: 1px solid var(--border);
+}
+.ctx-gd-kind {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
-  color: var(--primary);
-  text-decoration: none;
+  gap: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
 }
-.ctx-panel-link:hover { text-decoration: underline; }
-.ctx-panel-meta {
+.ctx-gd-kind .sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+.ctx-gd-close {
+  position: absolute;
+  top: 11px;
+  right: 11px;
+  display: inline-flex;
+  padding: 3px;
+  border: none;
+  background: none;
+  color: var(--faint-foreground);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.ctx-gd-close:hover {
+  color: var(--foreground);
+}
+.ctx-gd-name {
+  margin-top: 9px;
+  padding-right: 22px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  color: var(--foreground);
+}
+.ctx-gd-meta {
+  padding: 12px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ctx-gd-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   font-size: 12px;
   color: var(--muted-foreground);
 }
+.ctx-gd-row svg {
+  color: var(--faint-foreground);
+  flex-shrink: 0;
+}
+.ctx-gd-row b {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.ctx-gd-links {
+  padding: 4px 15px 14px;
+}
+.ctx-gd-links-h {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--faint-foreground);
+  margin-bottom: 8px;
+}
+.ctx-gd-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 9px;
+  margin-bottom: 5px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 130ms var(--ease-out-smooth);
+}
+.ctx-gd-chip:hover {
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+.ctx-gd-chip .sw {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ctx-gd-chip .nm {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctx-gd-chip .ty {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--faint-foreground);
+  flex-shrink: 0;
+}
+.ctx-gd-open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 2px 15px 15px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: all 150ms var(--ease-out-smooth);
+}
+.ctx-gd-open:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.ctx-gd-timeline {
+  padding: 0 15px 15px;
+  border-top: 1px solid var(--border);
+  padding-top: 13px;
+}
 
-/* Timeline */
+/* "Generated from" / "Quotes priced from this" — quote↔PRD provenance lineage.
+   A richer, purpose-built display than the generic "Connected to" chips: an
+   accent-tinted source-document card, a flow connector, and the current node,
+   so the wiring reads as "this quote was generated with this specific PRD". */
+.ctx-gd-lineage {
+  padding: 4px 15px 14px;
+}
+.ctx-gd-prov {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px 9px 11px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--prov-c) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--prov-c) 26%, var(--border));
+  border-left: 3px solid var(--prov-c);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms var(--ease-out-smooth),
+    border-color 140ms var(--ease-out-smooth);
+}
+.ctx-gd-prov:hover {
+  background: color-mix(in srgb, var(--prov-c) 13%, transparent);
+  border-color: color-mix(in srgb, var(--prov-c) 44%, var(--border));
+}
+.ctx-gd-prov-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--prov-c) 16%, transparent);
+  color: var(--prov-c);
+}
+.ctx-gd-prov-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.ctx-gd-prov-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ctx-gd-prov-sub {
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+.ctx-gd-prov-status {
+  text-transform: capitalize;
+}
+.ctx-gd-prov-go {
+  flex-shrink: 0;
+  color: var(--faint-foreground);
+  transition: color 140ms var(--ease-out-smooth),
+    transform 140ms var(--ease-out-smooth);
+}
+.ctx-gd-prov:hover .ctx-gd-prov-go {
+  color: var(--prov-c);
+  transform: translate(1px, -1px);
+}
+.ctx-gd-prov-group .ctx-gd-prov + .ctx-gd-prov {
+  margin-top: 6px;
+}
+
+/* Flow connector linking the source doc and the current node. */
+.ctx-gd-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 4px 19px;
+}
+.ctx-gd-flow-rail {
+  width: 2px;
+  height: 15px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  background: linear-gradient(
+    var(--border-strong),
+    color-mix(in srgb, var(--border-strong) 20%, transparent)
+  );
+}
+.ctx-gd-flow-txt {
+  font-size: 10.5px;
+  font-style: italic;
+  color: var(--faint-foreground);
+}
+.ctx-gd-prov-self {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  border: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.ctx-gd-prov-self .sw {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ctx-gd-prov-self .nm {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "In AI context" — a document's folded-in context mirror (status + preview) */
+.ctx-gd-synced {
+  padding: 13px 15px 15px;
+  border-top: 1px solid var(--border);
+}
+.ctx-gd-synced-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  margin-bottom: 9px;
+}
+.ctx-gd-synced-status.tone-ready {
+  color: var(--foreground);
+}
+.ctx-gd-synced-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--faint-foreground);
+  flex-shrink: 0;
+}
+.ctx-gd-synced-status.tone-ready .ctx-gd-synced-dot {
+  background: #34d399;
+}
+.ctx-gd-synced-status.tone-pending .ctx-gd-synced-dot {
+  background: #f0a830;
+}
+.ctx-gd-synced-status.tone-failed .ctx-gd-synced-dot {
+  background: #ef4444;
+}
+.ctx-gd-synced-preview {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* "Completed" — a done task's folded-in completion context: time-to-done,
+   deliverable materials, and linked commit messages. */
+.ctx-gd-completed {
+  padding: 13px 15px 15px;
+  border-top: 1px solid var(--border);
+}
+.ctx-gd-completed-stat {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--foreground);
+  margin-bottom: 7px;
+}
+.ctx-gd-completed-stat svg {
+  color: #22c55e;
+  flex-shrink: 0;
+}
+.ctx-gd-completed-stat b {
+  font-weight: 600;
+}
+.ctx-gd-completed-stat.sub {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.ctx-gd-completed-stat.sub svg {
+  color: var(--faint-foreground);
+}
+.ctx-gd-completed-note {
+  margin: 7px 0 0;
+  padding: 9px 11px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ctx-gd-completed-grp {
+  margin-top: 12px;
+}
+.ctx-gd-completed-sub-h {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--faint-foreground);
+  margin-bottom: 6px;
+}
+.ctx-gd-completed-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--foreground);
+  padding: 4px 0;
+  min-width: 0;
+}
+.ctx-gd-completed-item svg {
+  color: var(--faint-foreground);
+  flex-shrink: 0;
+}
+.ctx-gd-completed-item .nm,
+.ctx-gd-completed-item .msg {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--foreground);
+  text-decoration: none;
+}
+.ctx-gd-completed-item a.nm:hover,
+.ctx-gd-completed-item a.msg:hover {
+  text-decoration: underline;
+}
+.ctx-gd-completed-item .sha {
+  font-family: var(--font-mono), monospace;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+/* settings (bottom-right) */
+.ctx-settings {
+  bottom: 16px;
+  right: 16px;
+  width: 260px;
+  padding: 0;
+  max-height: calc(100% - 32px);
+  display: none;
+  flex-direction: column;
+}
+.ctx-settings.show {
+  display: flex;
+}
+.ctx-gs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 15px;
+  border-bottom: 1px solid var(--border);
+}
+.ctx-gs-head .t {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+.ctx-gs-head button {
+  background: none;
+  border: none;
+  color: var(--faint-foreground);
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.ctx-gs-head button:hover {
+  color: var(--foreground);
+}
+.ctx-gs-body {
+  padding: 13px 15px 15px;
+  overflow-y: auto;
+}
+.ctx-gs-sec + .ctx-gs-sec {
+  margin-top: 16px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+}
+.ctx-gs-sec-t {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--faint-foreground);
+  margin-bottom: 11px;
+}
+.ctx-gs-ctl {
+  margin-bottom: 13px;
+}
+.ctx-gs-ctl:last-child {
+  margin-bottom: 0;
+}
+.ctx-gs-lab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--foreground);
+  margin-bottom: 7px;
+}
+.ctx-gs-lab .v {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+}
+.ctx-settings input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  outline: none;
+}
+.ctx-settings input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: var(--shadow-1);
+  transition: transform 130ms var(--ease-out-smooth);
+}
+.ctx-settings input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.18);
+}
+.ctx-settings input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--primary);
+  cursor: pointer;
+}
+.ctx-gs-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--foreground);
+  margin-bottom: 11px;
+}
+.ctx-gs-toggle:last-child {
+  margin-bottom: 0;
+}
+.ctx-sw-track {
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  border: none;
+  position: relative;
+  cursor: pointer;
+  transition: background 160ms var(--ease-out-smooth);
+  flex-shrink: 0;
+}
+.ctx-sw-track.on {
+  background: var(--primary);
+}
+.ctx-sw-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  transition: transform 160ms var(--ease-out-smooth);
+  box-shadow: var(--shadow-1);
+}
+.ctx-sw-track.on::after {
+  transform: translateX(16px);
+}
+
+/* zoom controls (bottom-left) */
+.ctx-controls {
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-full);
+}
+.ctx-controls button {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  border: none;
+  background: none;
+  color: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 140ms var(--ease-out-smooth), color 140ms var(--ease-out-smooth);
+}
+.ctx-controls button:hover {
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--foreground);
+}
+.ctx-zlabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint-foreground);
+  min-width: 40px;
+  text-align: center;
+}
+.ctx-ctrl-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+/* gear / settings opener (bottom-right) */
+.ctx-gear {
+  bottom: 16px;
+  right: 16px;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.ctx-gear:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+/* hint pill (bottom center) */
+.ctx-hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  z-index: 2;
+  background: color-mix(in srgb, #fff 80%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 1;
+  transition: opacity 500ms var(--ease-out-smooth);
+}
+.ctx-hint.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+.ctx-hint .em {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+}
+
+/* ───────── Document timeline (inside the detail card) ───────── */
 .ctx-timeline {
   display: flex;
   flex-direction: column;
@@ -216,7 +992,14 @@
   color: #fff;
   flex: none;
 }
-.ctx-timeline-body { min-width: 0; }
+/* Block-level so the inline-SVG baseline descender gap doesn't push the glyph
+   off-center; the flex centering above then lands it dead-center in the disc. */
+.ctx-timeline-dot svg {
+  display: block;
+}
+.ctx-timeline-body {
+  min-width: 0;
+}
 .ctx-timeline-line {
   display: flex;
   align-items: baseline;
@@ -236,6 +1019,88 @@
   font-size: 11px;
   color: var(--muted-foreground);
 }
+/* Profile change history — a list of updates, each a field-level diff. */
+.ctx-prof-hist {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 4px;
+}
+.ctx-prof-event {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ctx-prof-event:not(:last-child) {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.ctx-prof-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ctx-prof-when {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.ctx-prof-count {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  flex: none;
+}
+.ctx-prof-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ctx-prof-change {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ctx-prof-field {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.ctx-prof-line {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 6px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  word-break: break-word;
+}
+.ctx-prof-line .mk {
+  font-weight: 700;
+  text-align: center;
+  user-select: none;
+}
+.ctx-prof-line.from {
+  background: color-mix(in oklch, #ef4444 8%, transparent);
+  color: var(--muted-foreground);
+}
+.ctx-prof-line.from .tx {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in oklch, #ef4444 55%, transparent);
+}
+.ctx-prof-line.from .mk {
+  color: #ef4444;
+}
+.ctx-prof-line.to {
+  background: color-mix(in oklch, #10b981 10%, transparent);
+  color: var(--foreground);
+}
+.ctx-prof-line.to .mk {
+  color: #10b981;
+}
 .ctx-timeline-detail {
   margin-top: 4px;
   font-size: 12.5px;
@@ -247,6 +1112,46 @@
   background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+/* Project history — engagement-wide rollup chips above the unified feed. */
+.ctx-ph-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 12px;
+}
+.ctx-ph-stat {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  padding: 3px 8px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+/* which artifact a project-history moment belongs to (doc/task/engagement) */
+.ctx-ph-entity {
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* time elapsed since the previous stage */
+.ctx-timeline-gap {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  opacity: 0.85;
+}
+/* first → last total, under the rail */
+.ctx-timeline-total {
+  margin-left: 30px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted-foreground);
 }
 
 /* Change-request composer */
@@ -276,4 +1181,109 @@
   border-color: var(--primary);
   box-shadow: 0 0 0 1px var(--primary-soft);
 }
-.ctx-cr-row { display: flex; gap: 8px; }
+.ctx-cr-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* The detail panel isn't a .docov/.prdnew scope, so the shared `.add-mini`
+   button style never reaches the change-request composer — its buttons would
+   render unstyled. Style them locally to match the panel's pill buttons. */
+.ctx-cr .add-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 150ms var(--ease-out-smooth);
+}
+.ctx-cr .add-mini:hover {
+  border-color: var(--faint-foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.ctx-cr .add-mini:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.ctx-cr .add-mini .ai {
+  display: inline-flex;
+  color: var(--faint-foreground);
+}
+/* Collapsed entry point spans the panel width. */
+.ctx-cr > .add-mini {
+  width: 100%;
+}
+/* Composer actions split the row: primary Save, quiet Cancel. */
+.ctx-cr-row .add-mini {
+  flex: 1;
+}
+.ctx-cr-row .add-mini:first-child {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.ctx-cr-row .add-mini:first-child .ai {
+  color: rgba(255, 255, 255, 0.85);
+}
+.ctx-cr-row .add-mini:first-child:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+  filter: brightness(0.95);
+}
+
+/* ───────── List view (grouped) ─────────
+   The List shows everything the graph shows, bucketed by category. Each group
+   gets a small header (colored swatch + label + count) above the .docov rows. */
+.ctx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  margin-top: 24px;
+}
+.ctx-list-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ctx-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 2px;
+}
+.ctx-list-sw {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.ctx-list-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  color: var(--muted-foreground);
+}
+.ctx-list-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint-foreground);
+}
+
+@media (max-width: 640px) {
+  .ctx-stage {
+    height: 520px;
+  }
+  .ctx-detail {
+    width: min(288px, calc(100% - 32px));
+  }
+}

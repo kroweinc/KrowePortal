@@ -5,6 +5,11 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { assertEngagementBuilder } from "@/lib/context/access";
 import { getContextItems } from "@/lib/actions/context";
 import { searchClientContext } from "@/lib/actions/context-search";
+import {
+  getEngagementTimeline,
+  type EngagementAnalytics,
+  type EntityLifecycle,
+} from "@/lib/context/lifecycle-analytics";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import type { RepoContext } from "@/lib/github/types";
 import type { ContextItem, TaskStatus } from "@/lib/types";
@@ -59,12 +64,15 @@ export interface ClientContextBundle {
   // query mode: the top-k semantically matched snippets.
   snippets?: ContextSnippet[];
   tasks: { open: BundleTask[]; done: BundleTask[]; counts: { open: number; done: number } };
+  // The builder↔client interaction story: every document/task/relationship stage
+  // transition with the time between each, plus engagement-level rollups.
+  activity?: { lifecycles: EntityLifecycle[]; analytics: EngagementAnalytics };
   repo: RepoContext | null;
   generatedAt: string;
 }
 
 // Protect the prompt from a pathological dump: cap aggregate full-text.
-const FULL_TEXT_AGGREGATE_CAP = 60_000;
+const FULL_TEXT_AGGREGATE_CAP = 120_000;
 
 type TaskRow = {
   id: string;
@@ -92,7 +100,7 @@ function milestoneTitle(milestone: TaskRow["milestone"]): string | null {
  */
 export async function buildClientContext(
   engagementId: string,
-  opts?: { query?: string; k?: number; includeFullText?: boolean }
+  opts?: { query?: string; k?: number; includeFullText?: boolean; includeActivity?: boolean }
 ): Promise<ClientContextBundle> {
   const profile = await getCurrentProfile();
   if (!profile) throw new Error("Unauthorized");
@@ -141,7 +149,8 @@ export async function buildClientContext(
   let itemTexts: ClientContextBundle["itemTexts"];
 
   if (mode === "query") {
-    const { hits } = await searchClientContext(engagementId, opts!.query!, opts?.k ?? 8);
+    // k omitted → searchClientContext picks an adaptive top-k scaled to corpus size.
+    const { hits } = await searchClientContext(engagementId, opts!.query!, opts?.k);
     snippets = (hits ?? []).map((h) => ({
       itemId: h.contextItemId,
       itemTitle: h.item.title,
@@ -185,6 +194,14 @@ export async function buildClientContext(
   // Linked GitHub repo context (LLM-ready already).
   const { repoContext } = await resolveRepoForGeneration({ profileId: profile.id, engagementId });
 
+  // Interaction timeline + timing analytics (on by default; skip for the leanest
+  // query-mode agent calls via opts.includeActivity === false).
+  let activity: ClientContextBundle["activity"];
+  if (opts?.includeActivity !== false) {
+    const timeline = await getEngagementTimeline(engagementId);
+    activity = { lifecycles: timeline.lifecycles, analytics: timeline.analytics };
+  }
+
   return {
     engagement,
     mode,
@@ -193,6 +210,7 @@ export async function buildClientContext(
     itemTexts,
     snippets,
     tasks: { open, done, counts: { open: open.length, done: done.length } },
+    activity,
     repo: repoContext,
     generatedAt: new Date().toISOString(),
   };
@@ -201,6 +219,31 @@ export async function buildClientContext(
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
+
+// How an entity is headed in the interaction timeline.
+function timelineHead(lc: EntityLifecycle): string {
+  if (lc.kind === "relationship") return `[Engagement] ${lc.entityLabel}`;
+  if (lc.kind === "task") return `[Task] ${lc.entityLabel}`;
+  const map: Record<string, string> = {
+    prd: "PRD",
+    quote: "Quote",
+    contract: "Contract",
+    brief: "Brief",
+    change_order: "Change Order",
+  };
+  return `[${(lc.docKind && map[lc.docKind]) || "Doc"}] ${lc.entityLabel}`;
+}
+
+// "(role · Name)" actor suffix for a timeline stage, empty when unknown.
+function stageActor(role: string | null, name: string | null): string {
+  if (!role) return "";
+  return ` (${role}${name ? ` · ${name}` : ""})`;
+}
+
+// Bounds so a long-running engagement can't blow the prompt.
+const TIMELINE_MAX_ENTITIES = 20;
+const TIMELINE_MAX_STAGES = 8;
+const TIMELINE_MAX_LINES = 220;
 
 /**
  * Render a bundle to a single deterministic, bounded string an LLM reads. This
@@ -227,13 +270,78 @@ export function serializeForPrompt(bundle: ClientContextBundle): string {
   }
   lines.push("");
 
+  // Engagement analytics + interaction timeline — the builder↔client story with
+  // the time between each stage. This is the section future agents read to reason
+  // about momentum, responsiveness, and where each artifact stands.
+  if (bundle.activity) {
+    const { analytics: a, lifecycles } = bundle.activity;
+
+    lines.push("## Engagement Analytics");
+    if (a.lastActivityLabel) {
+      lines.push(
+        `Last activity: ${a.lastActivityLabel}${a.lastActivityAt ? ` (${a.lastActivityAt.slice(0, 10)})` : ""}`
+      );
+    }
+    lines.push(
+      `Documents: ${a.docsSent} sent, ${a.docsSigned} signed` +
+        (a.avgTimeToSignLabel ? ` · avg time to sign ${a.avgTimeToSignLabel}` : "") +
+        (a.fastestSignLabel ? ` (fastest ${a.fastestSignLabel})` : "")
+    );
+    if (a.responseCadenceLabel) lines.push(`Client response cadence: ~${a.responseCadenceLabel}`);
+    lines.push(
+      `Tasks: ${a.tasksCompleted} completed` +
+        (a.avgTaskCycleLabel ? ` · avg cycle ${a.avgTaskCycleLabel}` : "")
+    );
+    lines.push("");
+
+    lines.push("## Interaction Timeline");
+    if (lifecycles.length) {
+      const ordered = [...lifecycles]
+        .sort((x, y) => (x.lastActivityAt < y.lastActivityAt ? 1 : -1))
+        .slice(0, TIMELINE_MAX_ENTITIES);
+      let count = 0;
+      let truncated = false;
+      for (const lc of ordered) {
+        if (count >= TIMELINE_MAX_LINES) {
+          truncated = true;
+          break;
+        }
+        lines.push(timelineHead(lc));
+        count++;
+        const omitted = Math.max(0, lc.stages.length - TIMELINE_MAX_STAGES);
+        if (omitted > 0) {
+          lines.push(`  …(${omitted} earlier ${omitted === 1 ? "stage" : "stages"} omitted)`);
+          count++;
+        }
+        for (const s of lc.stages.slice(-TIMELINE_MAX_STAGES)) {
+          const gap = s.sincePreviousLabel ? `  (+${s.sincePreviousLabel})` : "";
+          const det = s.detail ? ` — "${truncate(s.detail, 160)}"` : "";
+          lines.push(
+            `  - ${s.stage}${stageActor(s.actorRole, s.actorName)} ${s.at.slice(0, 10)}${gap}${det}`
+          );
+          count++;
+        }
+        if (lc.totalElapsedLabel && lc.stages.length > 1) {
+          lines.push(`  total: ${lc.totalElapsedLabel}`);
+          count++;
+        }
+      }
+      if (truncated || ordered.length < lifecycles.length) {
+        lines.push("…(timeline truncated)");
+      }
+    } else {
+      lines.push("(no interactions yet)");
+    }
+    lines.push("");
+  }
+
   // Knowledge
   if (bundle.mode === "query") {
     lines.push(`## Knowledge — top matches for "${bundle.query}"`);
     if (bundle.snippets?.length) {
       for (const s of bundle.snippets) {
         lines.push(`### ${s.itemTitle} (${s.itemKind}, similarity ${s.similarity.toFixed(2)})`);
-        lines.push(truncate(s.content.trim(), 1500));
+        lines.push(truncate(s.content.trim(), 2500));
         lines.push("");
       }
     } else {

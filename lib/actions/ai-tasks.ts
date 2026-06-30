@@ -10,6 +10,7 @@ import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
+import { syncTaskContext } from "@/lib/context/sync-entity";
 import type { TaskGenerationResult } from "@/lib/ai/schemas";
 import type { TaskPriority } from "@/lib/types";
 
@@ -142,6 +143,7 @@ export async function acceptGeneratedTask(input: {
     });
   }
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { taskId };

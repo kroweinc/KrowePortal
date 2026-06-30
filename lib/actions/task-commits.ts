@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { syncTaskContext } from "@/lib/context/sync-entity";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -84,6 +85,7 @@ export async function linkTaskCommit(
     },
   });
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { id: data.id as string };
@@ -133,6 +135,7 @@ export async function unlinkTaskCommit(
     },
   });
 
+  await syncTaskContext(row.task_id as string);
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };

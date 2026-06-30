@@ -30,8 +30,17 @@ create index if not exists context_chunks_engagement_idx on context_chunks (enga
 -- cosine ops to match unit-normalized OpenAI embeddings. lists=100 suits the
 -- modest per-engagement scale. (Swap to `hnsw (embedding vector_cosine_ops)` if
 -- the Postgres build has it enabled.)
+--
+-- pgvector's ivfflat build holds its k-means sample in maintenance_work_mem and
+-- raises `54000: memory required is N MB` when the 32 MB default is too small on
+-- a populated table. SET LOCAL inside an explicit transaction guarantees the bump
+-- and the CREATE INDEX share one backend even under transaction-mode pooling,
+-- where a bare session-level SET can be dropped between statements.
+begin;
+set local maintenance_work_mem = '256MB';
 create index if not exists context_chunks_embedding_idx
   on context_chunks using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+commit;
 
 alter table context_chunks enable row level security;
 

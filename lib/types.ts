@@ -395,14 +395,28 @@ export interface ProjectSopTranscript {
 
 // ── Client Context Layer (engagement-scoped, builder-only; migrations 0059/0060)
 // The single home for everything a builder knows about a client — documents,
-// SOPs, transcripts, materials, notes, links — chunked + embedded for RAG.
+// SOPs, transcripts, materials, notes, links, and auto-synced builder/operator
+// profiles — chunked + embedded for RAG.
 export type ContextItemKind =
   | "document"
   | "sop"
   | "transcript"
   | "material"
   | "note"
-  | "link";
+  | "link"
+  | "profile" // auto-synced builder/operator profile mirror (migration 0062)
+  // auto-synced engagement entities (migration 0064) — see lib/context/sync-entity.ts
+  | "brief"
+  | "change_order"
+  | "agreement"
+  | "deliverable"
+  | "infra"
+  | "task"
+  | "milestone"
+  | "availability"
+  | "codebase"
+  // auto-synced task attachment content (migration 0068) — see lib/context/sync-entity.ts
+  | "task_attachment";
 
 export type ContextEmbeddingStatus = "pending" | "ready" | "failed" | "skipped";
 
@@ -422,6 +436,10 @@ export interface ContextItem {
   source_meta: Record<string, unknown>;
   embedding_status: ContextEmbeddingStatus;
   chunk_count: number;
+  // Set when a newer version logically replaces this mirror (e.g. a signed quote
+  // supersedes the project's other quote drafts, migration 0067). Superseded
+  // items stay visible for history but drop out of semantic retrieval.
+  superseded_at: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { syncTaskContext, removeEntityContext } from "@/lib/context/sync-entity";
 import type { TaskStatus, TaskPriority } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -65,6 +66,7 @@ export async function createTask(formData: FormData) {
     userId: profile.id,
   });
 
+  await syncTaskContext(data.id as string);
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true, taskId: data.id as string };
 }
@@ -122,6 +124,7 @@ export async function updateTask(formData: FormData) {
     }
   }
 
+  await syncTaskContext(id);
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true };
 }
@@ -183,6 +186,7 @@ export async function markTaskDone(
     },
   });
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -242,6 +246,7 @@ export async function markTaskForApproval(
     metadata: parsed.data.note ? { note: parsed.data.note } : null,
   });
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -318,6 +323,7 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
     });
   }
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   return { success: true };
 }
@@ -346,6 +352,7 @@ export async function deleteTask(taskId: string) {
 
   if (error) return { error: error.message };
 
+  await removeEntityContext("task", taskId);
   revalidatePath("/o");
   revalidatePath("/b");
   return { success: true };

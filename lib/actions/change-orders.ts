@@ -7,6 +7,7 @@ import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { recordDocumentEvent } from "@/lib/context/document-events";
+import { syncChangeOrderContext } from "@/lib/context/sync-entity";
 import type { ChangeOrder, ChangeOrderContent } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -91,6 +92,7 @@ export async function createChangeOrder(
     actorId: profile.id,
     actorRole: "builder",
   });
+  await syncChangeOrderContext(data.id as string);
   revalidatePath(`/b/engagements/${engagementId}`);
   return { success: true, id: data.id as string };
 }
@@ -121,6 +123,7 @@ export async function updateChangeOrder(
   }
   const { error } = await supabase.from("change_orders").update(patch).eq("id", id);
   if (error) return { error: error.message };
+  await syncChangeOrderContext(id);
   revalidatePath("/b/engagements");
   return { success: true };
 }
@@ -150,6 +153,7 @@ export async function sendChangeOrder(id: string): Promise<{ success: true } | {
     actorId: profile.id,
     actorRole: "builder",
   });
+  await syncChangeOrderContext(id);
   revalidatePath("/b/engagements");
   revalidatePath("/o/project");
   return { success: true };
@@ -190,6 +194,7 @@ export async function rejectChangeOrder(
     actorRole: "operator",
     payload: cleanNote ? { rejectionNote: cleanNote } : {},
   });
+  await syncChangeOrderContext(id);
   revalidatePath("/b/engagements");
   revalidatePath("/o/project");
   return { success: true };
@@ -249,6 +254,9 @@ export async function signChangeOrder(
     payload: { signerName: parsed.data.signerName, signerIp: ip },
   });
 
+  // Signing appended a milestone + tasks via the RPC; those backfill on next
+  // panel load. Re-sync the change order itself to reflect its signed state.
+  await syncChangeOrderContext(id);
   revalidatePath("/o/project");
   revalidatePath("/b/engagements");
   return { success: true };

@@ -38,6 +38,10 @@ interface KindHandlers {
   dup: (id: string) => Promise<{ id: string } | { error: string }>;
   /** Public share path segment: /{path}/{token}. */
   path: string;
+  /** Whether a doc of this kind may be deleted while in `status`. PRDs can be
+   *  removed even after they're sent; quotes/contracts stay draft-only so a
+   *  client-accepted quote or signed contract can't be silently destroyed. */
+  canDelete: (status: string) => boolean;
 }
 
 const KIND: Record<DocKind, KindHandlers> = {
@@ -47,6 +51,7 @@ const KIND: Record<DocKind, KindHandlers> = {
     publish: sendPrd,
     dup: duplicatePrd,
     path: "prd",
+    canDelete: () => true,
   },
   quote: {
     del: deleteQuote,
@@ -54,6 +59,7 @@ const KIND: Record<DocKind, KindHandlers> = {
     publish: sendQuote,
     dup: duplicateQuote,
     path: "quotes",
+    canDelete: (s) => s === "draft",
   },
   contract: {
     del: deleteContract,
@@ -61,6 +67,7 @@ const KIND: Record<DocKind, KindHandlers> = {
     publish: (id) => sendContract(id),
     dup: duplicateContract,
     path: "contract",
+    canDelete: (s) => s === "draft",
   },
 };
 
@@ -152,10 +159,14 @@ export function useDocMenu(doc: DocRef) {
         icon: <Trash2 size={15} strokeWidth={1.9} />,
         destructive: true,
         separatorBefore: true,
-        disabled: !isDraft,
+        disabled: !k.canDelete(doc.status),
         disabledReason: "Only drafts can be deleted",
         onSelect: () => {
-          if (!window.confirm("Delete this draft? This cannot be undone.")) return;
+          // A sent PRD has been shared with the client — warn before removing it.
+          const confirmMsg = isDraft
+            ? "Delete this draft? This cannot be undone."
+            : "This PRD has already been sent to the client. Delete it anyway? This cannot be undone.";
+          if (!window.confirm(confirmMsg)) return;
           startTransition(async () => {
             const r = await k.del(doc.id);
             if (isErr(r)) toast.error(r.error);

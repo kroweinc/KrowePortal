@@ -28,7 +28,9 @@ export const DOC_KIND_LABEL: Record<SyncDocKind, string> = {
 };
 
 // A tiny line accumulator so each serializer reads as a flat list of sections.
-class Lines {
+// Exported so the profile serializer (serialize-profile.ts) reuses the same
+// section formatting that the RAG layer reads back.
+export class Lines {
   private out: string[] = [];
 
   heading(text: string): void {
@@ -57,7 +59,7 @@ class Lines {
   }
 }
 
-function money(n: number | null | undefined): string {
+export function money(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "";
   return `$${Math.round(n).toLocaleString()}`;
 }
@@ -85,7 +87,7 @@ function uxFlowLines(flow: PrdUxFlow): string[] {
   return [`${flow.role}:`, ...steps.map((s, i) => `  ${i + 1}. ${s}`)];
 }
 
-function lineItemLines(items?: BriefLineItem[]): string[] {
+export function lineItemLines(items?: BriefLineItem[]): string[] {
   return (items ?? [])
     .filter((li) => li.label?.trim())
     .map((li) => `  • ${li.label} — ${money(li.amount)}${li.notes ? ` (${li.notes})` : ""}`);

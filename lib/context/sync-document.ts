@@ -32,7 +32,7 @@ interface EngagementRef {
   builderId: string;
 }
 
-async function engagementForProject(
+export async function engagementForProject(
   admin: ReturnType<typeof createAdminClient>,
   projectId: string
 ): Promise<EngagementRef | null> {
@@ -191,8 +191,78 @@ export async function backfillProjectDocuments(
       }
     }
     await Promise.all(jobs);
+
+    // Once every doc is mirrored, mark non-winning versions superseded so
+    // retrieval cites the signed one (best-effort; see reconcileDocSupersedence).
+    await reconcileDocSupersedence(engagementId, projectId);
   } catch (err) {
     console.error("[backfillProjectDocuments]", err);
+  }
+}
+
+/** A document version that stands as the live one for its kind on a project. */
+function isLiveDoc(kind: SyncDocKind, status: string): boolean {
+  return status === "signed" || (kind === "quote" && status === "accepted");
+}
+
+/**
+ * Flag a project's non-winning document mirrors as superseded. For each kind
+ * (quote / PRD / contract): if any version is signed (or accepted, for quotes),
+ * every OTHER version of that kind is superseded; the live version and all
+ * kinds without a signed winner stay searchable. Idempotent — clears the flag
+ * if a doc is no longer superseded. Best-effort.
+ */
+export async function reconcileDocSupersedence(
+  engagementId: string,
+  projectId: string
+): Promise<void> {
+  try {
+    const admin = createAdminClient();
+
+    const { data: mirrors } = await admin
+      .from("context_items")
+      .select("id, source_meta, superseded_at")
+      .eq("engagement_id", engagementId)
+      .eq("source_meta->>source", "auto-doc");
+    if (!mirrors?.length) return;
+
+    const [quotes, prds, contracts] = await Promise.all([
+      admin.from("quotes").select("id, status").eq("project_id", projectId),
+      admin.from("prds").select("id, status").eq("project_id", projectId),
+      admin.from("contracts").select("id, status").eq("project_id", projectId),
+    ]);
+
+    const statusByDoc = new Map<string, { kind: SyncDocKind; status: string }>();
+    const kindHasWinner = new Set<SyncDocKind>();
+    const groups: [SyncDocKind, { id: string; status: string }[]][] = [
+      ["quote", (quotes.data ?? []) as { id: string; status: string }[]],
+      ["prd", (prds.data ?? []) as { id: string; status: string }[]],
+      ["contract", (contracts.data ?? []) as { id: string; status: string }[]],
+    ];
+    for (const [kind, rows] of groups) {
+      for (const r of rows) {
+        statusByDoc.set(r.id, { kind, status: r.status });
+        if (isLiveDoc(kind, r.status)) kindHasWinner.add(kind);
+      }
+    }
+
+    const now = new Date().toISOString();
+    for (const m of mirrors) {
+      const meta = m.source_meta as { docKind?: SyncDocKind; docId?: string } | null;
+      const docId = meta?.docId;
+      const kind = meta?.docKind;
+      if (!docId || !kind) continue;
+      const info = statusByDoc.get(docId);
+      const shouldSupersede = !!info && kindHasWinner.has(kind) && !isLiveDoc(kind, info.status);
+      const isSuperseded = !!m.superseded_at;
+      if (shouldSupersede && !isSuperseded) {
+        await admin.from("context_items").update({ superseded_at: now }).eq("id", m.id as string);
+      } else if (!shouldSupersede && isSuperseded) {
+        await admin.from("context_items").update({ superseded_at: null }).eq("id", m.id as string);
+      }
+    }
+  } catch (err) {
+    console.error("[reconcileDocSupersedence]", err);
   }
 }
 

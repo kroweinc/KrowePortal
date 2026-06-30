@@ -11,6 +11,15 @@ import { normalizeUrl } from "@/lib/project/business-context";
 import { embedAndStoreChunks } from "@/lib/context/embed-store";
 import { backfillProjectDocuments } from "@/lib/context/sync-document";
 import {
+  backfillEngagementEntities,
+  backfillProjectScopedEntities,
+} from "@/lib/context/sync-entity";
+import { syncLinkContent, backfillLinkContents } from "@/lib/context/sync-link";
+import {
+  syncBuilderProfileContext,
+  syncOperatorProfileContext,
+} from "@/lib/context/sync-profile";
+import {
   MAX_ATTACHMENT_SIZE,
   MAX_SOP_CHARS,
   SOP_ALLOWED_EXTENSIONS,
@@ -77,7 +86,20 @@ export async function syncEngagementDocuments(
 
   if (eng?.project_id) {
     await backfillProjectDocuments(engagementId, eng.project_id as string, profile.id);
+    await backfillProjectScopedEntities(engagementId, eng.project_id as string, profile.id);
   }
+
+  // Mirror the two people in the engagement (builder + operator) and every
+  // engagement-scoped entity (briefs, change orders, agreement, deliverables,
+  // infra, tasks, milestones, availability) into the context layer too. All
+  // engagement-level, so they run even without a linked project. Best-effort:
+  // the helpers swallow their own errors.
+  await Promise.all([
+    syncBuilderProfileContext(engagementId, profile.id),
+    syncOperatorProfileContext(engagementId, profile.id),
+    backfillEngagementEntities(engagementId, profile.id),
+    backfillLinkContents(engagementId, profile.id),
+  ]);
 
   return { items: await getContextItems(engagementId) };
 }
@@ -151,8 +173,9 @@ export async function addContextLink(
   if (!normalized) return { error: "Enter a valid http(s) URL." };
 
   const supabase = await getClient(profile.id);
-  // Links carry no extractable body in v1 (no page crawl), so they are stored as
-  // references and skipped by the embedding pipeline.
+  // The link is stored immediately as a reference (status 'skipped'); then we
+  // fetch + extract + embed its page content so it becomes searchable. The
+  // fetch is best-effort (see syncLinkContent) and never blocks the save.
   const { data, error } = await supabase
     .from("context_items")
     .insert({
@@ -169,6 +192,7 @@ export async function addContextLink(
 
   if (error || !data) return { error: error?.message ?? "Couldn't save link." };
 
+  await syncLinkContent(data.id as string, parsed.data.engagementId, normalized, profile.id);
   revalidateEngagement(parsed.data.engagementId);
   return { success: true, item: data as ContextItem };
 }
