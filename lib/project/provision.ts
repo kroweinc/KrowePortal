@@ -43,7 +43,7 @@ export async function seedEngagementTasksFromQuote(
         description: t.description,
         builder_estimate_hours: t.builder_estimate_hours,
         source: "builder_added",
-        status: "inbox",
+        status: "backlog",
         created_by: createdBy,
         sort_order: t.sort_order,
       }))

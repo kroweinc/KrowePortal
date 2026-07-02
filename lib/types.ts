@@ -19,7 +19,7 @@ export interface GitHubRepo {
 }
 
 export type Role = "operator" | "builder";
-export type TaskStatus = "inbox" | "in_progress" | "blocked" | "done";
+export type TaskStatus = "backlog" | "todo" | "in_progress" | "done";
 export type TaskSource = "operator_request" | "builder_added";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 // Linear-style change type. Null on legacy/unclassified tasks (see migration
@@ -141,7 +141,9 @@ export interface Task {
   engagement?: Engagement;
   // The person who submitted the task, joined on created_by. Surfaced in place of
   // the old operator/builder source badge. Absent unless the query selects it.
-  creator?: { display_name: string | null; role: Role } | null;
+  // avatar_url is not a profiles column — it's resolved server-side (uploaded
+  // profile photo, else Google account photo) via lib/submitter-avatars.ts.
+  creator?: { display_name: string | null; role: Role; avatar_url?: string | null } | null;
   task_attachments?: TaskAttachment[];
 }
 

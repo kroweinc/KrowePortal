@@ -8,6 +8,7 @@ import { TaskBoard } from "@/components/task-board";
 import { NewTaskForm } from "@/components/new-task-form";
 import { CreateInvitationDialog } from "@/components/create-invitation-dialog";
 import { getMyEngagements, getMyPendingInvites } from "@/lib/actions/invitations";
+import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-avatars";
 import type { Task } from "@/lib/types";
 
 export const metadata = { title: "Tasks" };
@@ -50,7 +51,9 @@ export default async function BuilderDashboard({
     .or(filter)
     .order("created_at", { ascending: false });
 
-  const tasks = (data ?? []) as Task[];
+  const rows = (data ?? []) as Task[];
+  const avatars = await getSubmitterAvatarMap(rows.map((t) => t.created_by));
+  const tasks = attachCreatorAvatars(rows, avatars);
   const firstEngagement = engagementList[0];
 
   // Single-engagement first-run: surface the invite affordance right on the board.

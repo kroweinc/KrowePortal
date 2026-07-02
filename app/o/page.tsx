@@ -5,6 +5,7 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { DEV_PROFILE_IDS } from "@/lib/auth";
 import { OperatorTaskList } from "@/components/operator-task-list";
 import { NewTaskForm } from "@/components/new-task-form";
+import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-avatars";
 import type { Engagement, Task } from "@/lib/types";
 
 export const metadata = { title: "Tasks" };
@@ -43,7 +44,9 @@ export default async function OperatorDashboard() {
     .or(filter)
     .order("created_at", { ascending: false });
 
-  const tasks = (data ?? []) as Task[];
+  const rows = (data ?? []) as Task[];
+  const avatars = await getSubmitterAvatarMap(rows.map((t) => t.created_by));
+  const tasks = attachCreatorAvatars(rows, avatars);
   const firstEngagement = engagementList[0];
 
   return (

@@ -10,8 +10,11 @@ const badgeVariants = cva(
         default: "bg-neutral-900 text-white",
         secondary: "bg-neutral-100 text-neutral-700",
         outline: "border border-neutral-300 text-neutral-700",
-        inbox: "bg-blue-50 text-blue-700",
+        backlog: "bg-blue-50 text-blue-700",
+        todo: "bg-indigo-50 text-indigo-700",
         in_progress: "bg-amber-50 text-amber-700",
+        // Not a task status anymore — still used by brief-status-pill and
+        // the project-profile AI overview card.
         blocked: "bg-red-50 text-red-700",
         done: "bg-green-50 text-green-700",
         operator: "bg-violet-50 text-violet-700",

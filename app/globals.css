@@ -574,8 +574,12 @@ button:focus-visible {
 .krowe-card.priority-medium .krowe-rail { background: var(--primary-accent); opacity: 0.85; }
 .krowe-card.priority-low    .krowe-rail { background: var(--success); }
 
-.krowe-card.status-done    { background: color-mix(in srgb, var(--success) 4.5%, white); }
-.krowe-card.status-blocked { background: color-mix(in srgb, var(--warning) 4%, white); }
+.krowe-card.status-done       { background: color-mix(in srgb, var(--success) 4.5%, white); }
+.krowe-card.approval-pending,
+.krowe-op-card.approval-pending {
+  background: color-mix(in srgb, var(--success) 2.5%, white);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
 .krowe-card.priority-urgent {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent), var(--shadow-1);
 }
@@ -653,8 +657,19 @@ button:focus-visible {
 
 /* "Submitted by {name}" — replaces the old operator/builder source chip. */
 .krowe-card-submitter {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: 5px;
   font-size: 11px; color: var(--muted-foreground); white-space: nowrap;
+}
+
+/* Submitter avatar: profile/Google photo, or initials when neither resolves. */
+.krowe-avatar {
+  width: 18px; height: 18px; border-radius: 50%; object-fit: cover;
+  flex-shrink: 0; border: 1px solid var(--border); background: var(--surface-subtle);
+}
+.krowe-avatar-initials {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--muted-foreground); user-select: none;
 }
 
 .krowe-chip-status { font-family: var(--font-mono); font-size: 10.5px; padding: 2px 8px; }
@@ -1214,7 +1229,11 @@ button:focus-visible {
   border-radius: var(--radius-full); border: 1px solid var(--border);
   background: white; color: var(--muted-foreground); white-space: nowrap;
 }
-.krowe-st-chip.inbox       { color: color-mix(in srgb, var(--primary-accent) 70%, black); border-color: color-mix(in srgb, var(--primary-accent) 30%, var(--border)); }
+/* inbox + blocked are historical values — the audit log renders pre-0065
+   transitions forever, so their chips stay styled. */
+.krowe-st-chip.inbox,
+.krowe-st-chip.backlog     { color: color-mix(in srgb, var(--primary-accent) 70%, black); border-color: color-mix(in srgb, var(--primary-accent) 30%, var(--border)); }
+.krowe-st-chip.todo        { color: color-mix(in srgb, var(--primary-accent) 55%, var(--primary-hover)); border-color: color-mix(in srgb, var(--primary-accent) 24%, var(--border)); }
 .krowe-st-chip.in_progress { color: var(--primary-hover); border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); }
 .krowe-st-chip.blocked     { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 30%, var(--border)); }
 .krowe-st-chip.done        { color: var(--success); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); background: var(--success-soft); }
@@ -1303,9 +1322,9 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .krowe-status-pill .pulse { animation: none; }
 }
-.krowe-status-pill.inbox       { background: color-mix(in srgb, var(--primary-accent) 12%, white); color: color-mix(in srgb, var(--primary-accent) 68%, black); }
+.krowe-status-pill.backlog     { background: color-mix(in srgb, var(--primary-accent) 12%, white); color: color-mix(in srgb, var(--primary-accent) 68%, black); }
+.krowe-status-pill.todo        { background: color-mix(in srgb, var(--primary-accent) 8%, white);  color: color-mix(in srgb, var(--primary-accent) 55%, var(--primary-hover)); }
 .krowe-status-pill.in_progress { background: color-mix(in srgb, var(--primary) 12%, white);        color: var(--primary-hover); }
-.krowe-status-pill.blocked     { background: var(--warning-soft);                                  color: var(--warning); }
 .krowe-status-pill.done        { background: var(--success-soft);                                  color: var(--success); }
 
 .krowe-prio-dot {

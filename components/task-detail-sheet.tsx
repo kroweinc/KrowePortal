@@ -32,12 +32,13 @@ import {
 } from "@/components/inline-edit";
 import { approveTask, updateTask, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
+import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
 import { TaskSubtasks } from "@/components/task-subtasks";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
 import { PlainEnglishToggle } from "@/components/plain-english-toggle";
 import { TaskTags } from "@/components/task-type-badge";
-import { TASK_TYPE_OPTIONS, submitterName } from "@/lib/utils";
+import { TASK_TYPE_OPTIONS, getTaskAdvance, submitterName } from "@/lib/utils";
 import type { Task, Role, TaskStatus } from "@/lib/types";
 
 const PRIORITY_OPTIONS = [
@@ -48,9 +49,9 @@ const PRIORITY_OPTIONS = [
 ];
 
 const STATUS_FLOW: { value: TaskStatus; label: string }[] = [
-  { value: "inbox", label: "Inbox" },
+  { value: "backlog", label: "Backlog" },
+  { value: "todo", label: "To-Do" },
   { value: "in_progress", label: "In Progress" },
-  { value: "blocked", label: "Approval" },
   { value: "done", label: "Done" },
 ];
 
@@ -120,6 +121,7 @@ function TaskDetailBody({
 }: TaskDetailBodyProps) {
   const router = useRouter();
   const requestDone = useRequestDone();
+  const requestApproval = useRequestApproval();
   const view = useTaskView(task);
   const { enabled: plainEnabled, ensureTaskCached } = usePlainEnglish();
   const showSimplified = role === "operator" && view.simplified;
@@ -208,8 +210,9 @@ function TaskDetailBody({
     }
   }
 
-  const currentIndex = statusIndex(task.status);
-  const nextStatus = currentIndex >= 0 ? STATUS_FLOW[currentIndex + 1] : undefined;
+  // Approval-aware forward step: in_progress advances to the approval dialog
+  // first, then (once sent) to Done — mirrors the card's advance button.
+  const advance = getTaskAdvance(task);
   const deliverableAttachments = (task.task_attachments ?? []).filter(
     (a) => a.is_deliverable,
   );
@@ -462,14 +465,28 @@ function TaskDetailBody({
                 Approve deliverable
               </button>
             )
-          : nextStatus && (
+          : advance && (
               <button
                 type="button"
                 className="krowe-btn-pill primary"
-                onClick={() => saveStatus(nextStatus.value)}
+                onClick={() => {
+                  if (advance.kind === "approval") {
+                    requestApproval({
+                      task,
+                      onCommit: () => {
+                        setToast("Sent for approval");
+                        router.refresh();
+                      },
+                    });
+                  } else {
+                    saveStatus(advance.kind === "done" ? "done" : advance.status);
+                  }
+                }}
               >
                 <ArrowRight className="h-3.5 w-3.5" />
-                Move to {nextStatus.label}
+                {advance.kind === "approval"
+                  ? "Send for approval"
+                  : `Move to ${advance.label}`}
               </button>
             )}
       </footer>
@@ -490,7 +507,7 @@ function StatusPipeline({
 }) {
   const active = statusIndex(status);
   // Operators don't drive the pipeline — for them it's a read-only status
-  // indicator. Their only status action is "Move to Approval" in the footer.
+  // indicator. Their only task action is "Approve deliverable" in the footer.
   const interactive = role !== "operator";
   return (
     <div className="krowe-pipeline" role="group" aria-label="Task status">

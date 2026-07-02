@@ -272,9 +272,10 @@ export async function markTaskForApproval(
   if (!(await isTaskMember(taskId, profile.id)))
     return { error: "You don't have access to this task." };
 
+  // Approval is not a status move — the task stays in its column and the
+  // approval_sent_at stamp drives the pill + pin in the UI.
   const now = new Date().toISOString();
   const updates: Record<string, string | null> = {
-    status: "blocked",
     approval_sent_at: now,
     updated_at: now,
   };
@@ -284,26 +285,10 @@ export async function markTaskForApproval(
 
   const supabase = await getClient(profile.id);
 
-  const { data: before } = await supabase
-    .from("tasks")
-    .select("status")
-    .eq("id", taskId)
-    .single();
-
   const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);
 
   if (error) return { error: error.message };
 
-  if (before && before.status !== "blocked") {
-    await writeAuditEntry({
-      taskId,
-      actorId: profile.id,
-      action: "task.status_changed",
-      field: "status",
-      oldValue: before.status,
-      newValue: "blocked",
-    });
-  }
   await writeAuditEntry({
     taskId,
     actorId: profile.id,
@@ -359,9 +344,13 @@ export async function approveTask(
   return { success: true };
 }
 
+const taskStatusSchema = z.enum(["backlog", "todo", "in_progress", "done"]);
+
 export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
+  if (!taskStatusSchema.safeParse(status).success)
+    return { error: "Invalid status" };
   if (!(await isTaskMember(taskId, profile.id)))
     return { error: "You don't have access to this task." };
 

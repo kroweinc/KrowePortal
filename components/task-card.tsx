@@ -8,19 +8,14 @@ import { updateTaskStatus } from "@/lib/actions/tasks";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
+import { useTaskMenu } from "@/components/task-menu";
+import { ContextMenu } from "@/components/ui/context-menu";
 import { ApprovalPill } from "@/components/approval-pill";
 import { DeliveryChips } from "@/components/design-atoms";
 import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
-import { submitterName } from "@/lib/utils";
-import type { Task, Role, TaskStatus } from "@/lib/types";
-
-const NEXT_STATUS: Record<TaskStatus, TaskStatus | null> = {
-  inbox: "in_progress", in_progress: "blocked", blocked: "done", done: null,
-};
-
-const ADVANCE_LABEL: Record<TaskStatus, string> = {
-  inbox: "In Progress", in_progress: "Approval", blocked: "Done", done: "",
-};
+import { SubmitterAvatar } from "@/components/submitter-avatar";
+import { submitterName, getTaskAdvance, isAwaitingApproval } from "@/lib/utils";
+import type { Task, Role } from "@/lib/types";
 
 interface TaskCardProps {
   task: Task;
@@ -36,23 +31,30 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
   const [confirm, confirmDialog] = useConfirm();
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
-  const nextStatus = NEXT_STATUS[task.status];
+  const advance = getTaskAdvance(task);
+  const taskMenu = useTaskMenu({
+    task,
+    role,
+    onOpen: onSelect ? () => onSelect(task) : undefined,
+    requestDone,
+    requestApproval,
+  });
 
   async function handleAdvance() {
-    if (!nextStatus) return;
-    if (nextStatus === "done") {
+    if (!advance) return;
+    if (advance.kind === "done") {
       requestDone({ task });
-    } else if (nextStatus === "blocked") {
+    } else if (advance.kind === "approval") {
       requestApproval({ task });
     } else {
-      await updateTaskStatus(task.id, nextStatus);
+      await updateTaskStatus(task.id, advance.status);
     }
   }
 
   return (
     <>
     <div
-      className={`krowe-card priority-${task.priority} status-${task.status} ${isDragging ? "dragging" : ""}`}
+      className={`krowe-card priority-${task.priority} status-${task.status} ${isAwaitingApproval(task) ? "approval-pending" : ""} ${isDragging ? "dragging" : ""}`}
       draggable
       onDragStart={(e) => {
         setIsDragging(true);
@@ -68,6 +70,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
         if ((e.target as HTMLElement).closest("button,a")) return;
         onSelect?.(task);
       }}
+      onContextMenu={taskMenu.menu.openAtEvent}
     >
       <div className="krowe-rail" />
 
@@ -112,13 +115,13 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
           <TaskTags tags={task.tags} />
         </div>
         <div className="krowe-card-actions">
-          {role === "builder" && nextStatus && (
+          {role === "builder" && advance && (
             <button
               className="krowe-advance-btn"
               onClick={(e) => { e.stopPropagation(); handleAdvance(); }}
             >
               <span style={{ fontFamily: "var(--font-mono)" }}>→</span>
-              {ADVANCE_LABEL[task.status]}
+              {advance.label}
             </button>
           )}
           <button
@@ -162,9 +165,14 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
             timeZone: "UTC",
           })}
         </span>
-        <span className="krowe-card-submitter">{submitterName(task.creator)}</span>
+        <span className="krowe-card-submitter">
+          <SubmitterAvatar creator={task.creator} />
+          {submitterName(task.creator)}
+        </span>
       </div>
     </div>
+    <ContextMenu state={taskMenu.menu.state} items={taskMenu.items} onClose={taskMenu.menu.close} />
+    {taskMenu.dialogs}
     {confirmDialog}
     </>
   );

@@ -9,14 +9,7 @@ import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import Link from "next/link";
 import type { Task, TaskAttachment, TaskPriority } from "@/lib/types";
 import { formatHoursRange } from "@/lib/format-estimate";
-import { submitterName } from "@/lib/utils";
-
-const STATUS_LABELS: Record<string, string> = {
-  inbox: "In Progress",
-  in_progress: "In Progress",
-  blocked: "Approval",
-  done: "Done",
-};
+import { STATUS_LABELS, submitterName } from "@/lib/utils";
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   urgent: "Urgent",
@@ -75,7 +68,7 @@ export default async function OperatorTaskDetail({
             <div className="flex items-center gap-1.5">
               <TaskTypeBadge type={task.type} />
               <Badge variant={task.priority}>{PRIORITY_LABELS[task.priority]}</Badge>
-              <Badge variant={task.status as "inbox" | "in_progress" | "blocked" | "done"}>
+              <Badge variant={task.status}>
                 {STATUS_LABELS[task.status]}
               </Badge>
             </div>

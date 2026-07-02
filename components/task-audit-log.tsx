@@ -32,8 +32,12 @@ type AuditEntry = {
 /** Visual lane each event falls into in the ledger. */
 type EventKind = "milestone" | "status" | "subtask" | "note" | "default";
 
+// Superset of current + historical status values: the audit log renders
+// transitions recorded before the backlog/todo rename (0065) forever.
 const STATUS_LABEL: Record<string, string> = {
   inbox: "Inbox",
+  backlog: "Backlog",
+  todo: "To-Do",
   in_progress: "In Progress",
   blocked: "Approval",
   done: "Done",

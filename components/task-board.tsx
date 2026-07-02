@@ -8,23 +8,15 @@ import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
-import { useRequestApproval } from "@/components/approval-deliverable-provider";
-import type { Task, Engagement, TaskStatus, TaskPriority } from "@/lib/types";
+import { isAwaitingApproval, sortWithApprovalPin } from "@/lib/utils";
+import type { Task, Engagement, TaskStatus } from "@/lib/types";
 
-const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-
-function sortTasks(tasks: Task[]): Task[] {
-  return [...tasks].sort((a, b) => {
-    const rankDiff = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
-    if (rankDiff !== 0) return rankDiff;
-    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
-  });
-}
+const sortTasks = sortWithApprovalPin<Task>;
 
 const COLUMNS: { status: TaskStatus; label: string }[] = [
-  { status: "inbox",       label: "Inbox" },
+  { status: "backlog",     label: "Backlog" },
+  { status: "todo",        label: "To-Do" },
   { status: "in_progress", label: "In Progress" },
-  { status: "blocked",     label: "Approval" },
   { status: "done",        label: "Done" },
 ];
 
@@ -42,7 +34,6 @@ interface TaskBoardProps {
 export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps) {
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const requestDone = useRequestDone();
-  const requestApproval = useRequestApproval();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -123,23 +114,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       }
     }
 
-    // Dropping into the "Approval" column opens the submit-for-approval dialog
-    // (deliverable + note), which stamps approval_sent_at via markTaskForApproval.
-    if (status === "blocked") {
-      const droppedTask = optimisticTasks.find((t) => t.id === taskId);
-      if (droppedTask && droppedTask.status !== "blocked") {
-        const priorStatus = droppedTask.status;
-        startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: "blocked" }); });
-        requestApproval({
-          task: droppedTask,
-          onCommit: () => {},
-          onCancel: () => {
-            startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: priorStatus }); });
-          },
-        });
-        return;
-      }
-    }
     startTransition(async () => {
       dispatchOptimistic({ type: "status", taskId, status });
       await updateTaskStatus(taskId, status);
@@ -150,6 +124,9 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     if (!draggingTask) return;
     if (draggingTask.priority !== targetTask.priority) return;
     if (draggingTask.status !== targetTask.status) return;
+    // Approval-pinned cards sit above the priority groups — reordering
+    // across the pin boundary would compute nonsense sort_orders.
+    if (isAwaitingApproval(draggingTask) !== isAwaitingApproval(targetTask)) return;
     if (draggingTask.id === targetTask.id) return;
     e.stopPropagation(); e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
@@ -163,6 +140,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     if (!draggingTask) return;
     if (draggingTask.priority !== targetTask.priority) return;
     if (draggingTask.status !== targetTask.status) return;
+    if (isAwaitingApproval(draggingTask) !== isAwaitingApproval(targetTask)) return;
     if (draggingTask.id === targetTask.id) { setDropTarget(null); return; }
     e.stopPropagation(); e.preventDefault();
     const target = dropTarget;
@@ -171,7 +149,11 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     if (!target) return;
     const group = sortTasks(
       optimisticTasks.filter(
-        (t) => t.status === targetTask.status && t.priority === targetTask.priority && t.id !== sourceTask.id
+        (t) =>
+          t.status === targetTask.status &&
+          t.priority === targetTask.priority &&
+          isAwaitingApproval(t) === isAwaitingApproval(targetTask) &&
+          t.id !== sourceTask.id
       )
     );
     const targetIdx = group.findIndex((t) => t.id === targetTask.id);
