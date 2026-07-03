@@ -97,6 +97,7 @@ export interface Engagement {
   github_repo_name?: string | null;
   github_default_branch?: string | null;
   operator?: { display_name: string | null };
+  builder?: { display_name: string | null };
   // The source project, joined on project_id. Carries the business contact so
   // engagement views can surface it without a separate fetch. Structural subset
   // of Project — keep field names aligned with the projects table.
@@ -145,6 +146,22 @@ export interface Task {
   // profile photo, else Google account photo) via lib/submitter-avatars.ts.
   creator?: { display_name: string | null; role: Role; avatar_url?: string | null } | null;
   task_attachments?: TaskAttachment[];
+  // Embedded subtasks — only present when the query selects them (the operator
+  // dashboard does, for review checklists and progress bars).
+  task_subtasks?: Pick<Subtask, "id" | "title" | "completed">[];
+  // Latest operator send-back, embedded from task_audit_log when the query
+  // selects it (the builder board does). At most one entry — newest-first,
+  // limited to 1 at the query. Read via getActiveChangeRequest in lib/utils.
+  change_requests?: TaskChangeRequest[];
+}
+
+// A task.changes_requested audit entry projected for builder-facing UI.
+// metadata.note carries the operator's message (null when they sent it back
+// without a note).
+export interface TaskChangeRequest {
+  metadata: { note?: string } | null;
+  created_at: string;
+  actor?: { display_name: string | null } | null;
 }
 
 export type MilestoneStatus = "pending" | "in_progress" | "done";

@@ -344,6 +344,70 @@ export async function approveTask(
   return { success: true };
 }
 
+const requestChangesSchema = z.object({
+  taskId: z.string().uuid(),
+  note: z.string().trim().max(2000).nullish(),
+});
+
+// Operator send-back on a task awaiting approval: clears the approval stamp and
+// returns the task to In Progress so the builder picks it back up. The
+// operator's note lives in the audit entry — completion_note stays the
+// builder's submission note (overwritten on their next re-submit).
+export async function requestTaskChanges(
+  taskId: string,
+  payload: { note: string | null }
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "operator") return { error: "Only operators can request changes." };
+
+  const parsed = requestChangesSchema.safeParse({ taskId, ...payload });
+  if (!parsed.success) return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
+
+  const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("status, approval_sent_at, approval_approved_at")
+    .eq("id", taskId)
+    .single();
+
+  if (!before) return { error: "Task not found." };
+  if (!before.approval_sent_at) return { error: "Task is not awaiting approval." };
+  if (before.approval_approved_at) return { error: "Task was already approved." };
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("tasks")
+    .update({ approval_sent_at: null, status: "in_progress", updated_at: now })
+    .eq("id", taskId);
+
+  if (error) return { error: error.message };
+
+  await writeAuditEntry({
+    taskId,
+    actorId: profile.id,
+    action: "task.changes_requested",
+    metadata: parsed.data.note ? { note: parsed.data.note } : null,
+  });
+  if (before.status !== "in_progress") {
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.status_changed",
+      field: "status",
+      oldValue: before.status,
+      newValue: "in_progress",
+    });
+  }
+
+  revalidatePath("/b");
+  revalidatePath("/o");
+  return { success: true };
+}
+
 const taskStatusSchema = z.enum(["backlog", "todo", "in_progress", "done"]);
 
 export async function updateTaskStatus(taskId: string, status: TaskStatus) {

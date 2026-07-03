@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { TaskPriority, TaskStatus, TaskType } from "@/lib/types";
+import type { TaskChangeRequest, TaskPriority, TaskStatus, TaskType } from "@/lib/types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -19,6 +19,19 @@ type ApprovalFields = { approval_sent_at: string | null; approval_approved_at: s
  *  again (the green "Approved" pill still marks them). */
 export function isAwaitingApproval(t: ApprovalFields): boolean {
   return !!t.approval_sent_at && !t.approval_approved_at;
+}
+
+/** The operator's most recent send-back, while it's still actionable. Requesting
+ *  changes clears approval_sent_at, so the note stays visible exactly until the
+ *  builder re-submits for approval (or the task is approved/done). Null when the
+ *  query didn't embed change_requests. */
+export function getActiveChangeRequest(
+  t: ApprovalFields & { status: TaskStatus; change_requests?: TaskChangeRequest[] }
+): TaskChangeRequest | null {
+  const entry = t.change_requests?.[0];
+  if (!entry) return null;
+  if (t.approval_sent_at || t.approval_approved_at || t.status === "done") return null;
+  return entry;
 }
 
 /** Column ordering shared by the board and the operator list: tasks awaiting
@@ -97,6 +110,22 @@ export function submitterName(
   if (name) return name;
   if (creator?.role) return creator.role.charAt(0).toUpperCase() + creator.role.slice(1);
   return "Unknown";
+}
+
+/** Compact relative timestamp for card metadata ("just now", "3h ago",
+ *  "yesterday"), falling back to a short date past two weeks. */
+export function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const mins = Math.round((Date.now() - then) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return "yesterday";
+  if (days < 14) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 /** Initials for the avatar fallback: first letters of up to two name words. */

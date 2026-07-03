@@ -21,7 +21,7 @@ export default async function OperatorDashboard() {
 
   const { data: engagements } = await supabase
     .from("engagements")
-    .select("*")
+    .select("*, builder:profiles!builder_id(display_name)")
     .eq("operator_id", profile.id)
     .order("created_at", { ascending: true });
 
@@ -39,7 +39,7 @@ export default async function OperatorDashboard() {
   const { data } = await supabase
     .from("tasks")
     .select(
-      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role)"
+      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), task_subtasks(id, title, completed)"
     )
     .or(filter)
     .order("created_at", { ascending: false });
@@ -49,26 +49,37 @@ export default async function OperatorDashboard() {
   const tasks = attachCreatorAvatars(rows, avatars);
   const firstEngagement = engagementList[0];
 
+  // Panels address the builder by name only when every engagement shares one
+  // builder — with several builders the copy falls back to generic wording.
+  const builderNames = new Set(
+    engagementList.map((e) => e.builder?.display_name?.trim()).filter(Boolean)
+  );
+  const builderName = builderNames.size === 1 ? [...builderNames][0]! : null;
+
   return (
     <>
       <main className="krowe-page">
-        <div className="krowe-page-inner" style={{ maxWidth: 960 }}>
+        <div className="krowe-page-inner" style={{ maxWidth: 1260 }}>
           <div className="krowe-page-head">
             <div>
               <h1 className="krowe-page-title">Your Tasks</h1>
               <div className="krowe-page-sub">
-                <span>{engagementList.length} project{engagementList.length !== 1 ? "s" : ""}</span>
+                <span>
+                  {engagementList.length === 1
+                    ? firstEngagement.title
+                    : `${engagementList.length} projects`}
+                </span>
                 <span className="sep">·</span>
                 <span>{tasks.length} task{tasks.length !== 1 ? "s" : ""}</span>
                 <span className="sep">·</span>
-                <span style={{ fontStyle: "italic", textTransform: "none", letterSpacing: "normal" }}>
-                  Here&apos;s what your builder is working on.
+                <span className="krowe-quip">
+                  Here&apos;s where things stand{builderName ? ` with ${builderName.split(/\s+/)[0]}` : ""}.
                 </span>
               </div>
             </div>
           </div>
           <Suspense>
-            <OperatorTaskList tasks={tasks} currentUserId={profile.id} />
+            <OperatorTaskList tasks={tasks} currentUserId={profile.id} builderName={builderName} />
           </Suspense>
         </div>
       </main>

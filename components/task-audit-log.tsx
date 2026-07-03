@@ -79,7 +79,8 @@ function classify(entry: AuditEntry): EventKind {
   const a = entry.action;
   if (a === "task.completed") return "milestone";
   if (a.startsWith("subtask.")) return "subtask";
-  if (a === "task.status_changed" || a === "task.sent_for_approval") return "status";
+  if (a === "task.status_changed" || a === "task.sent_for_approval" || a === "task.changes_requested")
+    return "status";
   if (a === "attachment.note_added") return "note";
   return "default";
 }
@@ -131,6 +132,15 @@ function describe(entry: AuditEntry): React.ReactNode {
       return <>marked task done</>;
     case "task.sent_for_approval":
       return <>sent task for approval</>;
+    case "task.changes_requested":
+      return (
+        <>
+          requested changes
+          {meta.note ? (
+            <> — <em className="krowe-audit-em">{formatValue(entry.action, null, meta.note)}</em></>
+          ) : null}
+        </>
+      );
     case "subtask.created":
       return <>added sub-task <em className="krowe-audit-em">{String(meta.title ?? "")}</em></>;
     case "subtask.completed":
@@ -191,6 +201,8 @@ function plainDescribe(entry: AuditEntry): string {
       return meta.pushed_to_main ? "marked it done and pushed to main" : "marked it done";
     case "task.sent_for_approval":
       return "sent it for approval";
+    case "task.changes_requested":
+      return "requested changes";
     case "subtask.completed":
       return "closed a sub-task";
     case "subtask.created":

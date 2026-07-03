@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, Trash2 } from "lucide-react";
+import { CalendarDays, Check, CornerUpLeft, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateTaskStatus } from "@/lib/actions/tasks";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -14,7 +14,14 @@ import { ApprovalPill } from "@/components/approval-pill";
 import { DeliveryChips } from "@/components/design-atoms";
 import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import { SubmitterAvatar } from "@/components/submitter-avatar";
-import { submitterName, getTaskAdvance, isAwaitingApproval } from "@/lib/utils";
+import {
+  submitterName,
+  submitterInitials,
+  getTaskAdvance,
+  getActiveChangeRequest,
+  isAwaitingApproval,
+  relativeTime,
+} from "@/lib/utils";
 import type { Task, Role } from "@/lib/types";
 
 interface TaskCardProps {
@@ -32,6 +39,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
   const advance = getTaskAdvance(task);
+  const changeRequest = getActiveChangeRequest(task);
   const taskMenu = useTaskMenu({
     task,
     role,
@@ -102,6 +110,45 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
 
       {task.description && (
         <p className="krowe-card-desc">{task.description}</p>
+      )}
+
+      {changeRequest && (
+        <div className="krowe-card-changes">
+          <div className="krowe-card-changes-head">
+            <span className="badge">
+              <RotateCcw width={13} height={13} strokeWidth={2.2} />
+            </span>
+            <span className="h">Changes requested</span>
+            <span className="t">{relativeTime(changeRequest.created_at)}</span>
+          </div>
+          <div className="krowe-card-changes-body">
+            {changeRequest.metadata?.note && (
+              <p className="krowe-card-changes-note">&ldquo;{changeRequest.metadata.note}&rdquo;</p>
+            )}
+            <div className="krowe-card-changes-foot">
+              <span className="av" aria-hidden="true">
+                {submitterInitials({
+                  display_name: changeRequest.actor?.display_name ?? null,
+                  role: "operator",
+                })}
+              </span>
+              <span className="who">{changeRequest.actor?.display_name ?? "Operator"}</span>
+              <span className="spacer" />
+              {role === "builder" && advance?.kind === "approval" && (
+                <button
+                  className="resolve"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestApproval({ task });
+                  }}
+                >
+                  <CornerUpLeft width={13} height={13} strokeWidth={2} />
+                  Resubmit
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       <DeliveryChips task={task} />

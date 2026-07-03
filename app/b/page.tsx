@@ -43,13 +43,19 @@ export default async function BuilderDashboard({
     ? `engagement_id.in.(${engagementIds.join(",")}),${personalFilter}`
     : personalFilter;
 
+  // change_requests embeds the newest operator send-back per task so cards and
+  // the detail sheet can surface "changes requested" without extra fetches —
+  // see getActiveChangeRequest for when it counts as still actionable.
   const { data } = await supabase
     .from("tasks")
     .select(
-      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role)"
+      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), change_requests:task_audit_log(metadata, created_at, actor:profiles!actor_id(display_name))"
     )
     .or(filter)
-    .order("created_at", { ascending: false });
+    .eq("change_requests.action", "task.changes_requested")
+    .order("created_at", { ascending: false })
+    .order("created_at", { referencedTable: "change_requests", ascending: false })
+    .limit(1, { referencedTable: "change_requests" });
 
   const rows = (data ?? []) as Task[];
   const avatars = await getSubmitterAvatarMap(rows.map((t) => t.created_by));

@@ -10,6 +10,7 @@ import {
   Info,
   Link2,
   Paperclip,
+  RotateCcw,
   Sparkles,
   X,
 } from "lucide-react";
@@ -38,7 +39,13 @@ import { TaskSubtasks } from "@/components/task-subtasks";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
 import { PlainEnglishToggle } from "@/components/plain-english-toggle";
 import { TaskTags } from "@/components/task-type-badge";
-import { TASK_TYPE_OPTIONS, getTaskAdvance, submitterName } from "@/lib/utils";
+import {
+  TASK_TYPE_OPTIONS,
+  getTaskAdvance,
+  getActiveChangeRequest,
+  relativeTime,
+  submitterName,
+} from "@/lib/utils";
 import type { Task, Role, TaskStatus } from "@/lib/types";
 
 const PRIORITY_OPTIONS = [
@@ -213,6 +220,7 @@ function TaskDetailBody({
   // Approval-aware forward step: in_progress advances to the approval dialog
   // first, then (once sent) to Done — mirrors the card's advance button.
   const advance = getTaskAdvance(task);
+  const changeRequest = getActiveChangeRequest(task);
   const deliverableAttachments = (task.task_attachments ?? []).filter(
     (a) => a.is_deliverable,
   );
@@ -337,6 +345,33 @@ function TaskDetailBody({
           <div className="-mt-1">
             <PlainEnglishToggle />
           </div>
+        )}
+
+        {/* CHANGES REQUESTED — operator sent the deliverable back; stays visible
+            until the builder re-submits for approval */}
+        {changeRequest && (
+          <section className="krowe-task-section">
+            <div className="krowe-task-section-h">
+              <span className="label">
+                <RotateCcw className="h-3 w-3" />
+                Changes requested
+              </span>
+            </div>
+            <div className="krowe-changes-block">
+              <p className="krowe-changes-head">
+                <strong>{changeRequest.actor?.display_name ?? "The operator"}</strong>{" "}
+                sent this back {relativeTime(changeRequest.created_at)}
+              </p>
+              {changeRequest.metadata?.note && (
+                <p className="krowe-changes-note">&ldquo;{changeRequest.metadata.note}&rdquo;</p>
+              )}
+              {role === "builder" && (
+                <p className="krowe-changes-hint">
+                  Make the updates, then send it for approval again.
+                </p>
+              )}
+            </div>
+          </section>
         )}
 
         {/* DESCRIPTION */}

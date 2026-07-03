@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Plus, Search } from "lucide-react";
+import { CheckCircle2, ChevronUp, Plus, Search } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
 import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
@@ -12,6 +12,8 @@ import { isAwaitingApproval, sortWithApprovalPin } from "@/lib/utils";
 import type { Task, Engagement, TaskStatus } from "@/lib/types";
 
 const sortTasks = sortWithApprovalPin<Task>;
+
+const DONE_PREVIEW_COUNT = 3;
 
 const COLUMNS: { status: TaskStatus; label: string }[] = [
   { status: "backlog",     label: "Backlog" },
@@ -42,6 +44,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
   const [draggingTask, setDraggingTask] = useState<Task | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [search, setSearch] = useState("");
+  const [showAllDone, setShowAllDone] = useState(false);
   const [, startTransition] = useTransition();
 
   const [optimisticTasks, dispatchOptimistic] = useOptimistic(
@@ -230,6 +233,12 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       <div className="krowe-board">
         {COLUMNS.map(({ status, label }) => {
           const columnTasks = sortTasks(searchedTasks.filter((t) => t.status === status));
+          // Done stays capped at a top-3 preview unless expanded — but never
+          // hide cards while a search is active, or matches would go missing.
+          const collapseDone =
+            status === "done" && !showAllDone && !q && columnTasks.length > DONE_PREVIEW_COUNT;
+          const shownTasks = collapseDone ? columnTasks.slice(0, DONE_PREVIEW_COUNT) : columnTasks;
+          const hiddenDone = columnTasks.length - shownTasks.length;
           const isOver = dragOverStatus === status;
           return (
             <div
@@ -256,7 +265,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
                 <div className="krowe-column-empty">{isOver ? "Drop here" : "Empty"}</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                  {columnTasks.map((task) => (
+                  {shownTasks.map((task) => (
                     <div
                       key={task.id}
                       style={{ marginBottom: 10 }}
@@ -279,6 +288,26 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
                       )}
                     </div>
                   ))}
+                  {collapseDone && (
+                    <button
+                      type="button"
+                      className="krowe-done-more"
+                      onClick={() => setShowAllDone(true)}
+                    >
+                      <CheckCircle2 width={14} height={14} strokeWidth={2} />
+                      {hiddenDone} more done — click to view
+                    </button>
+                  )}
+                  {status === "done" && showAllDone && columnTasks.length > DONE_PREVIEW_COUNT && (
+                    <button
+                      type="button"
+                      className="krowe-done-more"
+                      onClick={() => setShowAllDone(false)}
+                    >
+                      <ChevronUp width={14} height={14} strokeWidth={2} />
+                      Show fewer
+                    </button>
+                  )}
                 </div>
               )}
             </div>
