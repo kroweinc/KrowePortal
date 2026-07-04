@@ -1,29 +1,33 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Plus, X, Paperclip, Maximize2, Minimize2, Sparkles, Loader2, ArrowLeft } from "lucide-react";
+import {
+  Plus,
+  X,
+  Paperclip,
+  Maximize2,
+  Minimize2,
+  ArrowLeft,
+  ChevronDown,
+  ChevronUp,
+  Building2,
+  RefreshCw,
+  WandSparkles,
+  Check,
+  Sparkles,
+  Bug,
+  GitPullRequestArrow,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Select } from "@/components/ui/select";
 import { createTask } from "@/lib/actions/tasks";
 import { uploadAttachment } from "@/lib/actions/attachments";
 import { generateTaskDraft } from "@/lib/actions/ai-tasks";
-import type { Question, TaskDraft } from "@/lib/ai/schemas";
+import type { TaskDraft } from "@/lib/ai/schemas";
 import type { TaskPriority, TaskType } from "@/lib/types";
 import { OPEN_NEW_TASK_EVENT } from "@/components/add-task-button";
 
 const MAX_SIZE = 25 * 1024 * 1024;
-const OTHER = "__other__";
-
-// Drop any AI-supplied option that is itself a generic "Other"/"please specify"
-// catch-all, since the UI always renders its own canonical OTHER choice. Without
-// this, such an option renders twice.
-const isRealOption = (opt: string) => {
-  const o = opt.trim().toLowerCase();
-  return o !== "other" && !o.includes("specify");
-};
 
 const ALLOWED_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
@@ -57,18 +61,64 @@ interface NewTaskFormProps {
 }
 
 const PERSONAL = "__personal__";
+const OTHER = "__other__";
+// Server-enforced cap on clarification rounds; hide the affordance at the limit.
+const MAX_CLARIFICATIONS = 5;
+
+const PRIORITIES: { value: TaskPriority; label: string }[] = [
+  { value: "urgent", label: "Urgent" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+
+// Same Linear-style icon set as TaskTypeBadge on the board cards.
+const TYPES: { value: TaskType; label: string; icon: LucideIcon }[] = [
+  { value: "feature", label: "Feature", icon: Sparkles },
+  { value: "bug", label: "Bug", icon: Bug },
+  { value: "change", label: "Change", icon: GitPullRequestArrow },
+];
 
 type AiMode =
   | { kind: "idle" }
   | { kind: "input"; prompt: string }
-  | { kind: "loading" }
-  | {
-      kind: "questions";
-      prompt: string;
-      items: Question[];
-      selections: Record<string, string>;
-      otherText: Record<string, string>;
-    };
+  | { kind: "loading" };
+
+type View = "ai" | "loading" | "questions" | "review" | "manual";
+
+/** Signature ember glyph — the AI accent mark from the design system. */
+function Ember({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" fill="var(--primary)" opacity="0.2" />
+      <circle cx="8" cy="8" r="4" fill="var(--primary)" opacity="0.42" />
+      <circle cx="8" cy="8" r="2.5" fill="var(--primary)" />
+      <circle cx="9" cy="7" r="1" fill="var(--primary-accent)" />
+    </svg>
+  );
+}
+
+function PrimaryBtn({
+  icon,
+  kbd,
+  full,
+  children,
+  ...rest
+}: {
+  icon: React.ReactNode;
+  kbd?: string;
+  full?: boolean;
+  children: React.ReactNode;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button className={`krowe-nt-primary${full ? " is-full" : ""}`} {...rest}>
+      <span className="krowe-nt-sheen" aria-hidden="true" />
+      {icon}
+      <span className="krowe-nt-primary-label">{children}</span>
+      {kbd && <span className="krowe-nt-kbd">{kbd}</span>}
+    </button>
+  );
+}
 
 export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuccess, tourId }: NewTaskFormProps) {
   const [expanded, setExpanded] = useState(false);
@@ -77,6 +127,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   const [isPending, startTransition] = useTransition();
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   // undefined = follow the engagementId prop (the board's active filter / first engagement)
   const [engagementChoice, setEngagementChoice] = useState<string | undefined>(undefined);
@@ -100,11 +151,36 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   // task's sidebar checklist.
   const [aiDrafted, setAiDrafted] = useState(false);
 
+  // Assumptions the AI made where the prompt was ambiguous, shown read-only on
+  // the draft so a wrong call can be caught before creating. Never submitted.
+  const [aiAssumptions, setAiAssumptions] = useState<string[]>([]);
+  const [showAllAssumptions, setShowAllAssumptions] = useState(false);
+
+  // Follow-up question from the latest draft when the AI judged the request
+  // weak; null when it was strong. Drives the "Strengthen this task" affordance
+  // in the assumptions box. UI-only, never submitted.
+  const [aiFollowUp, setAiFollowUp] = useState<TaskDraft["followUp"] | null>(null);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  // Selected answer chip — an option's text, or OTHER for the free-text escape.
+  const [followUpChoice, setFollowUpChoice] = useState<string | null>(null);
+  const [followUpOther, setFollowUpOther] = useState("");
+  // The raw description actually sent for the current draft, so strengthening
+  // regenerates from the ORIGINAL request rather than the edited form fields.
+  const [lastPrompt, setLastPrompt] = useState("");
+  // Q&A accumulated across strengthen rounds. Carried into BOTH strengthen and
+  // plain Regenerate calls so a redraft never gets weaker; reset on close.
+  const [clarifications, setClarifications] = useState<{ question: string; answer: string }[]>([]);
+
   // Default to the AI input the moment the "+" opens the form — the AI flow is
   // the primary path, with "Manual entry" available as an escape hatch. resetForm
   // returns here too, so every fresh open lands in AI mode.
   const [aiMode, setAiMode] = useState<AiMode>({ kind: "input", prompt: "" });
-  const askedOnceRef = useRef(false);
+
+  // ⌘ on Mac, Ctrl elsewhere. Safe to read lazily: the chip only renders once
+  // the panel is opened client-side, so it never appears in SSR markup.
+  const [kbdLabel] = useState(() =>
+    typeof navigator !== "undefined" && !/mac/i.test(navigator.platform) ? "Ctrl ↵" : "⌘↵"
+  );
 
   useEffect(() => {
     const open = () => setExpanded(true);
@@ -119,11 +195,18 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     setAiType(null);
     setAiTags([]);
     setAiDrafted(false);
+    setAiAssumptions([]);
+    setShowAllAssumptions(false);
+    setAiFollowUp(null);
+    setFollowUpOpen(false);
+    setFollowUpChoice(null);
+    setFollowUpOther("");
+    setLastPrompt("");
+    setClarifications([]);
     setAiMode({ kind: "input", prompt: "" });
     setFiles([]);
     setError(null);
     setEngagementChoice(undefined);
-    askedOnceRef.current = false;
   }
 
   function handleClose() {
@@ -153,27 +236,38 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     setPriority(draft.priority);
     setAiType(draft.type);
     setAiTags(draft.tags);
+    setAiAssumptions(draft.assumptions);
+    setShowAllAssumptions(false);
+    setAiFollowUp(draft.followUp ?? null);
+    setFollowUpOpen(false);
+    setFollowUpChoice(null);
+    setFollowUpOther("");
     setAiDrafted(true);
   }
 
-  function generate(answers?: { questionId: string; answer: string }[]) {
+  function generate(opts?: { raw: string; clarifications: { question: string; answer: string }[] }) {
+    // Without opts (Generate / Regenerate), draft from what's in the form and
+    // carry any accumulated clarifications so a redraft never gets weaker. The
+    // strengthen flow passes opts to regenerate from the original request + Q&A.
     const raw =
-      aiMode.kind === "input"
+      opts?.raw ??
+      (aiMode.kind === "input"
         ? aiMode.prompt.trim()
-        : aiMode.kind === "questions"
-          ? aiMode.prompt.trim()
-          : [title.trim(), description.trim()].filter(Boolean).join("\n\n");
+        : [title.trim(), description.trim()].filter(Boolean).join("\n\n"));
+    const clar = opts?.clarifications ?? clarifications;
     if (raw.length < 5) {
       toast.error("Type a few words describing what you want first.");
       return;
     }
 
+    setLastPrompt(raw);
+    setClarifications(clar);
     setAiMode({ kind: "loading" });
     startTransition(async () => {
       const result = await generateTaskDraft({
         rawDescription: raw,
         engagementId: effectiveEngagementId,
-        answers,
+        clarifications: clar.length > 0 ? clar : undefined,
       });
 
       if ("error" in result) {
@@ -182,49 +276,33 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
         return;
       }
 
-      if (result.kind === "questions") {
-        if (askedOnceRef.current) {
-          toast.error("Couldn't build a task from this — add more detail and try again.");
-          setAiMode({ kind: "idle" });
-          return;
-        }
-        askedOnceRef.current = true;
-        setAiMode({
-          kind: "questions",
-          prompt: raw,
-          items: result.items,
-          selections: Object.fromEntries(result.items.map((q) => [q.id, ""])),
-          otherText: Object.fromEntries(result.items.map((q) => [q.id, ""])),
-        });
-      } else {
-        applyDraft(result.item);
-        setAiMode({ kind: "idle" });
-      }
+      applyDraft(result.item);
+      setAiMode({ kind: "idle" });
     });
   }
 
-  function answerFor(
-    q: Question,
-    selections: Record<string, string>,
-    otherText: Record<string, string>
-  ): string {
-    const sel = selections[q.id] ?? "";
-    if (sel === OTHER) return (otherText[q.id] ?? "").trim();
-    return sel;
+  function openFollowUp() {
+    if (!aiFollowUp) return;
+    // Pre-select the AI's recommended option (tolerating a recommended value
+    // that matches no option — then nothing is pre-selected).
+    setFollowUpChoice(
+      aiFollowUp.recommended && aiFollowUp.options.includes(aiFollowUp.recommended)
+        ? aiFollowUp.recommended
+        : null
+    );
+    setFollowUpOther("");
+    setFollowUpOpen(true);
   }
 
-  function submitAnswers() {
-    if (aiMode.kind !== "questions") return;
-    const answers = aiMode.items.map((q) => ({
-      questionId: q.id,
-      answer: answerFor(q, aiMode.selections, aiMode.otherText),
-    }));
-    generate(answers);
+  function submitFollowUp() {
+    if (!aiFollowUp) return;
+    const answer = followUpChoice === OTHER ? followUpOther.trim() : followUpChoice;
+    if (!answer || answer.length < 2) return;
+    generate({
+      raw: lastPrompt,
+      clarifications: [...clarifications, { question: aiFollowUp.question, answer }],
+    });
   }
-
-  const questionsReady =
-    aiMode.kind === "questions" &&
-    aiMode.items.every((q) => answerFor(q, aiMode.selections, aiMode.otherText).length > 0);
 
   async function uploadAllAttachments(taskId: string) {
     if (files.length === 0) return;
@@ -276,10 +354,18 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   }
 
   const isBusy = isPending || aiMode.kind === "loading";
-  const aiActive = aiMode.kind === "input";
-  const canGenerate = aiActive
-    ? aiMode.prompt.trim().length >= 5
-    : (title.trim() + description.trim()).length >= 5;
+  const canGenerate =
+    aiMode.kind === "input"
+      ? aiMode.prompt.trim().length >= 5
+      : (title.trim() + description.trim()).length >= 5;
+  const canStrengthen = Boolean(aiFollowUp) && clarifications.length < MAX_CLARIFICATIONS;
+
+  const view: View =
+    aiMode.kind === "loading" ? "loading"
+    : aiMode.kind === "input" ? "ai"
+    : followUpOpen && aiFollowUp ? "questions"
+    : aiDrafted ? "review"
+    : "manual";
 
   function toggleAi() {
     if (aiMode.kind === "input") {
@@ -296,348 +382,526 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     }
   }
 
-  const header = (
-    <div className="flex items-center justify-between">
-      <span className="text-sm font-medium text-neutral-900">
-        {aiDrafted ? "Review AI draft" : "New task"}
-      </span>
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => setModal((v) => !v)}
-          className="text-neutral-400 hover:text-neutral-700 transition-colors"
-          aria-label={modal ? "Collapse" : "Expand"}
-        >
-          {modal ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </button>
-        <button
-          type="button"
-          onClick={handleClose}
-          className="text-neutral-400 hover:text-neutral-700 transition-colors"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
-  );
-
-  const questionsView = aiMode.kind === "questions" && (
-    <div className="space-y-3">
-      {header}
-      <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
-        <p className="text-xs text-neutral-500">
-          A few quick questions so the AI can build the right task.
-        </p>
-        {aiMode.items.map((q) => {
-          const selected = aiMode.selections[q.id] ?? "";
-          return (
-            <div key={q.id} className="space-y-2">
-              <p className="text-sm font-medium text-neutral-800">{q.text}</p>
-              <div className="space-y-1.5">
-                {q.options.filter(isRealOption).map((opt) => (
-                  <label
-                    key={opt}
-                    className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition ${
-                      selected === opt
-                        ? "border-neutral-700 bg-neutral-50 text-neutral-900"
-                        : "border-neutral-200 text-neutral-700 hover:border-neutral-300"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name={q.id}
-                      value={opt}
-                      checked={selected === opt}
-                      onChange={() =>
-                        setAiMode((prev) =>
-                          prev.kind === "questions"
-                            ? { ...prev, selections: { ...prev.selections, [q.id]: opt } }
-                            : prev
-                        )
-                      }
-                      className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700"
-                    />
-                    <span className="leading-snug">{opt}</span>
-                  </label>
-                ))}
-                <label
-                  className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition ${
-                    selected === OTHER
-                      ? "border-neutral-700 bg-neutral-50 text-neutral-900"
-                      : "border-neutral-200 text-neutral-700 hover:border-neutral-300"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name={q.id}
-                    value={OTHER}
-                    checked={selected === OTHER}
-                    onChange={() =>
-                      setAiMode((prev) =>
-                        prev.kind === "questions"
-                          ? { ...prev, selections: { ...prev.selections, [q.id]: OTHER } }
-                          : prev
-                      )
-                    }
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-neutral-700"
-                  />
-                  <span className="leading-snug">Other (specify)</span>
-                </label>
-                {selected === OTHER && (
-                  <textarea
-                    rows={2}
-                    autoFocus
-                    value={aiMode.otherText[q.id] ?? ""}
-                    onChange={(e) =>
-                      setAiMode((prev) =>
-                        prev.kind === "questions"
-                          ? { ...prev, otherText: { ...prev.otherText, [q.id]: e.target.value } }
-                          : prev
-                      )
-                    }
-                    placeholder="Type your answer…"
-                    className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 outline-none focus:border-neutral-400 resize-none"
-                  />
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setAiMode({ kind: "idle" })}
-        >
-          <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
-          Back
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={submitAnswers}
-          disabled={isBusy || !questionsReady}
-        >
-          {isBusy ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-          )}
-          Build task
-        </Button>
-      </div>
-    </div>
-  );
-
-  const loadingView = aiMode.kind === "loading" && (
-    <div className="space-y-3">
-      {header}
-      <div className="flex flex-col items-center justify-center gap-2 py-10">
-        <Loader2 className="h-6 w-6 animate-spin text-neutral-400" />
-        <p className="text-xs text-neutral-500">Drafting your task…</p>
-      </div>
-    </div>
-  );
-
-  const inputView = aiMode.kind === "input" && (
-    <div className="space-y-3">
-      {header}
-      <Textarea
-        autoFocus
-        rows={modal ? 8 : 6}
-        value={aiMode.prompt}
-        onChange={(e) =>
-          setAiMode((prev) =>
-            prev.kind === "input" ? { ...prev, prompt: e.target.value } : prev
-          )
+  // Esc closes (steps back to review from questions); ⌘/Ctrl+Enter fires the
+  // view's primary action. No dependency array — the handler needs each
+  // render's latest state and re-attaching a listener is cheap.
+  useEffect(() => {
+    if (!expanded) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        if (e.defaultPrevented) return;
+        if (followUpOpen) setFollowUpOpen(false);
+        else handleClose();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (isBusy) return;
+        if (view === "ai") {
+          if (canGenerate) generate();
+        } else if (view === "review" || view === "manual") {
+          formRef.current?.requestSubmit();
+        } else if (view === "questions") {
+          submitFollowUp();
         }
-        placeholder='Describe what you want built. e.g. "Stripe checkout flow with webhook handling, success page, and email receipt."'
-      />
-      <div className="flex items-center justify-between gap-2">
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  // On the draft views the header IS the title — an editable input in the
+  // title's serif style, replacing the static "Review AI draft" label. It lives
+  // outside the <form>, which is fine: submit reads the controlled state.
+  const header = (
+    <div className="krowe-nt-head">
+      <div className="krowe-nt-head-l">
+        {view === "review" || view === "questions" ? (
+          <input
+            className="krowe-nt-title krowe-nt-titleinput"
+            aria-label="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="Task title"
+          />
+        ) : (
+          <>
+            <Ember size={15} />
+            <span className="krowe-nt-title">New task</span>
+          </>
+        )}
+      </div>
+      <div className="krowe-nt-head-r">
         <button
           type="button"
-          onClick={toggleAi}
-          disabled={isBusy}
-          className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 transition-colors"
+          className="krowe-nt-iconbtn"
+          onClick={() => setModal((v) => !v)}
+          aria-label={modal ? "Dock to side" : "Expand"}
         >
-          <ArrowLeft className="h-3 w-3" />
-          Manual entry
+          {modal ? <Minimize2 width={15} height={15} /> : <Maximize2 width={15} height={15} />}
         </button>
-        <Button
+        <button type="button" className="krowe-nt-iconbtn" onClick={handleClose} aria-label="Close">
+          <X width={15} height={15} />
+        </button>
+      </div>
+    </div>
+  );
+
+  const assumedCard = (opts: { strengthen: boolean }) =>
+    (aiAssumptions.length > 0 || (opts.strengthen && canStrengthen)) && (
+      <div className="krowe-nt-assumed">
+        <div className="krowe-nt-assumed-head">
+          <Ember size={12} /> What krowe assumed
+        </div>
+        <ul className="krowe-nt-assumed-list">
+          {(showAllAssumptions ? aiAssumptions : aiAssumptions.slice(0, 2)).map((a, i) => (
+            <li key={i}>{a}</li>
+          ))}
+        </ul>
+        {(aiAssumptions.length > 2 || (opts.strengthen && canStrengthen)) && (
+          <div className="krowe-nt-assumed-actions">
+            {aiAssumptions.length > 2 && (
+              <button
+                type="button"
+                className="krowe-nt-more"
+                onClick={() => setShowAllAssumptions((v) => !v)}
+              >
+                {showAllAssumptions ? "Show less" : `Show ${aiAssumptions.length - 2} more`}
+                {showAllAssumptions ? (
+                  <ChevronUp width={13} height={13} />
+                ) : (
+                  <ChevronDown width={13} height={13} />
+                )}
+              </button>
+            )}
+            {opts.strengthen && canStrengthen && (
+              <button
+                type="button"
+                className="krowe-nt-strengthen"
+                onClick={openFollowUp}
+                disabled={isBusy}
+              >
+                <WandSparkles width={13} height={13} /> Strengthen this task
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+
+  const fileList = files.length > 0 && (
+    <ul className="krowe-nt-files" style={{ margin: 0, padding: 0, listStyle: "none" }}>
+      {files.map((f, i) => (
+        <li key={i} className="krowe-nt-file">
+          <span className="krowe-nt-file-name">{f.name}</span>
+          <button
+            type="button"
+            className="krowe-nt-file-rm"
+            onClick={() => removeFile(i)}
+            aria-label={`Remove ${f.name}`}
+          >
+            <X width={13} height={13} />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+
+  const attachments = (
+    <>
+      <div className="krowe-nt-attach">
+        <span className="krowe-nt-flabel">Attachments</span>
+        <button
           type="button"
-          size="sm"
+          className="krowe-nt-textbtn"
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Paperclip width={13} height={13} /> Add file
+        </button>
+      </div>
+      {fileList}
+    </>
+  );
+
+  const clientOptions = (
+    <>
+      {engagements.map((eng) => (
+        <option key={eng.id} value={eng.id}>
+          {eng.title}
+        </option>
+      ))}
+      <option value={PERSONAL}>Personal (no client)</option>
+    </>
+  );
+
+  const priorityOptions = PRIORITIES.map((p) => (
+    <option key={p.value} value={p.value}>
+      {p.label}
+    </option>
+  ));
+
+  const aiView = (
+    <>
+      <div className="krowe-nt-scroll">
+        <p className="krowe-nt-lede">Describe what you want built — krowe drafts the rest.</p>
+        <div className="krowe-nt-inputwrap is-focus">
+          <textarea
+            className="krowe-nt-textarea krowe-nt-textarea-lg"
+            autoFocus
+            value={aiMode.kind === "input" ? aiMode.prompt : ""}
+            onChange={(e) =>
+              setAiMode((prev) =>
+                prev.kind === "input" ? { ...prev, prompt: e.target.value } : prev
+              )
+            }
+            placeholder='e.g. "Stripe checkout flow with webhook handling, a success page, and an email receipt."'
+          />
+        </div>
+        <p className="krowe-nt-note">
+          Don&rsquo;t overthink it. A sentence or two is fine — you can edit the draft before
+          anything is created.
+        </p>
+      </div>
+      <div className="krowe-nt-foot">
+        <button type="button" className="krowe-nt-textbtn" onClick={toggleAi} disabled={isBusy}>
+          <ArrowLeft width={13} height={13} /> Manual entry
+        </button>
+        <PrimaryBtn
+          type="button"
+          icon={<Ember size={14} />}
+          kbd={kbdLabel}
           onClick={() => generate()}
           disabled={isBusy || !canGenerate}
         >
-          {isBusy ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-          )}
           Generate
-        </Button>
+        </PrimaryBtn>
+      </div>
+    </>
+  );
+
+  const loadingView = (
+    <div className="krowe-nt-loading">
+      <span className="krowe-nt-breathe">
+        <Ember size={30} />
+      </span>
+      <p className="krowe-nt-loading-txt">Drafting your task…</p>
+      <div className="krowe-nt-loadbar">
+        <span />
       </div>
     </div>
   );
 
-  const formView = aiMode.kind === "idle" && (
-    <div className="space-y-3">
-      {header}
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <Input
-          name="title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder={placeholder ?? "What needs to be built or fixed?"}
-          required
-          autoFocus
-        />
-        <Textarea
-          name="description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="More context (optional)"
-          rows={modal ? 5 : 3}
-        />
-
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-neutral-500">
-            {aiDrafted ? "AI draft — edit anything before creating" : "Or let AI flesh it out"}
-          </span>
-          {aiDrafted ? (
-            <button
-              type="button"
-              onClick={() => generate()}
-              disabled={isBusy}
-              className="flex items-center gap-1 text-xs text-neutral-600 hover:text-neutral-900 disabled:text-neutral-300 transition-colors"
-            >
-              <Sparkles className="h-3 w-3" />
-              Regenerate
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={toggleAi}
-              disabled={isBusy}
-              className="flex items-center gap-1 text-xs text-neutral-600 hover:text-neutral-900 disabled:text-neutral-300 transition-colors"
-            >
-              <Sparkles className="h-3 w-3" />
-              Generate with AI
-            </button>
-          )}
-        </div>
-
-        {engagements.length > 1 && (
-          <div>
-            <label className="block text-xs font-medium text-neutral-700 mb-1">Client</label>
-            <Select
-              name="engagement"
-              value={selectedEngagement}
-              onChange={(e) => setEngagementChoice(e.target.value)}
-            >
-              {engagements.map((eng) => (
-                <option key={eng.id} value={eng.id}>
-                  {eng.title}
-                </option>
-              ))}
-              <option value={PERSONAL}>Personal (no client)</option>
-            </Select>
-          </div>
-        )}
-
-        <div>
-          <label className="block text-xs font-medium text-neutral-700 mb-1">Priority</label>
-          <Select
-            name="priority"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as TaskPriority)}
-          >
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </Select>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-xs font-medium text-neutral-700">Attachments</label>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 text-xs text-neutral-400 hover:text-neutral-700 transition-colors"
-            >
-              <Paperclip className="h-3 w-3" />
-              Add file
-            </button>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPT}
-            className="hidden"
-            onChange={handleFileChange}
-          />
-          {files.length > 0 && (
-            <ul className="space-y-1">
-              {files.map((f, i) => (
-                <li
-                  key={i}
-                  className="flex items-center justify-between gap-2 rounded-md border border-neutral-100 bg-neutral-50 px-2 py-1 text-xs"
+  const questionsView = aiFollowUp && (
+    <>
+      <div className="krowe-nt-scroll">
+        {assumedCard({ strengthen: false })}
+        <div className="krowe-nt-qblock">
+          <p className="krowe-nt-q">{aiFollowUp.question}</p>
+          <div className="krowe-nt-chips">
+            {[...aiFollowUp.options, OTHER].map((opt) => {
+              const on = followUpChoice === opt;
+              const isOther = opt === OTHER;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  className={`krowe-nt-chip${on ? " is-on" : ""}`}
+                  onClick={() => setFollowUpChoice(opt)}
+                  disabled={isBusy}
                 >
-                  <span className="truncate text-neutral-700">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeFile(i)}
-                    className="shrink-0 text-neutral-400 hover:text-red-500 transition-colors"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+                  {on && <Ember size={12} />}
+                  {isOther ? "Other…" : opt}
+                </button>
+              );
+            })}
+          </div>
+          {followUpChoice === OTHER && (
+            <div className="krowe-nt-inputwrap">
+              <textarea
+                className="krowe-nt-textarea"
+                autoFocus
+                rows={2}
+                value={followUpOther}
+                onChange={(e) => setFollowUpOther(e.target.value)}
+                placeholder="Your answer…"
+              />
+            </div>
           )}
         </div>
-
-        {error && <p className="text-xs text-red-600">{error}</p>}
-        <Button type="submit" size="sm" className="w-full" disabled={isBusy}>
-          {isBusy ? "Adding…" : aiDrafted ? "Create task" : "Add task"}
-        </Button>
-      </form>
-    </div>
+      </div>
+      <div className="krowe-nt-foot">
+        <button
+          type="button"
+          className="krowe-nt-textbtn"
+          onClick={() => setFollowUpOpen(false)}
+          disabled={isBusy}
+        >
+          Cancel
+        </button>
+        <PrimaryBtn
+          type="button"
+          icon={<Ember size={14} />}
+          onClick={submitFollowUp}
+          disabled={
+            isBusy ||
+            !followUpChoice ||
+            (followUpChoice === OTHER && followUpOther.trim().length < 2)
+          }
+        >
+          Strengthen draft
+        </PrimaryBtn>
+      </div>
+    </>
   );
 
-  const panelContent = questionsView || loadingView || inputView || formView;
+  // The AI-classified change type, shown as a correctable pill on the review
+  // screen. Falls back to "change" (mirrors the schema default) if unset.
+  const reviewType = aiType ?? "change";
+  const TypeIcon = TYPES.find((t) => t.value === reviewType)!.icon;
+
+  // Selected-option labels for the pill sizers: a native <select> always sizes
+  // to its widest option, so each pill stacks the select over a hidden span of
+  // the *current* label and hugs that instead.
+  const clientLabel =
+    engagements.find((eng) => eng.id === selectedEngagement)?.title ?? "Personal (no client)";
+  const typeLabel = TYPES.find((t) => t.value === reviewType)!.label;
+  const priorityLabel = PRIORITIES.find((p) => p.value === priority)!.label;
+
+  const reviewView = (
+    <form ref={formRef} onSubmit={handleSubmit} className="krowe-nt-form">
+      <div className="krowe-nt-scroll">
+        <div className="krowe-nt-pillrow">
+          <div className="krowe-nt-pillgroup">
+            {engagements.length > 1 && (
+              <span className="krowe-nt-pill">
+                <Building2 width={12} height={12} />
+                <span className="krowe-nt-pillfit">
+                  <select
+                    className="krowe-nt-pillsel"
+                    aria-label="Client"
+                    value={selectedEngagement}
+                    onChange={(e) => setEngagementChoice(e.target.value)}
+                  >
+                    {clientOptions}
+                  </select>
+                  <span className="krowe-nt-pillsizer" aria-hidden="true">
+                    {clientLabel}
+                  </span>
+                </span>
+                <ChevronDown width={12} height={12} />
+              </span>
+            )}
+            <span className="krowe-nt-pill krowe-nt-typepill" data-type={reviewType}>
+              <TypeIcon width={12} height={12} strokeWidth={2.25} />
+              <span className="krowe-nt-pillfit">
+                <select
+                  className="krowe-nt-pillsel"
+                  aria-label="Type"
+                  value={reviewType}
+                  onChange={(e) => setAiType(e.target.value as TaskType)}
+                >
+                  {TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="krowe-nt-pillsizer" aria-hidden="true">
+                  {typeLabel}
+                </span>
+              </span>
+              <ChevronDown width={12} height={12} />
+            </span>
+            <span className="krowe-nt-pill">
+              <span className="krowe-nt-dot" data-priority={priority} />
+              <span className="krowe-nt-pillfit">
+                <select
+                  className="krowe-nt-pillsel"
+                  aria-label="Priority"
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                >
+                  {priorityOptions}
+                </select>
+                <span className="krowe-nt-pillsizer" aria-hidden="true">
+                  {priorityLabel}
+                </span>
+              </span>
+              <ChevronDown width={12} height={12} />
+            </span>
+          </div>
+        </div>
+        <div className="krowe-nt-field">
+          <span className="krowe-nt-flabel">Description</span>
+          <div className="krowe-nt-inputwrap">
+            <textarea
+              className="krowe-nt-textarea krowe-nt-desc"
+              name="description"
+              rows={5}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="More context (optional)"
+            />
+          </div>
+        </div>
+        {assumedCard({ strengthen: true })}
+        <div className="krowe-nt-attach">
+          <button
+            type="button"
+            className="krowe-nt-textbtn"
+            onClick={() => generate()}
+            disabled={isBusy}
+          >
+            <RefreshCw width={13} height={13} /> Regenerate
+          </button>
+          <button
+            type="button"
+            className="krowe-nt-textbtn"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Paperclip width={13} height={13} /> Add file
+          </button>
+        </div>
+        {fileList}
+        {error && <p className="krowe-nt-error">{error}</p>}
+      </div>
+      <div className="krowe-nt-foot krowe-nt-foot-solo">
+        <PrimaryBtn
+          type="submit"
+          icon={<Check width={15} height={15} strokeWidth={2} />}
+          kbd={kbdLabel}
+          full
+          disabled={isBusy}
+        >
+          {isBusy ? "Creating…" : "Create task"}
+        </PrimaryBtn>
+      </div>
+    </form>
+  );
+
+  const manualView = (
+    <form ref={formRef} onSubmit={handleSubmit} className="krowe-nt-form">
+      <div className="krowe-nt-scroll">
+        <div className="krowe-nt-inputwrap">
+          <input
+            className="krowe-nt-input"
+            name="title"
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={placeholder ?? "What needs to be built or fixed?"}
+            required
+          />
+        </div>
+        <div className="krowe-nt-inputwrap">
+          <textarea
+            className="krowe-nt-textarea"
+            name="description"
+            rows={3}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="More context (optional)"
+          />
+        </div>
+        <div className="krowe-nt-ai-row">
+          <span className="krowe-nt-ai-row-l">Or let krowe flesh it out</span>
+          <button type="button" className="krowe-nt-ghostpill" onClick={toggleAi} disabled={isBusy}>
+            <Ember size={13} /> Generate with AI
+          </button>
+        </div>
+        <div className="krowe-nt-metagrid">
+          {engagements.length > 1 && (
+            <label className="krowe-nt-field">
+              <span className="krowe-nt-flabel">Client</span>
+              <div className="krowe-nt-selwrap">
+                <select
+                  className="krowe-nt-select"
+                  name="engagement"
+                  value={selectedEngagement}
+                  onChange={(e) => setEngagementChoice(e.target.value)}
+                >
+                  {clientOptions}
+                </select>
+                <ChevronDown width={15} height={15} />
+              </div>
+            </label>
+          )}
+          <label className="krowe-nt-field">
+            <span className="krowe-nt-flabel">Priority</span>
+            <div className="krowe-nt-selwrap">
+              <select
+                className="krowe-nt-select"
+                name="priority"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+              >
+                {priorityOptions}
+              </select>
+              <ChevronDown width={15} height={15} />
+            </div>
+          </label>
+        </div>
+        {attachments}
+        {error && <p className="krowe-nt-error">{error}</p>}
+      </div>
+      <div className="krowe-nt-foot krowe-nt-foot-solo">
+        <PrimaryBtn
+          type="submit"
+          icon={<Plus width={15} height={15} strokeWidth={2} />}
+          kbd={kbdLabel}
+          full
+          disabled={isBusy}
+        >
+          {isBusy ? "Adding…" : "Add task"}
+        </PrimaryBtn>
+      </div>
+    </form>
+  );
+
+  const panel = (
+    <div className={`krowe-nt-panel ${modal ? "krowe-nt-panel-modal" : "krowe-nt-panel-dock"}`}>
+      {header}
+      {view === "ai" && aiView}
+      {view === "loading" && loadingView}
+      {view === "questions" && questionsView}
+      {view === "review" && reviewView}
+      {view === "manual" && manualView}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept={ACCEPT}
+        className="hidden"
+        onChange={handleFileChange}
+      />
+    </div>
+  );
 
   return (
     <>
       {expanded && modal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm bg-black/30"
-          onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+          className="krowe-nt-backdrop"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) handleClose();
+          }}
         >
-          <div className="w-full max-w-lg rounded-2xl border border-neutral-200 bg-white shadow-2xl p-6 mx-4">
-            {panelContent}
-          </div>
+          {panel}
         </div>
       )}
 
-      <div data-tour={tourId} className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
-        {expanded && !modal && (
-          <div className="w-80 rounded-xl border border-neutral-200 bg-white shadow-xl p-4">
-            {panelContent}
-          </div>
-        )}
+      <div data-tour={tourId} className="krowe-nt-dock">
+        {expanded && !modal && panel}
         <button
-          onClick={() => setExpanded((v) => !v)}
-          className="flex h-12 w-12 items-center justify-center rounded-full bg-neutral-900 text-white shadow-lg hover:bg-neutral-700 transition-colors"
-          aria-label="New task"
+          type="button"
+          className="krowe-nt-fab"
+          onClick={() => (expanded ? handleClose() : setExpanded(true))}
+          aria-label={expanded ? "Close" : "New task"}
         >
-          <Plus className="h-5 w-5" />
+          <span className="krowe-nt-fab-ring" aria-hidden="true" />
+          <span className={`krowe-nt-fab-plus${expanded ? " is-open" : ""}`}>
+            <Plus width={22} height={22} strokeWidth={2} />
+          </span>
         </button>
       </div>
     </>

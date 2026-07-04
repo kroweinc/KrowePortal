@@ -19,7 +19,7 @@ const TASK_TAG_DESCRIPTIONS: Record<TaskTag, string> = {
 
 const MANIFEST_PROMPT_CAP = 150;
 
-const TOOL_GUIDANCE = `You have tools to read this repo's codebase: list_directory(path), read_file(path), and search_code(query). You MUST investigate before deciding whether to return a final answer or ask the user clarifying questions — investigation always comes first, even if the description seems clear.
+const TOOL_GUIDANCE = `You have tools to read this repo's codebase: list_directory(path), read_file(path), and search_code(query). You MUST investigate before producing your final answer — investigation always comes first, even if the description seems clear.
 
 Phase 1 — Investigate (required, before any output):
 1. Read the dependency manifest for the language(s) listed above (e.g. "package.json" for JS/TS, "pyproject.toml" or "requirements.txt" for Python, "go.mod" for Go, "Cargo.toml" for Rust, "Gemfile" for Ruby, "composer.json" for PHP). This tells you the actual frameworks, UI libraries, ORM, router, CSS system, build tool, and test runner — do not guess.
@@ -27,11 +27,11 @@ Phase 1 — Investigate (required, before any output):
 3. search_code or read_file to locate the feature, component, route, table, or data shape the user mentioned. If they referred to "the list" / "the table" / "the form" / "the page" / "the X view", find which file actually owns it.
 
 Phase 2 — Decide:
-- If your investigation answered the open questions, return the final task/subtasks JSON, grounded in the file paths and patterns you actually saw.
-- Only ask the user clarifying questions about gaps that genuinely survived investigation (product decisions, ambiguous intent, choices the codebase cannot answer).
-- Do not stop investigating prematurely. Keep calling tools until you either have enough context or have proven the gap is a real product question for the user.`;
+- Return the final JSON, grounded in the file paths and patterns you actually saw. You CANNOT ask the user questions.
+- If genuine ambiguity survives investigation (product decisions, ambiguous intent, choices the codebase cannot answer), make the most reasonable assumption a senior engineer would make and proceed.
+- Do not stop investigating prematurely. Keep calling tools until you either have enough context to answer or have proven the gap can only be resolved by assumption.`;
 
-const FORBIDDEN_QUESTION_TOPICS = `Do NOT ask the user about anything that the linked repo can answer for you. Specifically, you MUST NOT ask about:
+const FORBIDDEN_ASSUMPTION_TOPICS = `Do NOT assume (or guess) anything that the linked repo can answer for you. Specifically, you MUST NOT assume:
 - The programming language or runtime (it is listed under "Languages:" above).
 - Which framework, UI library, ORM, router, CSS / styling system, state library, build tool, or test runner is used (read the dependency manifest — package.json / pyproject.toml / go.mod / Cargo.toml / Gemfile / composer.json).
 - Where a feature is displayed, rendered, or which file owns it (use search_code or list_directory to find it).
@@ -39,7 +39,7 @@ const FORBIDDEN_QUESTION_TOPICS = `Do NOT ask the user about anything that the l
 - The naming or location of existing modules, routes, or endpoints (search the codebase).
 - Any fact that has a definitive answer in a config file or existing source file.
 
-If you would have asked one of the above, investigate the repo with your tools and use the answer in the task you generate instead. Save your questions for genuine product / intent ambiguity that no file can resolve.`;
+If you would have assumed one of the above, investigate the repo with your tools and use the real answer instead. Reserve assumptions for genuine product / intent ambiguity that no file can resolve.`;
 
 function formatRepoContext(repoContext: RepoContext | null, opts: { withTools: boolean } = { withTools: false }): string {
   if (!repoContext) {
@@ -98,16 +98,15 @@ function formatRepoContext(repoContext: RepoContext | null, opts: { withTools: b
   return lines.join("\n");
 }
 
-export function buildTaskSystemPrompt(
-  repoContext: RepoContext | null,
-  opts: { forceTask?: boolean } = {}
-): string {
+export function buildTaskSystemPrompt(repoContext: RepoContext | null): string {
   const taskShape = `{
   "title": "imperative verb phrase, ≤80 chars, summarizes the deliverable",
   "description": "optional 1–3 short paragraphs of scope / acceptance criteria. Omit if title is self-evident.",
   "priority": "one of: low | medium | high | urgent",
   "type": "one of: feature | bug | change",
-  "tags": ["exactly one area label from the list in the rules"]
+  "tags": ["exactly one area label from the list in the rules"],
+  "assumptions": ["0–6 short sentences, each one assumption you made where the description was ambiguous"],
+  "followUp": null — or, ONLY when the description was too weak to author confidently: {"question": "ONE short question whose answer would most strengthen this task", "options": ["3–5 concise likely answers, most likely first"], "recommended": "exact text of the best option"}
 }`;
 
   const labelList = TASK_TAGS.map((t) => `    • "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
@@ -120,40 +119,21 @@ export function buildTaskSystemPrompt(
 - tags: pick exactly ONE area label as a one-element array — the single best fit for the PRIMARY area the work touches. NEVER invent a label, NEVER return more than one, and NEVER use a label outside this list:
 ${labelList}`;
 
-  const instructions = opts.forceTask
-    ? `You are an expert engineering task author. The user has answered clarifying questions. You MUST return a fully-formed task now. Do NOT ask further questions.
+  const instructions = `You are an expert engineering task author. Turn the user's free-text description into a fully-formed task. ALWAYS return a complete task — never questions instead of a task. Where the description is ambiguous, make the most sensible assumption a senior engineer would make (grounded in the repo context and what your tools showed you, when available) and proceed.
 
 Rules for the task:
 - title: imperative verb phrase, ≤80 chars (e.g. "Add Stripe checkout flow with webhook handler").
 - description: ALWAYS write a thorough plain-language overview (≥20 chars, aim for 4–7 sentences). Describe in detail WHAT is being built and what it will do — the user-facing behavior, the flow end to end, and what the finished thing looks/feels like when used. Cover edge cases the user should know about (e.g. "if the user is logged out, they see…", "if no results are found, show…"). Write for a non-technical product owner: NO file paths, NO library names, NO function names, NO code-level detail. Do not describe implementation steps. Just explain the thing being delivered as a human would describe it.
 - priority: infer from urgency cues in the user's text (default "medium"). Use "urgent" only if the user says it's blocking or time-critical.
 ${classificationRules}
+- assumptions: list each material assumption you made where the description was ambiguous or silent — scope boundaries, default behavior, which surface/feature the user meant, edge-case handling you chose. One short plain-language sentence each (≤300 chars), most important first, max 6. Only genuine judgment calls: do NOT list restatements of what the user said, and do NOT list codebase facts you verified with tools. Return [] when the description was unambiguous.${
+    repoContext ? `\n- ${FORBIDDEN_ASSUMPTION_TOPICS}` : ""
+  }
+- followUp: judge whether the request was WEAK — so vague or thin you had to guess at its core (what surface it touches, the essential behavior, or what "done" means). If weak, ALSO return followUp: the single most valuable question (plain language, aimed at the biggest gap, not a nice-to-have), 3–5 concise answer options a user could tap (most likely first — every option a real answer, NO catch-all like "something else"; the UI adds its own "Other" option), and recommended = the exact text of the option you'd pick. If the request is adequately specified, or the user's clarifications already close the gap, return null. NEVER re-ask something the description or clarifications already state, and never let this replace drafting the task.
 - Do NOT break the task into subtasks — return only the task itself. Subtasks are generated separately, on demand, from the task's sidebar.
 
 Output format — respond ONLY with valid JSON in this exact shape:
 {"kind":"task","item":${taskShape}}
-No markdown, no explanation, no wrapper — raw JSON only.`
-    : `You are an expert engineering task author. Your job is to turn a free-text description into a fully-formed task (title, description, priority, type, tags), OR ask 2–4 short clarifying questions if the description is too vague.
-
-Rules for the task:
-- title: imperative verb phrase, ≤80 chars (e.g. "Add Stripe checkout flow with webhook handler").
-- description: ALWAYS write a thorough plain-language overview (≥20 chars, aim for 4–7 sentences). Describe in detail WHAT is being built and what it will do — the user-facing behavior, the flow end to end, and what the finished thing looks/feels like when used. Cover edge cases the user should know about (e.g. "if the user is logged out, they see…", "if no results are found, show…"). Write for a non-technical product owner: NO file paths, NO library names, NO function names, NO code-level detail. Do not describe implementation steps. Just explain the thing being delivered as a human would describe it.
-- priority: infer from urgency cues in the user's text (default "medium"). Use "urgent" only if the user says it's blocking or time-critical.
-${classificationRules}
-- Do NOT break the task into subtasks — return only the task itself. Subtasks are generated separately, on demand, from the task's sidebar.
-
-Rules for clarifying questions:
-- Investigate the repo with your tools FIRST. Only ask a question after you have tried to answer it from the codebase and failed.
-- ${FORBIDDEN_QUESTION_TOPICS}
-- Only ask when a reasonable engineer could not infer scope, surface area, or output from the description, repo context, and what your tools showed you. Good questions are about product intent (default behavior, edge cases the user wants, scope boundaries), not about facts that live in the code.
-- Keep questions short (under 60 words each).
-- Each question MUST include an "options" array of 3–5 mutually distinct, concrete candidate answers (each ≤80 chars), ranked from most likely to least likely. Do NOT include an "Other" option — the UI adds that automatically.
-- For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the "options" strings) and "recommendation" to one short, plain-language sentence on why it's the best default. For technical/implementation questions, reason about the best real-world method first. Omit both only if no option is meaningfully better.
-- Return 2–4 questions. If after investigating you have no genuine product gaps, return the task instead.
-
-Output format — respond ONLY with valid JSON in one of these two shapes:
-{"kind":"task","item":${taskShape}}
-{"kind":"questions","items":[{"id":"q1","text":"...","options":["...","...","..."],"recommended":"...","recommendation":"Best because ..."},...]}
 No markdown, no explanation, no wrapper — raw JSON only.`;
 
   return `${instructions}\n\n${formatRepoContext(repoContext, { withTools: repoContext !== null })}`;
@@ -161,20 +141,17 @@ No markdown, no explanation, no wrapper — raw JSON only.`;
 
 export function buildTaskUserPrompt(
   rawDescription: string,
-  answers?: { questionId: string; answer: string }[]
+  clarifications?: { question: string; answer: string }[]
 ): string {
-  const parts: string[] = [`User description:\n${rawDescription.trim()}`];
-
-  if (answers && answers.length > 0) {
-    parts.push(
-      `\nAnswers to clarifying questions:\n${answers
-        .map((a) => `[${a.questionId}] ${a.answer}`)
-        .join("\n")}`
+  const lines = [`User description:\n${rawDescription.trim()}`];
+  if (clarifications && clarifications.length > 0) {
+    lines.push(
+      "Clarifications the user gave to your earlier follow-up questions (treat as authoritative):",
+      ...clarifications.map((c) => `Q: ${c.question}\nA: ${c.answer}`)
     );
   }
-
-  parts.push("\nRespond with JSON only.");
-  return parts.join("");
+  lines.push("Respond with JSON only.");
+  return lines.join("\n");
 }
 
 export function buildSubtasksSystemPrompt(repoContext: RepoContext | null): string {

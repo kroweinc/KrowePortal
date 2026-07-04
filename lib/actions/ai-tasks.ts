@@ -6,21 +6,29 @@ import { z } from "zod";
 import { generateTask } from "@/lib/ai/generate-tasks";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
-import type { TaskGenerationResult } from "@/lib/ai/schemas";
+import type { TaskOnlyResult } from "@/lib/ai/schemas";
 
 const generateSchema = z.object({
   rawDescription: z.string().trim().min(5).max(5000),
   engagementId: z.string().uuid().optional(),
-  answers: z
-    .array(z.object({ questionId: z.string(), answer: z.string() }))
+  // Q&A from the draft form's "strengthen" rounds. Capped at 5 — the UI hides
+  // the affordance at the same limit, so hitting the cap here means a bad actor.
+  clarifications: z
+    .array(
+      z.object({
+        question: z.string().trim().min(1).max(300),
+        answer: z.string().trim().min(1).max(1000),
+      })
+    )
+    .max(5)
     .optional(),
 });
 
 export async function generateTaskDraft(input: {
   rawDescription: string;
   engagementId?: string;
-  answers?: { questionId: string; answer: string }[];
-}): Promise<TaskGenerationResult | { error: string }> {
+  clarifications?: { question: string; answer: string }[];
+}): Promise<TaskOnlyResult | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
 
@@ -42,8 +50,8 @@ export async function generateTaskDraft(input: {
     const result = await generateTask({
       rawDescription: parsed.data.rawDescription,
       repoContext,
-      answers: parsed.data.answers,
       toolContext,
+      clarifications: parsed.data.clarifications,
     }, { userId: profile.id, operation: "generate_tasks" });
     return result;
   } catch (err) {
