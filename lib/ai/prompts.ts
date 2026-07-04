@@ -1,9 +1,25 @@
 import type { RepoContext } from "@/lib/github/types";
-import type { Task, TaskAttachment } from "@/lib/types";
+import { TASK_TAGS, type TaskTag } from "@/lib/types";
+
+// One-line gloss per area label, used only to steer the classifier. Typed as a
+// Record<TaskTag, …> so adding a tag to TASK_TAGS forces a description here.
+const TASK_TAG_DESCRIPTIONS: Record<TaskTag, string> = {
+  ui: "user-facing interface — components, layout, styling, on-screen copy",
+  backend: "server-side logic, business rules, server actions, background jobs",
+  api: "API endpoints, request/response handling, third-party API integration",
+  database: "schema, migrations, queries, data modeling, storage",
+  auth: "login, signup, sessions, permissions, access control",
+  infra: "deployment, CI/CD, env config, hosting, build tooling",
+  design: "visual design, UX, design system, branding (vs. implementation)",
+  performance: "speed, caching, query/render optimization, reducing load time",
+  docs: "documentation, README, code comments, guides",
+  growth: "marketing, SEO, analytics, onboarding, referrals, conversion",
+  ai: "LLM / model features — prompts, classification, content generation",
+};
 
 const MANIFEST_PROMPT_CAP = 150;
 
-const TOOL_GUIDANCE = `You have tools to read this repo's codebase: list_directory(path), read_file(path), and search_code(query). You MUST investigate before deciding whether to return a final answer or ask the user clarifying questions — investigation always comes first, even if the description seems clear.
+const TOOL_GUIDANCE = `You have tools to read this repo's codebase: list_directory(path), read_file(path), and search_code(query). You MUST investigate before producing your final answer — investigation always comes first, even if the description seems clear.
 
 Phase 1 — Investigate (required, before any output):
 1. Read the dependency manifest for the language(s) listed above (e.g. "package.json" for JS/TS, "pyproject.toml" or "requirements.txt" for Python, "go.mod" for Go, "Cargo.toml" for Rust, "Gemfile" for Ruby, "composer.json" for PHP). This tells you the actual frameworks, UI libraries, ORM, router, CSS system, build tool, and test runner — do not guess.
@@ -11,22 +27,11 @@ Phase 1 — Investigate (required, before any output):
 3. search_code or read_file to locate the feature, component, route, table, or data shape the user mentioned. If they referred to "the list" / "the table" / "the form" / "the page" / "the X view", find which file actually owns it.
 
 Phase 2 — Decide:
-- If your investigation answered the open questions, return the final task/subtasks JSON, grounded in the file paths and patterns you actually saw.
-- Only ask the user clarifying questions about gaps that genuinely survived investigation (product decisions, ambiguous intent, choices the codebase cannot answer).
-- Do not stop investigating prematurely. Keep calling tools until you either have enough context or have proven the gap is a real product question for the user.`;
+- Return the final JSON, grounded in the file paths and patterns you actually saw. You CANNOT ask the user questions.
+- If genuine ambiguity survives investigation (product decisions, ambiguous intent, choices the codebase cannot answer), make the most reasonable assumption a senior engineer would make and proceed.
+- Do not stop investigating prematurely. Keep calling tools until you either have enough context to answer or have proven the gap can only be resolved by assumption.`;
 
-const ESTIMATE_RULES = `- For EACH subtask, return estLowMin and estHighMin (integers, in minutes) representing how long the work will take a SOLO DEVELOPER who is driving the work through Claude Code (or a comparable agentic AI coding assistant). Claude writes most of the code, edits files in parallel, and handles the boilerplate — the human is reviewing, steering, and verifying, NOT hand-typing. Calibrate to THIS repo specifically using the file manifest and patterns you saw via list_directory / read_file.
-  Do NOT pad for: typing speed, looking up syntax, scaffolding boilerplate, writing repetitive types/tests, or context-switching between files — the AI does these instantly.
-  DO account for: reading and verifying AI output, debugging the genuinely tricky part, and product-level decisions the AI can't make on its own.
-  Reference points for a solo dev driving Claude Code:
-    • Small edit (rename, copy tweak, single-prop UI change): 2–6 min
-    • New shadcn-style component or simple form field: 5–15 min
-    • New API route or server action wired to one table: 10–30 min
-    • New page or feature spanning 2–4 files: 20–60 min
-    • Migration + types + UI + server action for a new column: 30–90 min
-  The spread (high − low) should reflect uncertainty: tight (≤10 min spread) when the change is well-scoped to files you already inspected; wider when surface area is fuzzy or unknown. Never return estHighMin < estLowMin.`;
-
-const FORBIDDEN_QUESTION_TOPICS = `Do NOT ask the user about anything that the linked repo can answer for you. Specifically, you MUST NOT ask about:
+const FORBIDDEN_ASSUMPTION_TOPICS = `Do NOT assume (or guess) anything that the linked repo can answer for you. Specifically, you MUST NOT assume:
 - The programming language or runtime (it is listed under "Languages:" above).
 - Which framework, UI library, ORM, router, CSS / styling system, state library, build tool, or test runner is used (read the dependency manifest — package.json / pyproject.toml / go.mod / Cargo.toml / Gemfile / composer.json).
 - Where a feature is displayed, rendered, or which file owns it (use search_code or list_directory to find it).
@@ -34,7 +39,7 @@ const FORBIDDEN_QUESTION_TOPICS = `Do NOT ask the user about anything that the l
 - The naming or location of existing modules, routes, or endpoints (search the codebase).
 - Any fact that has a definitive answer in a config file or existing source file.
 
-If you would have asked one of the above, investigate the repo with your tools and use the answer in the task you generate instead. Save your questions for genuine product / intent ambiguity that no file can resolve.`;
+If you would have assumed one of the above, investigate the repo with your tools and use the real answer instead. Reserve assumptions for genuine product / intent ambiguity that no file can resolve.`;
 
 function formatRepoContext(repoContext: RepoContext | null, opts: { withTools: boolean } = { withTools: false }): string {
   if (!repoContext) {
@@ -93,128 +98,42 @@ function formatRepoContext(repoContext: RepoContext | null, opts: { withTools: b
   return lines.join("\n");
 }
 
-export function buildSystemPrompt(
-  repoContext: RepoContext | null,
-  opts: { forceSubtasks?: boolean } = {}
-): string {
-  const instructions = opts.forceSubtasks
-    ? `You are an expert engineering task decomposer. You have already received the user's answers to clarifying questions. You MUST return subtasks now. Do NOT ask further questions.
-
-Rules for subtasks:
-- Each title must start with an imperative verb (e.g. "Add", "Update", "Write", "Fix", "Remove", "Test").
-- Scope each subtask to one focused session or one PR. No subtask should take more than a few hours.
-- If repo context is provided, reference real file paths, component names, or framework patterns from that context to make subtasks specific.
-- Provide an optional one-sentence "rationale" only when the reason isn't obvious from the title.
-- Return 3–8 subtasks; aim for the minimum number that fully covers the task.
-${ESTIMATE_RULES}
-
-Output format — respond ONLY with valid JSON in this exact shape:
-{"kind":"subtasks","items":[{"title":"...","rationale":"...","estLowMin":30,"estHighMin":60},...]}
-No markdown, no explanation, no wrapper — raw JSON only.`
-    : `You are an expert engineering task decomposer. Your job is to break a software engineering task into 3–8 concrete, actionable subtasks, OR ask 2–4 short clarifying questions if the task is too vague to break down responsibly.
-
-Rules for subtasks:
-- Each title must start with an imperative verb (e.g. "Add", "Update", "Write", "Fix", "Remove", "Test").
-- Scope each subtask to one focused session or one PR. No subtask should take more than a few hours.
-- If repo context is provided, reference real file paths, component names, or framework patterns from that context to make subtasks specific.
-- Provide an optional one-sentence "rationale" only when the reason isn't obvious from the title.
-- Return 3–8 subtasks; aim for the minimum number that fully covers the task.
-${ESTIMATE_RULES}
-
-Rules for clarifying questions:
-- Investigate the repo with your tools FIRST. Only ask a question after you have tried to answer it from the codebase and failed.
-- ${FORBIDDEN_QUESTION_TOPICS}
-- Only ask when a reasonable engineer could not infer the answer from the task, repo context, and what your tools showed you. Good questions are about product intent, not about facts that live in the code.
-- Keep questions short (under 60 words each).
-- Each question MUST include an "options" array of 3–5 mutually distinct, concrete candidate answers (each ≤80 chars), ranked from most likely to least likely given the task and repo context. Do NOT include an "Other" option — the UI adds that automatically.
-- Options must be concrete answers a user can pick directly, not open-ended prompts.
-- For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the "options" strings) and "recommendation" to one short, plain-language sentence on why it's the best default. For technical/implementation questions, reason about the best real-world method first. Omit both only if no option is meaningfully better.
-- Return 2–4 questions. If after investigating you have no genuine product gaps, return subtasks instead.
-
-Output format — respond ONLY with valid JSON in one of these two shapes:
-{"kind":"subtasks","items":[{"title":"...","rationale":"...","estLowMin":30,"estHighMin":60},...]}
-{"kind":"questions","items":[{"id":"q1","text":"...","options":["...","...","..."],"recommended":"...","recommendation":"Best because ..."},...]}
-No markdown, no explanation, no wrapper — raw JSON only.`;
-
-  return `${instructions}\n\n${formatRepoContext(repoContext, { withTools: repoContext !== null })}`;
-}
-
-export function buildUserPrompt(
-  task: Pick<Task, "title" | "description">,
-  attachments: Pick<TaskAttachment, "text_content">[],
-  answers?: { questionId: string; answer: string }[]
-): string {
-  const parts: string[] = [`Task: ${task.title}`];
-
-  if (task.description?.trim()) {
-    parts.push(`\nDescription:\n${task.description.trim()}`);
-  }
-
-  const textAttachments = attachments
-    .filter((a) => a.text_content?.trim())
-    .map((a) => a.text_content!.trim());
-
-  if (textAttachments.length > 0) {
-    parts.push(`\nAttached context:\n${textAttachments.join("\n\n")}`);
-  }
-
-  if (answers && answers.length > 0) {
-    parts.push(
-      `\nAnswers to clarifying questions:\n${answers
-        .map((a) => `[${a.questionId}] ${a.answer}`)
-        .join("\n")}`
-    );
-  }
-
-  parts.push("\nRespond with JSON only.");
-  return parts.join("");
-}
-
-export function buildTaskSystemPrompt(
-  repoContext: RepoContext | null,
-  opts: { forceTask?: boolean } = {}
-): string {
+export function buildTaskSystemPrompt(repoContext: RepoContext | null): string {
   const taskShape = `{
   "title": "imperative verb phrase, ≤80 chars, summarizes the deliverable",
   "description": "optional 1–3 short paragraphs of scope / acceptance criteria. Omit if title is self-evident.",
   "priority": "one of: low | medium | high | urgent",
-  "subtasks": [{"title":"...","rationale":"...","estLowMin":30,"estHighMin":60}, ...]
+  "type": "one of: feature | bug | change",
+  "tags": ["exactly one area label from the list in the rules"],
+  "assumptions": ["0–6 short sentences, each one assumption you made where the description was ambiguous"],
+  "followUp": null — or, ONLY when the description was too weak to author confidently: {"question": "ONE short question whose answer would most strengthen this task", "options": ["3–5 concise likely answers, most likely first"], "recommended": "exact text of the best option"}
 }`;
 
-  const instructions = opts.forceTask
-    ? `You are an expert engineering task author. The user has answered clarifying questions. You MUST return a fully-formed task now. Do NOT ask further questions.
+  const labelList = TASK_TAGS.map((t) => `    • "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
+  // Classification rules shared by both prompt variants — triage the task the way a
+  // developer would in Linear, so the draft is born with its type and area label.
+  const classificationRules = `- type: classify the work, Linear-style — pick exactly ONE:
+    • "feature": adds a new user-facing capability that didn't exist before (e.g. "Add CSV export").
+    • "bug": fixes broken, incorrect, or unintended behavior. Cues: fix, broken, wrong, error, crash, regression, doesn't work.
+    • "change": modifies, improves, refactors, or removes something that already works — copy, styling, config, performance, refactors, removals. Use this as the DEFAULT when it is neither a clear new feature nor a defect.
+- tags: pick exactly ONE area label as a one-element array — the single best fit for the PRIMARY area the work touches. NEVER invent a label, NEVER return more than one, and NEVER use a label outside this list:
+${labelList}`;
+
+  const instructions = `You are an expert engineering task author. Turn the user's free-text description into a fully-formed task. ALWAYS return a complete task — never questions instead of a task. Where the description is ambiguous, make the most sensible assumption a senior engineer would make (grounded in the repo context and what your tools showed you, when available) and proceed.
 
 Rules for the task:
 - title: imperative verb phrase, ≤80 chars (e.g. "Add Stripe checkout flow with webhook handler").
-- description: ALWAYS write a thorough plain-language overview (≥20 chars, aim for 4–7 sentences). Describe in detail WHAT is being built and what it will do — the user-facing behavior, the flow end to end, and what the finished thing looks/feels like when used. Cover edge cases the user should know about (e.g. "if the user is logged out, they see…", "if no results are found, show…"). Write for a non-technical product owner: NO file paths, NO library names, NO function names, NO code-level detail. Do not describe implementation steps — those go in subtasks. Just explain the thing being delivered as a human would describe it.
+- description: ALWAYS write a thorough plain-language overview (≥20 chars, aim for 4–7 sentences). Describe in detail WHAT is being built and what it will do — the user-facing behavior, the flow end to end, and what the finished thing looks/feels like when used. Cover edge cases the user should know about (e.g. "if the user is logged out, they see…", "if no results are found, show…"). Write for a non-technical product owner: NO file paths, NO library names, NO function names, NO code-level detail. Do not describe implementation steps. Just explain the thing being delivered as a human would describe it.
 - priority: infer from urgency cues in the user's text (default "medium"). Use "urgent" only if the user says it's blocking or time-critical.
-- subtasks: 3–8 items, each starting with an imperative verb, scoped to one focused session or one PR. If repo context is provided, reference real file paths or framework patterns. Provide an optional one-sentence "rationale" only when the reason isn't obvious.
-${ESTIMATE_RULES}
+${classificationRules}
+- assumptions: list each material assumption you made where the description was ambiguous or silent — scope boundaries, default behavior, which surface/feature the user meant, edge-case handling you chose. One short plain-language sentence each (≤300 chars), most important first, max 6. Only genuine judgment calls: do NOT list restatements of what the user said, and do NOT list codebase facts you verified with tools. Return [] when the description was unambiguous.${
+    repoContext ? `\n- ${FORBIDDEN_ASSUMPTION_TOPICS}` : ""
+  }
+- followUp: judge whether the request was WEAK — so vague or thin you had to guess at its core (what surface it touches, the essential behavior, or what "done" means). If weak, ALSO return followUp: the single most valuable question (plain language, aimed at the biggest gap, not a nice-to-have), 3–5 concise answer options a user could tap (most likely first — every option a real answer, NO catch-all like "something else"; the UI adds its own "Other" option), and recommended = the exact text of the option you'd pick. If the request is adequately specified, or the user's clarifications already close the gap, return null. NEVER re-ask something the description or clarifications already state, and never let this replace drafting the task.
+- Do NOT break the task into subtasks — return only the task itself. Subtasks are generated separately, on demand, from the task's sidebar.
 
 Output format — respond ONLY with valid JSON in this exact shape:
 {"kind":"task","item":${taskShape}}
-No markdown, no explanation, no wrapper — raw JSON only.`
-    : `You are an expert engineering task author. Your job is to turn a free-text description into a fully-formed task (title, description, priority, 3–8 subtasks), OR ask 2–4 short clarifying questions if the description is too vague.
-
-Rules for the task:
-- title: imperative verb phrase, ≤80 chars (e.g. "Add Stripe checkout flow with webhook handler").
-- description: ALWAYS write a thorough plain-language overview (≥20 chars, aim for 4–7 sentences). Describe in detail WHAT is being built and what it will do — the user-facing behavior, the flow end to end, and what the finished thing looks/feels like when used. Cover edge cases the user should know about (e.g. "if the user is logged out, they see…", "if no results are found, show…"). Write for a non-technical product owner: NO file paths, NO library names, NO function names, NO code-level detail. Do not describe implementation steps — those go in subtasks. Just explain the thing being delivered as a human would describe it.
-- priority: infer from urgency cues in the user's text (default "medium"). Use "urgent" only if the user says it's blocking or time-critical.
-- subtasks: 3–8 items, each starting with an imperative verb, scoped to one focused session or one PR. If repo context is provided, reference real file paths or framework patterns. Provide an optional one-sentence "rationale" only when the reason isn't obvious.
-${ESTIMATE_RULES}
-
-Rules for clarifying questions:
-- Investigate the repo with your tools FIRST. Only ask a question after you have tried to answer it from the codebase and failed.
-- ${FORBIDDEN_QUESTION_TOPICS}
-- Only ask when a reasonable engineer could not infer scope, surface area, or output from the description, repo context, and what your tools showed you. Good questions are about product intent (default behavior, edge cases the user wants, scope boundaries), not about facts that live in the code.
-- Keep questions short (under 60 words each).
-- Each question MUST include an "options" array of 3–5 mutually distinct, concrete candidate answers (each ≤80 chars), ranked from most likely to least likely. Do NOT include an "Other" option — the UI adds that automatically.
-- For EACH question, mark exactly ONE option as recommended: set "recommended" to that option's exact text (character-for-character one of the "options" strings) and "recommendation" to one short, plain-language sentence on why it's the best default. For technical/implementation questions, reason about the best real-world method first. Omit both only if no option is meaningfully better.
-- Return 2–4 questions. If after investigating you have no genuine product gaps, return the task instead.
-
-Output format — respond ONLY with valid JSON in one of these two shapes:
-{"kind":"task","item":${taskShape}}
-{"kind":"questions","items":[{"id":"q1","text":"...","options":["...","...","..."],"recommended":"...","recommendation":"Best because ..."},...]}
 No markdown, no explanation, no wrapper — raw JSON only.`;
 
   return `${instructions}\n\n${formatRepoContext(repoContext, { withTools: repoContext !== null })}`;
@@ -222,20 +141,55 @@ No markdown, no explanation, no wrapper — raw JSON only.`;
 
 export function buildTaskUserPrompt(
   rawDescription: string,
-  answers?: { questionId: string; answer: string }[]
+  clarifications?: { question: string; answer: string }[]
 ): string {
-  const parts: string[] = [`User description:\n${rawDescription.trim()}`];
-
-  if (answers && answers.length > 0) {
-    parts.push(
-      `\nAnswers to clarifying questions:\n${answers
-        .map((a) => `[${a.questionId}] ${a.answer}`)
-        .join("\n")}`
+  const lines = [`User description:\n${rawDescription.trim()}`];
+  if (clarifications && clarifications.length > 0) {
+    lines.push(
+      "Clarifications the user gave to your earlier follow-up questions (treat as authoritative):",
+      ...clarifications.map((c) => `Q: ${c.question}\nA: ${c.answer}`)
     );
   }
+  lines.push("Respond with JSON only.");
+  return lines.join("\n");
+}
 
-  parts.push("\nRespond with JSON only.");
-  return parts.join("");
+export function buildSubtasksSystemPrompt(repoContext: RepoContext | null): string {
+  const instructions = `You are an expert engineer breaking a single task down into the concrete subtasks needed to complete it. Given the task title and description${
+    repoContext ? " plus its linked GitHub repo" : ""
+  }, return a flat, ordered checklist of the actual steps a developer would carry out.
+
+Rules for the subtasks:
+- Return between 3 and 8 subtasks (never more than 12). Prefer the smallest set that fully covers the work — do not pad.
+- Each title is a short imperative phrase, ≤120 chars (e.g. "Add a migration for the new column", "Wire the submit handler to the server action").
+- Order them in the logical sequence the work would be done (schema/data → server/logic → UI → wiring → verification).
+- Make each subtask concrete and independently checkable. No vague catch-alls ("do the work", "finish the feature") and no overlap between items.
+- Ground the steps in what the repo actually uses${
+    repoContext
+      ? " — investigate with your tools FIRST so the steps name real files, patterns, and surfaces rather than guesses"
+      : " (work from the description alone; do not invent specifics you can't support)"
+  }.
+- Do NOT restate the task itself as a subtask, and do NOT include unrelated boilerplate.
+
+Output format — respond ONLY with valid JSON in this exact shape:
+{"items":[{"title":"..."},{"title":"..."}]}
+No markdown, no explanation, no wrapper — raw JSON only.`;
+
+  return `${instructions}\n\n${formatRepoContext(repoContext, { withTools: repoContext !== null })}`;
+}
+
+export function buildSubtasksUserPrompt(task: {
+  title: string;
+  description: string | null;
+}): string {
+  const parts = [`Task title: ${task.title}`];
+  if (task.description?.trim()) {
+    parts.push(`Task description:\n${task.description.trim()}`);
+  } else {
+    parts.push("Task description: (none)");
+  }
+  parts.push("\nBreak this task into subtasks. Respond with JSON only.");
+  return parts.join("\n");
 }
 
 export function buildEstimateTaskSystemPrompt(): string {
@@ -272,6 +226,37 @@ export function buildEstimateTaskUserPrompt(input: {
   priority: string;
 }): string {
   const parts = [`Title: ${input.title}`, `Priority: ${input.priority}`];
+  if (input.description?.trim()) {
+    parts.push(`Description:\n${input.description.trim()}`);
+  } else {
+    parts.push("Description: (none)");
+  }
+  parts.push("\nRespond with JSON only.");
+  return parts.join("\n");
+}
+
+export function buildClassifyTaskSystemPrompt(): string {
+  const labelList = TASK_TAGS.map((t) => `- "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
+  return `You are a senior engineer triaging software tasks the way a developer would in Linear. From the task title and description alone, classify it and label its area.
+
+Pick exactly ONE type:
+- "feature": adds new user-facing capability or a new thing that didn't exist before (e.g. "Add CSV export", "Build a referral dashboard").
+- "bug": fixes broken, incorrect, or unintended behavior (e.g. "Fix login redirect loop", "Totals show wrong tax"). Cues: fix, broken, wrong, error, crash, regression, doesn't work.
+- "change": modifies, improves, refactors, or removes something that already works — copy tweaks, styling, config, performance, refactors, removals (e.g. "Rename the Clients tab", "Speed up the board query", "Remove the legacy banner"). Use this as the default when it is neither clearly a new feature nor a defect.
+
+Then pick exactly ONE area label — the single best fit from this fixed list, returned as a one-element array. Choose the label for the PRIMARY area the work touches; if several apply, pick the most central one. NEVER invent your own label, NEVER return more than one, and NEVER return a label outside this list (e.g. not "pdf-forms", "export", "forms", "misc"):
+${labelList}
+
+Output format — respond ONLY with valid JSON in this exact shape:
+{"type": "bug", "tags": ["auth"]}
+No markdown, no explanation, no wrapper — raw JSON only.`;
+}
+
+export function buildClassifyTaskUserPrompt(input: {
+  title: string;
+  description: string | null;
+}): string {
+  const parts = [`Title: ${input.title}`];
   if (input.description?.trim()) {
     parts.push(`Description:\n${input.description.trim()}`);
   } else {

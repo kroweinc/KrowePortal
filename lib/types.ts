@@ -19,9 +19,31 @@ export interface GitHubRepo {
 }
 
 export type Role = "operator" | "builder";
-export type TaskStatus = "inbox" | "in_progress" | "blocked" | "done";
+export type TaskStatus = "backlog" | "todo" | "in_progress" | "done";
 export type TaskSource = "operator_request" | "builder_added";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
+// Linear-style change type. Null on legacy/unclassified tasks (see migration
+// 0064); auto-set by the AI classifier on creation and overridable in the UI.
+export type TaskType = "feature" | "bug" | "change";
+
+// Fixed taxonomy of area labels the AI classifier may assign. A task gets
+// exactly ONE of these (stored as a single-element tasks.tags array) — the
+// closed list keeps labels consistent and prevents one-off free-form tags like
+// "pdf-forms" or "export". Edit this list to change the allowed set.
+export const TASK_TAGS = [
+  "ui",
+  "backend",
+  "api",
+  "database",
+  "auth",
+  "infra",
+  "design",
+  "performance",
+  "docs",
+  "growth",
+  "ai",
+] as const;
+export type TaskTag = (typeof TASK_TAGS)[number];
 
 export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
 // First-time product-tour lifecycle (separate from the onboarding form wizard).
@@ -75,6 +97,7 @@ export interface Engagement {
   github_repo_name?: string | null;
   github_default_branch?: string | null;
   operator?: { display_name: string | null };
+  builder?: { display_name: string | null };
   // The source project, joined on project_id. Carries the business contact so
   // engagement views can surface it without a separate fetch. Structural subset
   // of Project — keep field names aligned with the projects table.
@@ -98,6 +121,9 @@ export interface Task {
   title: string;
   description: string | null;
   source: TaskSource;
+  // Linear-style change type and AI-generated area labels (migration 0064).
+  type: TaskType | null;
+  tags: string[];
   status: TaskStatus;
   priority: TaskPriority;
   builder_estimate_hours: number | null;
@@ -114,7 +140,28 @@ export interface Task {
   approval_approved_at: string | null;
   milestone_id: string | null;
   engagement?: Engagement;
+  // The person who submitted the task, joined on created_by. Surfaced in place of
+  // the old operator/builder source badge. Absent unless the query selects it.
+  // avatar_url is not a profiles column — it's resolved server-side (uploaded
+  // profile photo, else Google account photo) via lib/submitter-avatars.ts.
+  creator?: { display_name: string | null; role: Role; avatar_url?: string | null } | null;
   task_attachments?: TaskAttachment[];
+  // Embedded subtasks — only present when the query selects them (the operator
+  // dashboard does, for review checklists and progress bars).
+  task_subtasks?: Pick<Subtask, "id" | "title" | "completed">[];
+  // Latest operator send-back, embedded from task_audit_log when the query
+  // selects it (the builder board does). At most one entry — newest-first,
+  // limited to 1 at the query. Read via getActiveChangeRequest in lib/utils.
+  change_requests?: TaskChangeRequest[];
+}
+
+// A task.changes_requested audit entry projected for builder-facing UI.
+// metadata.note carries the operator's message (null when they sent it back
+// without a note).
+export interface TaskChangeRequest {
+  metadata: { note?: string } | null;
+  created_at: string;
+  actor?: { display_name: string | null } | null;
 }
 
 export type MilestoneStatus = "pending" | "in_progress" | "done";

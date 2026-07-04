@@ -4,16 +4,11 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { Badge } from "@/components/ui/badge";
 import { BuilderTaskActions } from "./builder-task-actions";
 import { TaskAttachments } from "@/components/task-attachments";
+import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import Link from "next/link";
 import type { Task, TaskAttachment } from "@/lib/types";
 import { formatHoursRange } from "@/lib/format-estimate";
-
-const STATUS_LABELS: Record<string, string> = {
-  inbox: "Inbox",
-  in_progress: "In Progress",
-  blocked: "Approval",
-  done: "Done",
-};
+import { STATUS_LABELS, submitterName } from "@/lib/utils";
 
 export const metadata = { title: "Task" };
 
@@ -34,7 +29,7 @@ export default async function BuilderTaskDetail({
   const [{ data }, { data: attachmentRows }] = await Promise.all([
     supabase
       .from("tasks")
-      .select("*, engagement:engagements(*)")
+      .select("*, engagement:engagements(*), creator:profiles!created_by(display_name, role)")
       .eq("id", id)
       .single(),
     supabase
@@ -61,22 +56,26 @@ export default async function BuilderTaskDetail({
           <h1 className="text-lg font-semibold text-neutral-900 leading-snug">
             {task.title}
           </h1>
-          <Badge variant={task.status as "inbox" | "in_progress" | "blocked" | "done"}>
-            {STATUS_LABELS[task.status]}
-          </Badge>
+          <div className="flex items-center gap-1.5">
+            <TaskTypeBadge type={task.type} />
+            <Badge variant={task.status}>
+              {STATUS_LABELS[task.status]}
+            </Badge>
+          </div>
         </div>
 
         {task.description && (
           <p className="text-sm text-neutral-600 leading-relaxed">{task.description}</p>
         )}
 
+        {task.tags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <TaskTags tags={task.tags} />
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 text-xs text-neutral-400 border-t border-neutral-100 pt-4">
-          <span>
-            Source:{" "}
-            <Badge variant={task.source === "operator_request" ? "operator" : "builder"}>
-              {task.source === "operator_request" ? "Operator request" : "Builder added"}
-            </Badge>
-          </span>
+          <span>Submitted by: {submitterName(task.creator)}</span>
           {(() => {
             const label = formatHoursRange(
               task.builder_estimate_low_hours,

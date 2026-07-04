@@ -9,6 +9,7 @@ import { getProjectMaterials } from "@/lib/actions/project-materials";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
 import { generatePrd, OPENER_QUESTION } from "@/lib/ai/generate-prd";
+import { friendlyAiError } from "@/lib/ai/client";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { getCurrentProfile } from "@/lib/auth";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
@@ -65,8 +66,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   try {
     result = await generatePrd(resolved.genInput, { userId: resolved.profile.id, operation: "generate_prd" });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "AI generation failed";
-    return { error: msg };
+    return { error: friendlyAiError(err) };
   }
 
   if (result.kind === "questions") {
@@ -84,7 +84,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
         { userId: resolved.profile.id, operation: "generate_prd" }
       );
     } catch (err) {
-      return { error: err instanceof Error ? err.message : "AI generation failed" };
+      return { error: friendlyAiError(err) };
     }
     if (result.kind !== "prd") return { error: "The PRD came back empty — generation didn't finish. Please try again." };
   }
@@ -219,8 +219,7 @@ export async function refinePrdSection(input: RefinePrdSectionInput): Promise<Re
       currentDate: new Date().toISOString().slice(0, 10),
     }, { userId: profile.id, operation: "refine_prd_section" });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "AI refine failed";
-    return { error: msg };
+    return { error: friendlyAiError(err) };
   }
 
   if (result.kind === "questions") return { kind: "questions", items: result.items };
