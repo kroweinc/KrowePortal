@@ -2,29 +2,23 @@
 
 import { useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Plus, Search } from "lucide-react";
+import { CheckCircle2, ChevronUp, Plus } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
 import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
-import { useRequestApproval } from "@/components/approval-deliverable-provider";
-import type { Task, Engagement, TaskStatus, TaskPriority } from "@/lib/types";
+import { isAwaitingApproval, sortWithApprovalPin } from "@/lib/utils";
+import type { Task, Engagement, TaskStatus } from "@/lib/types";
 
-const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+const sortTasks = sortWithApprovalPin<Task>;
 
-function sortTasks(tasks: Task[]): Task[] {
-  return [...tasks].sort((a, b) => {
-    const rankDiff = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
-    if (rankDiff !== 0) return rankDiff;
-    return (a.sort_order ?? 0) - (b.sort_order ?? 0);
-  });
-}
+const DONE_PREVIEW_COUNT = 3;
 
 const COLUMNS: { status: TaskStatus; label: string }[] = [
-  { status: "inbox",       label: "Inbox" },
+  { status: "backlog",     label: "Backlog" },
+  { status: "todo",        label: "To-Do" },
   { status: "in_progress", label: "In Progress" },
-  { status: "blocked",     label: "Approval" },
   { status: "done",        label: "Done" },
 ];
 
@@ -42,7 +36,6 @@ interface TaskBoardProps {
 export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps) {
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const requestDone = useRequestDone();
-  const requestApproval = useRequestApproval();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -50,7 +43,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
   const [draggingTask, setDraggingTask] = useState<Task | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
-  const [search, setSearch] = useState("");
+  const [showAllDone, setShowAllDone] = useState(false);
   const [, startTransition] = useTransition();
 
   const [optimisticTasks, dispatchOptimistic] = useOptimistic(
@@ -75,16 +68,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       : engagementFilter === "personal"
         ? optimisticTasks.filter((t) => t.engagement_id === null)
         : optimisticTasks.filter((t) => t.engagement_id === engagementFilter);
-
-  // Pure view filter on top of the engagement filter — never feeds drag/reorder math.
-  const q = search.trim().toLowerCase();
-  const searchedTasks = q
-    ? visibleTasks.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          (t.description ?? "").toLowerCase().includes(q)
-      )
-    : visibleTasks;
 
   function syncSelected(id: string | null) {
     setSelectedId(id);
@@ -123,23 +106,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       }
     }
 
-    // Dropping into the "Approval" column opens the submit-for-approval dialog
-    // (deliverable + note), which stamps approval_sent_at via markTaskForApproval.
-    if (status === "blocked") {
-      const droppedTask = optimisticTasks.find((t) => t.id === taskId);
-      if (droppedTask && droppedTask.status !== "blocked") {
-        const priorStatus = droppedTask.status;
-        startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: "blocked" }); });
-        requestApproval({
-          task: droppedTask,
-          onCommit: () => {},
-          onCancel: () => {
-            startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: priorStatus }); });
-          },
-        });
-        return;
-      }
-    }
     startTransition(async () => {
       dispatchOptimistic({ type: "status", taskId, status });
       await updateTaskStatus(taskId, status);
@@ -150,6 +116,9 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     if (!draggingTask) return;
     if (draggingTask.priority !== targetTask.priority) return;
     if (draggingTask.status !== targetTask.status) return;
+    // Approval-pinned cards sit above the priority groups — reordering
+    // across the pin boundary would compute nonsense sort_orders.
+    if (isAwaitingApproval(draggingTask) !== isAwaitingApproval(targetTask)) return;
     if (draggingTask.id === targetTask.id) return;
     e.stopPropagation(); e.preventDefault();
     const rect = e.currentTarget.getBoundingClientRect();
@@ -163,6 +132,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     if (!draggingTask) return;
     if (draggingTask.priority !== targetTask.priority) return;
     if (draggingTask.status !== targetTask.status) return;
+    if (isAwaitingApproval(draggingTask) !== isAwaitingApproval(targetTask)) return;
     if (draggingTask.id === targetTask.id) { setDropTarget(null); return; }
     e.stopPropagation(); e.preventDefault();
     const target = dropTarget;
@@ -171,7 +141,11 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     if (!target) return;
     const group = sortTasks(
       optimisticTasks.filter(
-        (t) => t.status === targetTask.status && t.priority === targetTask.priority && t.id !== sourceTask.id
+        (t) =>
+          t.status === targetTask.status &&
+          t.priority === targetTask.priority &&
+          isAwaitingApproval(t) === isAwaitingApproval(targetTask) &&
+          t.id !== sourceTask.id
       )
     );
     const targetIdx = group.findIndex((t) => t.id === targetTask.id);
@@ -196,7 +170,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
 
   return (
     <>
-      <div className="krowe-board-toolbar">
       {showFilters && (
         <div className="krowe-filter-row">
           <button
@@ -229,15 +202,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
           )}
         </div>
       )}
-      <label className="krowe-board-search">
-        <Search width={15} height={15} strokeWidth={2} />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search tasks"
-        />
-      </label>
-      </div>
       {visibleTasks.length === 0 ? (
         <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
           {optimisticTasks.length === 0
@@ -247,7 +211,12 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       ) : (
       <div className="krowe-board">
         {COLUMNS.map(({ status, label }) => {
-          const columnTasks = sortTasks(searchedTasks.filter((t) => t.status === status));
+          const columnTasks = sortTasks(visibleTasks.filter((t) => t.status === status));
+          // Done stays capped at a top-3 preview unless expanded.
+          const collapseDone =
+            status === "done" && !showAllDone && columnTasks.length > DONE_PREVIEW_COUNT;
+          const shownTasks = collapseDone ? columnTasks.slice(0, DONE_PREVIEW_COUNT) : columnTasks;
+          const hiddenDone = columnTasks.length - shownTasks.length;
           const isOver = dragOverStatus === status;
           return (
             <div
@@ -274,7 +243,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
                 <div className="krowe-column-empty">{isOver ? "Drop here" : "Empty"}</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                  {columnTasks.map((task) => (
+                  {shownTasks.map((task) => (
                     <div
                       key={task.id}
                       style={{ marginBottom: 10 }}
@@ -297,6 +266,26 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
                       )}
                     </div>
                   ))}
+                  {collapseDone && (
+                    <button
+                      type="button"
+                      className="krowe-done-more"
+                      onClick={() => setShowAllDone(true)}
+                    >
+                      <CheckCircle2 width={14} height={14} strokeWidth={2} />
+                      {hiddenDone} more done — click to view
+                    </button>
+                  )}
+                  {status === "done" && showAllDone && columnTasks.length > DONE_PREVIEW_COUNT && (
+                    <button
+                      type="button"
+                      className="krowe-done-more"
+                      onClick={() => setShowAllDone(false)}
+                    >
+                      <ChevronUp width={14} height={14} strokeWidth={2} />
+                      Show fewer
+                    </button>
+                  )}
                 </div>
               )}
             </div>

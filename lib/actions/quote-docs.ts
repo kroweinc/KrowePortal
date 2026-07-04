@@ -345,13 +345,13 @@ export async function reissueQuoteShareLink(
   if (!before) return { error: "Quote not found." };
   if (before.created_by !== profile.id) return { error: "Not your quote." };
 
-  // supabase-js can't invoke the SQL column default on update, so mint the same
-  // 64-hex shape here; expiry window matches migration 0062 (90 days for docs).
+  // supabase-js can't invoke the SQL column default on update, so mint the
+  // 64-hex token here. Reissued links never expire by default (null, per
+  // migration 0064); clear any prior revocation so the fresh link works.
   const token = randomBytes(32).toString("hex");
-  const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
   const { error } = await supabase
     .from("quotes")
-    .update({ token, token_expires_at: expires, token_revoked_at: null })
+    .update({ token, token_expires_at: null, token_revoked_at: null })
     .eq("id", id);
   if (error) return { error: error.message };
 

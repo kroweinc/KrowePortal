@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
@@ -7,7 +6,9 @@ import { DEV_PROFILE_IDS } from "@/lib/auth";
 import { TaskBoard } from "@/components/task-board";
 import { NewTaskForm } from "@/components/new-task-form";
 import { CreateInvitationDialog } from "@/components/create-invitation-dialog";
+import { ImportFromGranolaDialog } from "@/components/granola/import-from-granola-dialog";
 import { getMyEngagements, getMyPendingInvites } from "@/lib/actions/invitations";
+import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-avatars";
 import type { Task } from "@/lib/types";
 
 export const metadata = { title: "Tasks" };
@@ -34,17 +35,31 @@ export default async function BuilderDashboard({
   const engagementIds = engagementList.map((e) => e.id);
   const activeEngagement = engagementList.find((e) => e.id === engagementParam);
 
+  // Personal (no-engagement) tasks are scoped to their creator. In prod RLS
+  // enforces this; in dev the admin client bypasses RLS, so we scope explicitly
+  // here — otherwise the null branch would surface every user's personal tasks.
+  const personalFilter = `and(engagement_id.is.null,created_by.eq.${profile.id})`;
   const filter = engagementIds.length > 0
-    ? `engagement_id.in.(${engagementIds.join(",")}),engagement_id.is.null`
-    : "engagement_id.is.null";
+    ? `engagement_id.in.(${engagementIds.join(",")}),${personalFilter}`
+    : personalFilter;
 
+  // change_requests embeds the newest operator send-back per task so cards and
+  // the detail sheet can surface "changes requested" without extra fetches —
+  // see getActiveChangeRequest for when it counts as still actionable.
   const { data } = await supabase
     .from("tasks")
-    .select("*, task_attachments(id, is_deliverable, file_name)")
+    .select(
+      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), change_requests:task_audit_log(metadata, created_at, actor:profiles!actor_id(display_name))"
+    )
     .or(filter)
-    .order("created_at", { ascending: false });
+    .eq("change_requests.action", "task.changes_requested")
+    .order("created_at", { ascending: false })
+    .order("created_at", { referencedTable: "change_requests", ascending: false })
+    .limit(1, { referencedTable: "change_requests" });
 
-  const tasks = (data ?? []) as Task[];
+  const rows = (data ?? []) as Task[];
+  const avatars = await getSubmitterAvatarMap(rows.map((t) => t.created_by));
+  const tasks = attachCreatorAvatars(rows, avatars);
   const firstEngagement = engagementList[0];
 
   // Single-engagement first-run: surface the invite affordance right on the board.
@@ -68,9 +83,17 @@ export default async function BuilderDashboard({
             </div>
           </div>
           <div className="krowe-board-actions">
-            <Link href="/b/engagements" className="krowe-pill-ghost">
-              Clients
-            </Link>
+            {firstEngagement && (
+              <ImportFromGranolaDialog
+                target={{
+                  kind: "engagement",
+                  engagementId: activeEngagement?.id ?? firstEngagement.id,
+                }}
+                engagements={engagementList.map((e) => ({ id: e.id, title: e.title }))}
+                triggerLabel="Tasks from meeting"
+                triggerClassName="krowe-pill-ghost"
+              />
+            )}
             {(showInvite || operatorName) && (
               <CreateInvitationDialog
                 engagementId={firstEngagement?.id}

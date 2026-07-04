@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getCurrentProfile } from "@/lib/auth";
 import { simplifyTasks } from "@/lib/ai/simplify-tasks";
+import { friendlyAiError } from "@/lib/ai/client";
 import type { SimplifyTasksResult } from "@/lib/ai/schemas";
 
 const inputSchema = z.object({
@@ -51,7 +52,6 @@ export async function simplifyOperatorTasks(input: {
     const result = await simplifyTasks({ tasks: parsed.data.tasks });
     return result;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "AI simplification failed";
-    return { error: msg };
+    return { error: friendlyAiError(err) };
   }
 }

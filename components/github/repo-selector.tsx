@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 import type { GitHubRepo } from "@/lib/types"
 
 interface RepoSelectorProps {
@@ -12,6 +13,7 @@ interface RepoSelectorProps {
 
 export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSelectorProps) {
   const router = useRouter()
+  const [confirm, confirmDialog] = useConfirm()
   const [repos, setRepos] = useState<GitHubRepo[]>(initialRepos ?? [])
   const [selected, setSelected] = useState<string>(currentRepo ?? "")
   const [loading, setLoading] = useState(!initialRepos)
@@ -32,8 +34,19 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
   }, [initialRepos])
 
   async function handleSelect(fullName: string) {
+    if (!fullName || fullName === selected) return
     const repo = repos.find((r) => r.full_name === fullName)
     if (!repo) return
+
+    const relinking = !!selected
+    const target = engagementId ? "this client" : "your account"
+    const ok = await confirm({
+      title: relinking ? "Re-link this repository?" : "Link this repository?",
+      description: `Link ${repo.full_name} to ${target} and track its commits against tasks. You can change this anytime.`,
+      confirmText: relinking ? "Re-link repo" : "Link repo",
+    })
+    if (!ok) return
+
     setSelected(fullName)
     setSaving(true)
     const body: Record<string, unknown> = {
@@ -56,15 +69,15 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
     }
   }
 
-  if (loading) return <p className="text-sm text-neutral-400">Loading repos...</p>
+  if (loading) return <p className="krowe-set-note">Loading repos...</p>
 
   if (needsReconnect) {
     return (
-      <div className="flex flex-col gap-2">
-        <label className="text-xs font-medium text-neutral-500">Connected repository</label>
-        <p className="text-sm text-neutral-500">
+      <div>
+        <p className="krowe-set-repo-sub">Connected repository</p>
+        <p className="krowe-set-note" style={{ fontSize: "13px" }}>
           Your GitHub connection expired.{" "}
-          <a href="/api/github/connect" className="text-neutral-900 underline underline-offset-2 hover:text-neutral-600">
+          <a href="/api/github/connect" className="krowe-set-link-muted">
             Reconnect GitHub
           </a>{" "}
           to pick a repository.
@@ -74,12 +87,12 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-xs font-medium text-neutral-500">Connected repository</label>
+    <div>
+      <p className="krowe-set-repo-sub">Connected repository</p>
       <select
         value={selected}
         onChange={(e) => handleSelect(e.target.value)}
-        className="rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-900 bg-white disabled:opacity-50"
+        className="krowe-set-select"
         disabled={saving}
       >
         <option value="">Select a repository...</option>
@@ -90,8 +103,11 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
           </option>
         ))}
       </select>
-      {saving && <p className="text-xs text-neutral-400">Saving...</p>}
-      {!saving && saved && <p className="text-xs text-green-600">Saved</p>}
+      {saving && <p className="krowe-set-note" style={{ marginTop: "6px" }}>Saving...</p>}
+      {!saving && saved && (
+        <p className="krowe-set-note" style={{ marginTop: "6px", color: "var(--success)" }}>Saved</p>
+      )}
+      {confirmDialog}
     </div>
   )
 }

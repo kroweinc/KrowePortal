@@ -31,8 +31,7 @@ const DESIGN_MODE_HINTS: Record<DesignSystemMode, string> = {
   none: "No design-system line on the quote.",
 };
 
-const inputClass =
-  "rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-400";
+const inputClass = "krowe-set-input narrow";
 
 export function PricingDefaultsEditor({ initial }: PricingDefaultsEditorProps) {
   const [rate, setRate] = useState(String(initial.hourlyRate));
@@ -83,17 +82,17 @@ export function PricingDefaultsEditor({ initial }: PricingDefaultsEditorProps) {
   }
 
   return (
-    <div className="space-y-5">
+    <div>
       {/* Hourly rate */}
-      <div className="space-y-2">
-        <label htmlFor="default_hourly_rate" className="block text-xs font-medium text-neutral-700">
+      <div className="krowe-set-field">
+        <label htmlFor="default_hourly_rate" className="krowe-set-label">
           Default hourly rate
         </label>
-        <p className="text-xs text-neutral-500">
+        <p className="krowe-set-note">
           The blended rate new quotes price line items at (hours × rate).
         </p>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-neutral-500">$</span>
+        <div className="krowe-set-field-row">
+          <span className="krowe-set-hint-inline">$</span>
           <input
             id="default_hourly_rate"
             type="number"
@@ -101,24 +100,27 @@ export function PricingDefaultsEditor({ initial }: PricingDefaultsEditorProps) {
             step={5}
             value={rate}
             onChange={(e) => setRate(e.target.value)}
-            className={inputClass + " w-28"}
+            className={inputClass}
           />
-          <span className="text-sm text-neutral-500">per hour</span>
+          <span className="krowe-set-hint-inline">per hour</span>
         </div>
       </div>
 
+      <div className="krowe-set-rule" />
+
       {/* Payment terms */}
-      <div className="space-y-2 border-t border-neutral-100 pt-4">
-        <label htmlFor="payment_terms" className="block text-xs font-medium text-neutral-700">
+      <div className="krowe-set-field">
+        <label htmlFor="payment_terms" className="krowe-set-label">
           Payment terms
         </label>
-        <p className="text-xs text-neutral-500">The payment schedule new quotes start from.</p>
-        <div className="flex flex-wrap items-center gap-3">
+        <p className="krowe-set-note">The payment schedule new quotes start from.</p>
+        <div className="krowe-set-field-row">
           <select
             id="payment_terms"
             value={terms}
             onChange={(e) => setTerms(e.target.value as PaymentTermsPreset)}
-            className={inputClass}
+            className="krowe-set-select"
+            style={{ width: "auto", minWidth: "190px" }}
           >
             {PAYMENT_TERMS_PRESETS.map((p) => (
               <option key={p} value={p}>
@@ -126,57 +128,57 @@ export function PricingDefaultsEditor({ initial }: PricingDefaultsEditorProps) {
               </option>
             ))}
           </select>
-          <span className="text-xs text-neutral-500">Split: {milestonePreview}</span>
+          <span className="krowe-set-hint-inline">Split: {milestonePreview}</span>
         </div>
       </div>
+
+      <div className="krowe-set-rule" />
 
       {/* Design system */}
-      <div className="space-y-2 border-t border-neutral-100 pt-4">
-        <span className="block text-xs font-medium text-neutral-700">Design system</span>
-        <p className="text-xs text-neutral-500">How the design system is handled on new quotes.</p>
-        <div className="space-y-1.5">
+      <div className="krowe-set-field">
+        <span className="krowe-set-label">Design system</span>
+        <p className="krowe-set-note">How the design system is handled on new quotes.</p>
+        <div className="krowe-set-radio-group">
           {DESIGN_SYSTEM_MODES.map((mode) => (
-            <label key={mode} className="flex items-start gap-2 text-sm text-neutral-900">
-              <input
-                type="radio"
-                name="design_system_mode"
-                value={mode}
-                checked={designMode === mode}
-                onChange={() => setDesignMode(mode)}
-                className="mt-1"
-              />
-              <span>
-                <span className="font-medium">{DESIGN_MODE_LABELS[mode]}</span>
-                <span className="block text-xs text-neutral-500">{DESIGN_MODE_HINTS[mode]}</span>
-              </span>
-            </label>
+            <div key={mode}>
+              <label className={`krowe-set-radio-row ${designMode === mode ? "sel" : ""}`}>
+                <input
+                  type="radio"
+                  name="design_system_mode"
+                  value={mode}
+                  checked={designMode === mode}
+                  onChange={() => setDesignMode(mode)}
+                  className="sr-only"
+                />
+                <span className="krowe-set-radio-dot" aria-hidden="true" />
+                <span>
+                  <span className="krowe-set-radio-label">{DESIGN_MODE_LABELS[mode]}</span>
+                  <span className="krowe-set-radio-hint">{DESIGN_MODE_HINTS[mode]}</span>
+                </span>
+              </label>
+              {mode === "fixed" && designMode === "fixed" && (
+                <div className="krowe-set-inline-cost">
+                  <span className="krowe-set-hint-inline">$</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={designCost}
+                    onChange={(e) => setDesignCost(e.target.value)}
+                    placeholder="0"
+                    className={inputClass}
+                    aria-label="Design system fixed cost"
+                  />
+                  <span className="krowe-set-hint-inline">design charge</span>
+                </div>
+              )}
+            </div>
           ))}
         </div>
-        {designMode === "fixed" && (
-          <div className="flex items-center gap-2 pl-6 pt-1">
-            <span className="text-sm text-neutral-500">$</span>
-            <input
-              type="number"
-              min={0}
-              step={100}
-              value={designCost}
-              onChange={(e) => setDesignCost(e.target.value)}
-              placeholder="0"
-              className={inputClass + " w-32"}
-              aria-label="Design system fixed cost"
-            />
-            <span className="text-sm text-neutral-500">design charge</span>
-          </div>
-        )}
       </div>
 
-      <div className="flex justify-end border-t border-neutral-100 pt-4">
-        <button
-          type="button"
-          onClick={save}
-          disabled={!canSave}
-          className="rounded-md bg-neutral-900 px-4 py-2 text-sm text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
+      <div className="krowe-set-card-foot">
+        <button type="button" onClick={save} disabled={!canSave} className="krowe-set-btn-dark">
           {isPending ? "Saving…" : "Save"}
         </button>
       </div>

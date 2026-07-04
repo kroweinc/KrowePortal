@@ -8,7 +8,7 @@ export default async function BuilderSecurityPage() {
   const { email, isDevProfile, isPasswordUser } = await getAccountContext();
 
   return (
-    <div className="space-y-5">
+    <div className="krowe-set-stack">
       <SettingsHeader title="Security" sub="Your password and active sessions." />
       <SecurityEditor currentEmail={email} isPasswordUser={isPasswordUser} isDevProfile={isDevProfile} />
     </div>

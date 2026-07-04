@@ -9,6 +9,7 @@ import { getProjectMaterials } from "@/lib/actions/project-materials";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
 import { generatePrd, OPENER_QUESTION } from "@/lib/ai/generate-prd";
+import { friendlyAiError } from "@/lib/ai/client";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { getCurrentProfile } from "@/lib/auth";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
@@ -65,8 +66,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   try {
     result = await generatePrd(resolved.genInput, { userId: resolved.profile.id, operation: "generate_prd" });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "AI generation failed";
-    return { error: msg };
+    return { error: friendlyAiError(err) };
   }
 
   if (result.kind === "questions") {
@@ -84,7 +84,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
         { userId: resolved.profile.id, operation: "generate_prd" }
       );
     } catch (err) {
-      return { error: err instanceof Error ? err.message : "AI generation failed" };
+      return { error: friendlyAiError(err) };
     }
     if (result.kind !== "prd") return { error: "The PRD came back empty — generation didn't finish. Please try again." };
   }
@@ -219,8 +219,7 @@ export async function refinePrdSection(input: RefinePrdSectionInput): Promise<Re
       currentDate: new Date().toISOString().slice(0, 10),
     }, { userId: profile.id, operation: "refine_prd_section" });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "AI refine failed";
-    return { error: msg };
+    return { error: friendlyAiError(err) };
   }
 
   if (result.kind === "questions") return { kind: "questions", items: result.items };
@@ -371,13 +370,13 @@ export async function reissuePrdShareLink(
   if (!before) return { error: "PRD not found." };
   if (before.created_by !== profile.id) return { error: "Not your PRD." };
 
-  // supabase-js can't invoke the SQL column default on update, so mint the same
-  // 64-hex shape here; expiry window matches migration 0062 (90 days for docs).
+  // supabase-js can't invoke the SQL column default on update, so mint the
+  // 64-hex token here. Reissued links never expire by default (null, per
+  // migration 0064); clear any prior revocation so the fresh link works.
   const token = randomBytes(32).toString("hex");
-  const expires = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
   const { error } = await supabase
     .from("prds")
-    .update({ token, token_expires_at: expires, token_revoked_at: null })
+    .update({ token, token_expires_at: null, token_revoked_at: null })
     .eq("id", id);
   if (error) return { error: error.message };
 

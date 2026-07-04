@@ -16,6 +16,20 @@ export function ConnectGitHubButton({ connected, username }: ConnectGitHubButton
   const [isPending, startTransition] = useTransition()
   const [confirm, confirmDialog] = useConfirm()
 
+  async function handleConnect() {
+    if (
+      !(await confirm({
+        title: "Connect your GitHub account?",
+        description:
+          "You'll be redirected to GitHub to authorize access. We use it to link repos and track commits against your tasks.",
+        confirmText: "Continue to GitHub",
+        cancelText: "Cancel",
+      }))
+    )
+      return
+    window.location.href = "/api/github/connect"
+  }
+
   async function handleDisconnect() {
     if (
       !(await confirm({
@@ -36,16 +50,16 @@ export function ConnectGitHubButton({ connected, username }: ConnectGitHubButton
 
   if (connected) {
     return (
-      <div className="flex items-center gap-3 text-sm text-neutral-600">
-        <span className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-green-500" />
-          GitHub connected{username ? ` as @${username}` : ""}
+      <div className="krowe-set-conn-line">
+        <span className="krowe-set-conn-dot" />
+        <span>
+          GitHub connected{username ? <> as <b style={{ fontWeight: 600 }}>@{username}</b></> : ""}
         </span>
         <button
           type="button"
           onClick={handleDisconnect}
           disabled={isPending}
-          className="text-xs text-neutral-400 underline underline-offset-2 transition-colors hover:text-red-600 disabled:opacity-50"
+          className="krowe-set-link-muted danger"
         >
           {isPending ? "Disconnecting…" : "Disconnect"}
         </button>
@@ -55,11 +69,19 @@ export function ConnectGitHubButton({ connected, username }: ConnectGitHubButton
   }
 
   return (
-    <a
-      href="/api/github/connect"
-      className="inline-flex items-center gap-2 rounded-md bg-neutral-900 px-4 py-2 text-sm text-white hover:bg-neutral-700 transition-colors"
-    >
-      Connect GitHub
-    </a>
+    <div className="krowe-set-conn-line">
+      <span className="krowe-set-conn-dot off" />
+      <span>Not connected</span>
+      <button
+        type="button"
+        onClick={handleConnect}
+        disabled={isPending}
+        className="krowe-set-btn-dark"
+        style={{ marginLeft: "auto" }}
+      >
+        Connect GitHub
+      </button>
+      {confirmDialog}
+    </div>
   )
 }

@@ -176,12 +176,18 @@ export async function deleteSopTranscript(
   const supabase = await getClient(profile.id);
   const { data: transcript } = await supabase
     .from("project_sop_transcripts")
-    .select("project_id, storage_path")
+    .select("project_id, storage_path, source_type")
     .eq("id", parsed.data.id)
     .single();
   if (!transcript) return { error: "Transcript not found." };
   if (!(await assertProjectOwner(transcript.project_id as string, profile.id))) {
     return { error: "Not your document." };
+  }
+
+  // Granola imports are deduped through the granola_imports ledger; drop the
+  // ledger row with the transcript so the call can be imported again.
+  if (transcript.source_type === "granola") {
+    await supabase.from("granola_imports").delete().eq("sop_transcript_id", parsed.data.id);
   }
 
   const { error } = await supabase

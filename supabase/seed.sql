@@ -28,11 +28,11 @@ begin
     values
       (eng_id, 'Inventory sheet keeps breaking every quarter',
        'Our Google Sheet formula errors out whenever we add more than 500 rows. We lose an hour fixing it each time.',
-       'operator_request', 'inbox', op_id),
+       'operator_request', 'backlog', op_id),
 
       (eng_id, 'Client onboarding is all email and spreadsheets',
        'New clients send a PDF, someone copies it into a spreadsheet, someone else emails a welcome kit. Takes 2 days.',
-       'operator_request', 'inbox', op_id),
+       'operator_request', 'backlog', op_id),
 
       (eng_id, 'Approval requests get lost in Slack',
        'Purchase approvals over $500 need manager sign-off but there is no system — just a Slack message that gets buried.',

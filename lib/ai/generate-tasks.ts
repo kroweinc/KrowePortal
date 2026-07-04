@@ -1,6 +1,6 @@
 import { openai, runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
-import { TaskGenerationResult, TaskOnlyResult } from "./schemas";
+import { TaskOnlyResult } from "./schemas";
 import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import { buildTaskSystemPrompt, buildTaskUserPrompt } from "./prompts";
 import type { RepoContext } from "@/lib/github/types";
@@ -15,8 +15,10 @@ type ResponseFormat = NonNullable<
 interface GenerateInput {
   rawDescription: string;
   repoContext: RepoContext | null;
-  answers?: { questionId: string; answer: string }[];
   toolContext?: RepoToolContext;
+  // Q&A from prior "strengthen" rounds, woven into the user prompt so the
+  // regenerated draft reflects the user's answers.
+  clarifications?: { question: string; answer: string }[];
 }
 
 async function callOpenAIOneShot(
@@ -71,44 +73,40 @@ async function callOpenAI(
   return result.content;
 }
 
-export async function generateTask(input: GenerateInput, meta?: AiCallMeta): Promise<TaskGenerationResult> {
-  const { rawDescription, repoContext, answers, toolContext } = input;
-  const forceTask = (answers?.length ?? 0) > 0;
-  const schema = forceTask ? TaskOnlyResult : TaskGenerationResult;
-  // Strict json_schema only on the single-object forceTask path with no tools.
-  // The question round is a root discriminated union (illegal for strict) and the
-  // tool loop can't carry json_schema — both stay json_object.
-  const responseFormat: ResponseFormat =
-    forceTask && !toolContext
-      ? jsonResponseFormat(TaskOnlyResult, "task_draft")
-      : { type: "json_object" };
-  const systemPrompt = buildTaskSystemPrompt(repoContext, { forceTask });
-  const userPrompt = buildTaskUserPrompt(rawDescription, answers);
+export async function generateTask(input: GenerateInput, meta?: AiCallMeta): Promise<TaskOnlyResult> {
+  const { rawDescription, repoContext, toolContext, clarifications } = input;
+  // Strict json_schema on the one-shot path; the tool loop can't carry
+  // json_schema, so it stays lenient json_object and relies on safeParse.
+  const responseFormat: ResponseFormat = toolContext
+    ? { type: "json_object" }
+    : jsonResponseFormat(TaskOnlyResult, "task_draft");
+  const systemPrompt = buildTaskSystemPrompt(repoContext);
+  const userPrompt = buildTaskUserPrompt(rawDescription, clarifications);
 
   const callOnce = () => callOpenAI(systemPrompt, userPrompt, 1500, responseFormat, toolContext, meta);
 
   // Non-throwing parse: null on a non-JSON or schema-invalid response. safeParse
-  // still enforces refinements (estHigh >= estLow, …) and catches a truncated
-  // response even when strict mode guarantees the top-level shape.
-  const tryParse = (raw: string): TaskGenerationResult | null => {
+  // still enforces refinements and catches a truncated response even when strict
+  // mode guarantees the top-level shape.
+  const tryParse = (raw: string): TaskOnlyResult | null => {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch {
       return null;
     }
-    const result = schema.safeParse(stripNullsDeep(parsed));
-    return result.success ? (result.data as TaskGenerationResult) : null;
+    const result = TaskOnlyResult.safeParse(stripNullsDeep(parsed));
+    return result.success ? result.data : null;
   };
 
-  // The lenient question round occasionally drifts outside the union on the first
-  // sample; resample once before failing (the model reliably self-corrects). The
-  // strict forceTask draft is structurally constrained, so it skips the retry.
+  // The lenient tool-loop path occasionally drifts outside the schema on the
+  // first sample; resample once before failing (the model reliably
+  // self-corrects). The strict one-shot draft is structurally constrained, so
+  // it skips the retry.
   let result = tryParse(await callOnce());
-  if (!result && !forceTask) result = tryParse(await callOnce());
+  if (!result && toolContext) result = tryParse(await callOnce());
   if (result) return result;
 
-  // Persistent failure: surface a clear error (the caller degrades). There's no
-  // sensible auto-finalize for a question round with no answers to force a task.
+  // Persistent failure: surface a clear error (the caller degrades).
   throw new Error("AI response validation failed");
 }

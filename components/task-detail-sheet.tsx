@@ -10,6 +10,7 @@ import {
   Info,
   Link2,
   Paperclip,
+  RotateCcw,
   Sparkles,
   X,
 } from "lucide-react";
@@ -28,15 +29,24 @@ import {
   InlineText,
   InlineTextarea,
   InlineSelect,
+  InlineEstimate,
 } from "@/components/inline-edit";
 import { approveTask, updateTask, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
+import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
 import { TaskSubtasks } from "@/components/task-subtasks";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
 import { PlainEnglishToggle } from "@/components/plain-english-toggle";
+import { TaskTags } from "@/components/task-type-badge";
+import {
+  TASK_TYPE_OPTIONS,
+  getTaskAdvance,
+  getActiveChangeRequest,
+  relativeTime,
+  submitterName,
+} from "@/lib/utils";
 import type { Task, Role, TaskStatus } from "@/lib/types";
-import { formatHoursRange } from "@/lib/format-estimate";
 
 const PRIORITY_OPTIONS = [
   { value: "urgent", label: "Urgent" },
@@ -46,9 +56,9 @@ const PRIORITY_OPTIONS = [
 ];
 
 const STATUS_FLOW: { value: TaskStatus; label: string }[] = [
-  { value: "inbox", label: "Inbox" },
+  { value: "backlog", label: "Backlog" },
+  { value: "todo", label: "To-Do" },
   { value: "in_progress", label: "In Progress" },
-  { value: "blocked", label: "Approval" },
   { value: "done", label: "Done" },
 ];
 
@@ -118,6 +128,7 @@ function TaskDetailBody({
 }: TaskDetailBodyProps) {
   const router = useRouter();
   const requestDone = useRequestDone();
+  const requestApproval = useRequestApproval();
   const view = useTaskView(task);
   const { enabled: plainEnabled, ensureTaskCached } = usePlainEnglish();
   const showSimplified = role === "operator" && view.simplified;
@@ -149,6 +160,12 @@ function TaskDetailBody({
     fd.set("id", task.id);
     fd.set(field, value);
     await updateTask(fd);
+  }
+
+  async function saveEstimate(hours: number) {
+    // Same path as priority/type — updateTask collapses the AI low/high range
+    // onto this midpoint so the cell reflects the entered value.
+    await saveField("builder_estimate_hours", String(hours));
   }
 
   async function saveStatus(value: TaskStatus) {
@@ -200,8 +217,10 @@ function TaskDetailBody({
     }
   }
 
-  const currentIndex = statusIndex(task.status);
-  const nextStatus = currentIndex >= 0 ? STATUS_FLOW[currentIndex + 1] : undefined;
+  // Approval-aware forward step: in_progress advances to the approval dialog
+  // first, then (once sent) to Done — mirrors the card's advance button.
+  const advance = getTaskAdvance(task);
+  const changeRequest = getActiveChangeRequest(task);
   const deliverableAttachments = (task.task_attachments ?? []).filter(
     (a) => a.is_deliverable,
   );
@@ -328,6 +347,33 @@ function TaskDetailBody({
           </div>
         )}
 
+        {/* CHANGES REQUESTED — operator sent the deliverable back; stays visible
+            until the builder re-submits for approval */}
+        {changeRequest && (
+          <section className="krowe-task-section">
+            <div className="krowe-task-section-h">
+              <span className="label">
+                <RotateCcw className="h-3 w-3" />
+                Changes requested
+              </span>
+            </div>
+            <div className="krowe-changes-block">
+              <p className="krowe-changes-head">
+                <strong>{changeRequest.actor?.display_name ?? "The operator"}</strong>{" "}
+                sent this back {relativeTime(changeRequest.created_at)}
+              </p>
+              {changeRequest.metadata?.note && (
+                <p className="krowe-changes-note">&ldquo;{changeRequest.metadata.note}&rdquo;</p>
+              )}
+              {role === "builder" && (
+                <p className="krowe-changes-hint">
+                  Make the updates, then send it for approval again.
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* DESCRIPTION */}
         <section className="krowe-task-section">
           <div className="krowe-task-section-h">
@@ -400,6 +446,8 @@ function TaskDetailBody({
             task={task}
             role={role}
             onPriority={(v) => saveField("priority", v)}
+            onType={(v) => saveField("type", v)}
+            onEstimate={saveEstimate}
           />
         </section>
 
@@ -452,14 +500,28 @@ function TaskDetailBody({
                 Approve deliverable
               </button>
             )
-          : nextStatus && (
+          : advance && (
               <button
                 type="button"
                 className="krowe-btn-pill primary"
-                onClick={() => saveStatus(nextStatus.value)}
+                onClick={() => {
+                  if (advance.kind === "approval") {
+                    requestApproval({
+                      task,
+                      onCommit: () => {
+                        setToast("Sent for approval");
+                        router.refresh();
+                      },
+                    });
+                  } else {
+                    saveStatus(advance.kind === "done" ? "done" : advance.status);
+                  }
+                }}
               >
                 <ArrowRight className="h-3.5 w-3.5" />
-                Move to {nextStatus.label}
+                {advance.kind === "approval"
+                  ? "Send for approval"
+                  : `Move to ${advance.label}`}
               </button>
             )}
       </footer>
@@ -480,7 +542,7 @@ function StatusPipeline({
 }) {
   const active = statusIndex(status);
   // Operators don't drive the pipeline — for them it's a read-only status
-  // indicator. Their only status action is "Move to Approval" in the footer.
+  // indicator. Their only task action is "Approve deliverable" in the footer.
   const interactive = role !== "operator";
   return (
     <div className="krowe-pipeline" role="group" aria-label="Task status">
@@ -508,30 +570,31 @@ function MetaCard({
   task,
   role,
   onPriority,
+  onType,
+  onEstimate,
 }: {
   task: Task;
   role: Role;
   onPriority: (v: string) => Promise<void>;
+  onType: (v: string) => Promise<void>;
+  onEstimate: (hours: number) => Promise<void>;
 }) {
-  const estimateLabel = formatHoursRange(
-    task.builder_estimate_low_hours,
-    task.builder_estimate_high_hours,
-    task.builder_estimate_hours
-  );
+  // Legacy/unclassified tasks have no type yet — offer an "Untyped" placeholder
+  // so the read-only operator view and the builder's select both render cleanly.
+  const typeOptions = task.type
+    ? TASK_TYPE_OPTIONS
+    : [{ value: "", label: "Untyped" }, ...TASK_TYPE_OPTIONS];
   return (
     <div className="krowe-meta-card">
       <div className="krowe-meta-cell">
-        <span className="k">Source</span>
+        <span className="k">Type</span>
         <span className="v">
-          <span
-            className={`krowe-meta-badge ${
-              task.source === "operator_request" ? "operator" : "builder"
-            }`}
-          >
-            {task.source === "operator_request"
-              ? "Operator requested"
-              : "Builder added"}
-          </span>
+          <InlineSelect
+            value={task.type ?? ""}
+            options={typeOptions}
+            onSave={onType}
+            readOnly={role === "operator"}
+          />
         </span>
       </div>
 
@@ -549,9 +612,20 @@ function MetaCard({
 
       <div className="krowe-meta-cell">
         <span className="k">Estimate</span>
-        <span className={`v mono${estimateLabel ? "" : " muted"}`}>
-          {estimateLabel ?? "—"}
+        <span className="v mono">
+          <InlineEstimate
+            low={task.builder_estimate_low_hours}
+            high={task.builder_estimate_high_hours}
+            fallback={task.builder_estimate_hours}
+            onSave={onEstimate}
+            readOnly={role === "operator"}
+          />
         </span>
+      </div>
+
+      <div className="krowe-meta-cell">
+        <span className="k">Submitted by</span>
+        <span className="v">{submitterName(task.creator)}</span>
       </div>
 
       <div className="krowe-meta-cell">
@@ -560,6 +634,15 @@ function MetaCard({
           {new Date(task.created_at).toLocaleDateString()}
         </span>
       </div>
+
+      {task.tags.length > 0 && (
+        <div className="krowe-meta-cell" style={{ gridColumn: "1 / -1" }}>
+          <span className="k">Labels</span>
+          <span className="v" style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            <TaskTags tags={task.tags} />
+          </span>
+        </div>
+      )}
     </div>
   );
 }
