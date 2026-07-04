@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { Plus, Search } from "lucide-react";
+import { Plus } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
 import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
@@ -41,7 +41,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
   const [draggingTask, setDraggingTask] = useState<Task | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
-  const [search, setSearch] = useState("");
   const [, startTransition] = useTransition();
 
   const [optimisticTasks, dispatchOptimistic] = useOptimistic(
@@ -66,16 +65,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       : engagementFilter === "personal"
         ? optimisticTasks.filter((t) => t.engagement_id === null)
         : optimisticTasks.filter((t) => t.engagement_id === engagementFilter);
-
-  // Pure view filter on top of the engagement filter — never feeds drag/reorder math.
-  const q = search.trim().toLowerCase();
-  const searchedTasks = q
-    ? visibleTasks.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          (t.description ?? "").toLowerCase().includes(q)
-      )
-    : visibleTasks;
 
   function syncSelected(id: string | null) {
     setSelectedId(id);
@@ -178,7 +167,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
 
   return (
     <>
-      <div className="krowe-board-toolbar">
       {showFilters && (
         <div className="krowe-filter-row">
           <button
@@ -211,15 +199,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
           )}
         </div>
       )}
-      <label className="krowe-board-search">
-        <Search width={15} height={15} strokeWidth={2} />
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search tasks"
-        />
-      </label>
-      </div>
       {visibleTasks.length === 0 ? (
         <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
           {optimisticTasks.length === 0
@@ -229,7 +208,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       ) : (
       <div className="krowe-board">
         {COLUMNS.map(({ status, label }) => {
-          const columnTasks = sortTasks(searchedTasks.filter((t) => t.status === status));
+          const columnTasks = sortTasks(visibleTasks.filter((t) => t.status === status));
           const isOver = dragOverStatus === status;
           return (
             <div

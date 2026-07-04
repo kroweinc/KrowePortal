@@ -1,6 +1,15 @@
 import { z } from "zod";
 import { TASK_TAGS } from "@/lib/types";
 
+// Exactly-one area tag, kept as an array for the tasks.tags text[] column.
+// OpenAI strict mode can't enforce maxItems (strict-schema.ts strips it from the
+// wire schema), so the model occasionally returns 2+ tags despite the prompt —
+// keep the first instead of failing the whole generation. z.preprocess keeps the
+// wire JSON schema (array of enum) intact, unlike .transform.
+const TagList = z
+  .preprocess((v) => (Array.isArray(v) ? v.slice(0, 1) : v), z.array(z.enum(TASK_TAGS)).max(1))
+  .default([]);
+
 const Question = z
   .object({
     id: z.string(),
@@ -50,7 +59,7 @@ export const TaskDraft = z.object({
   // round-trip and no fill-in delay. `type` defaults to "change" so a rare omission
   // degrades to the catch-all instead of failing the whole generation.
   type: z.enum(["feature", "bug", "change"]).default("change"),
-  tags: z.array(z.enum(TASK_TAGS)).max(1).default([]),
+  tags: TagList,
 });
 
 export const TaskGenerationResult = z.discriminatedUnion("kind", [
@@ -61,6 +70,93 @@ export const TaskGenerationResult = z.discriminatedUnion("kind", [
 export const TaskOnlyResult = z.object({
   kind: z.literal("task"),
   item: TaskDraft,
+});
+
+// A cross-person dependency on an extracted task: something ANOTHER participant
+// must deliver before this task can proceed ("Rahul sends the call sheet
+// template"). Another person sending a file/template is THEIR action item plus
+// a dependency here — never automatically a new task for the builder.
+export const TaskDraftDependency = z.object({
+  owner: z.string().min(1).max(80),
+  requirement: z.string().min(1).max(300),
+});
+
+// Drop blank strings and over-cap arrays instead of failing the whole
+// generation (strict mode strips minLength/maxItems from the wire schema, so
+// the model can violate them despite the prompt — same posture as TagList).
+const ChecklistList = z
+  .preprocess(
+    (v) =>
+      Array.isArray(v)
+        ? v.filter((s) => typeof s === "string" && s.trim().length > 0).slice(0, 20)
+        : v,
+    z.array(z.string().min(1).max(300)).max(20)
+  )
+  .default([]);
+
+const DependencyList = z
+  .preprocess((v) => (Array.isArray(v) ? v.slice(0, 10) : v), z.array(TaskDraftDependency).max(10))
+  .default([]);
+
+// Action items extracted from an imported Granola call transcript. Reuses
+// TaskDraft so every draft arrives pre-classified (type/tags) like the
+// new-task AI flow; sourceQuote is a short transcript excerpt shown in the
+// review checklist so the builder can judge each draft against the call.
+export const ExtractedTaskDraft = TaskDraft.extend({
+  sourceQuote: z.string().max(300).optional(),
+  // Fuller verbatim excerpt of the note/transcript lines this task came from
+  // (up to ~1200 chars). Grounds the completeness/misattribution checks in
+  // lib/ai/extract-tasks-postprocess.ts. NOT model-emitted (see
+  // ModelExtractedTaskDraft below) — reconstructed server-side from sourceQuote
+  // by reconstructSourceText, so the model doesn't spend output tokens
+  // re-copying the transcript.
+  sourceText: z.string().max(1200).optional(),
+  // Who committed to the work on the call: exactly "builder" for the person
+  // running this tool, otherwise the participant's name as heard ("Rahul").
+  // Absent = attribution unclear; the review UI treats that as builder-owned.
+  // Display-only — createDraftTasks never persists it.
+  owner: z.string().max(80).optional(),
+  // Individual requirements / completion criteria of a multi-part action item
+  // ("then push it live" is a checklist entry, not lost context). Persisted as
+  // task_subtasks rows when the draft is approved.
+  checklist: ChecklistList,
+  // Work other people owe this task before it can proceed. Appended to the
+  // task description on approval (dependencies have no dedicated column).
+  dependencies: DependencyList,
+  // How clearly the call assigned this item. Ambiguous attribution must
+  // surface as medium/low — never a silent guess.
+  confidence: z.enum(["high", "medium", "low"]).default("medium"),
+});
+
+// Absent/"builder" owner = the builder's own work; anything else is another
+// participant's action item.
+export function isBuilderOwnedDraft(owner?: string): boolean {
+  return !owner || owner.trim().toLowerCase() === "builder";
+}
+
+export const ExtractTasksResult = z.object({
+  // Soft-truncate instead of relying on .max() alone: strict mode strips
+  // maxItems from the wire schema, so the model can exceed the cap — keep the
+  // first 40 rather than failing the whole extraction (same posture as TagList).
+  items: z.preprocess(
+    (v) => (Array.isArray(v) ? v.slice(0, 40) : v),
+    z.array(ExtractedTaskDraft).max(40)
+  ),
+});
+
+// What the MODEL is asked to emit: everything in ExtractedTaskDraft EXCEPT
+// sourceText, which is reconstructed server-side (reconstructSourceText in
+// lib/ai/extract-tasks-postprocess.ts). Strict mode forces every schema key
+// into `required`, so merely .optional() would still make the model emit the
+// field — omission is the only way to stop paying for those output tokens.
+// Wire-schema only; server-side parsing keeps using ExtractTasksResult.
+export const ModelExtractedTaskDraft = ExtractedTaskDraft.omit({ sourceText: true });
+
+export const ModelExtractTasksResult = z.object({
+  items: z.preprocess(
+    (v) => (Array.isArray(v) ? v.slice(0, 40) : v),
+    z.array(ModelExtractedTaskDraft).max(40)
+  ),
 });
 
 // On-demand subtask breakdown. The "Generate" button in the task sidebar turns
@@ -90,7 +186,7 @@ export const TaskEstimateResult = z
 // unchanged. Persisted by classifyAndSaveTask onto tasks.type / tasks.tags.
 export const TaskClassifyResult = z.object({
   type: z.enum(["feature", "bug", "change"]),
-  tags: z.array(z.enum(TASK_TAGS)).max(1).default([]),
+  tags: TagList,
 });
 
 export const ProjectProfileResult = z.object({
@@ -425,10 +521,13 @@ export const RefineQuoteSectionFinalResult = z.object({
   patch: QuoteSectionPatchSchema,
 });
 
+export type TaskDraftDependency = z.infer<typeof TaskDraftDependency>;
 export type Question = z.infer<typeof Question>;
 export type TaskDraft = z.infer<typeof TaskDraft>;
 export type TaskGenerationResult = z.infer<typeof TaskGenerationResult>;
 export type TaskOnlyResult = z.infer<typeof TaskOnlyResult>;
+export type ExtractedTaskDraft = z.infer<typeof ExtractedTaskDraft>;
+export type ExtractTasksResult = z.infer<typeof ExtractTasksResult>;
 export type SubtaskDraft = z.infer<typeof SubtaskDraft>;
 export type SubtasksResult = z.infer<typeof SubtasksResult>;
 export type TaskEstimateResult = z.infer<typeof TaskEstimateResult>;

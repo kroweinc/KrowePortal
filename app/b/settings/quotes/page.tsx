@@ -14,7 +14,7 @@ export default async function BuilderQuotesPage() {
   const pricingDefaults = await getPricingDefaults(profile.id);
 
   return (
-    <div className="space-y-5">
+    <div className="krowe-set-stack">
       <SettingsHeader title="Quote Defaults" sub="The base pricing every new quote starts from." />
       <SettingsSection title="Pricing" hint="New quotes are seeded from these values — you can still tweak each quote.">
         <PricingDefaultsEditor initial={pricingDefaults} />
