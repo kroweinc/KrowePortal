@@ -4,6 +4,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { generateTask } from "@/lib/ai/generate-tasks";
+import { friendlyAiError } from "@/lib/ai/client";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import type { TaskOnlyResult } from "@/lib/ai/schemas";
@@ -55,7 +56,6 @@ export async function generateTaskDraft(input: {
     }, { userId: profile.id, operation: "generate_tasks" });
     return result;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "AI generation failed";
-    return { error: msg };
+    return { error: friendlyAiError(err) };
   }
 }

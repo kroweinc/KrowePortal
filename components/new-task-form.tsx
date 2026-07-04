@@ -548,6 +548,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
           <textarea
             className="krowe-nt-textarea krowe-nt-textarea-lg"
             autoFocus
+            maxLength={5000}
             value={aiMode.kind === "input" ? aiMode.prompt : ""}
             onChange={(e) =>
               setAiMode((prev) =>
@@ -621,6 +622,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
                 className="krowe-nt-textarea"
                 autoFocus
                 rows={2}
+                maxLength={1000}
                 value={followUpOther}
                 onChange={(e) => setFollowUpOther(e.target.value)}
                 placeholder="Your answer…"

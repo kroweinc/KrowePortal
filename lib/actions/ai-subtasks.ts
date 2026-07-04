@@ -4,6 +4,7 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { generateSubtasks } from "@/lib/ai/generate-subtasks";
+import { friendlyAiError } from "@/lib/ai/client";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
@@ -63,8 +64,7 @@ export async function generateSubtasksForTask(
       { userId: profile.id, operation: "generate_subtasks" }
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "AI generation failed";
-    return { inserted: [], error: msg };
+    return { inserted: [], error: friendlyAiError(err) };
   }
 
   if (result.items.length === 0) return { inserted: [] };
