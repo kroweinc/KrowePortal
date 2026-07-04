@@ -69,15 +69,15 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
     }
   }
 
-  if (loading) return <p className="text-sm text-neutral-400">Loading repos...</p>
+  if (loading) return <p className="krowe-set-note">Loading repos...</p>
 
   if (needsReconnect) {
     return (
-      <div className="flex flex-col gap-2">
-        <label className="text-xs font-medium text-neutral-500">Connected repository</label>
-        <p className="text-sm text-neutral-500">
+      <div>
+        <p className="krowe-set-repo-sub">Connected repository</p>
+        <p className="krowe-set-note" style={{ fontSize: "13px" }}>
           Your GitHub connection expired.{" "}
-          <a href="/api/github/connect" className="text-neutral-900 underline underline-offset-2 hover:text-neutral-600">
+          <a href="/api/github/connect" className="krowe-set-link-muted">
             Reconnect GitHub
           </a>{" "}
           to pick a repository.
@@ -87,12 +87,12 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <label className="text-xs font-medium text-neutral-500">Connected repository</label>
+    <div>
+      <p className="krowe-set-repo-sub">Connected repository</p>
       <select
         value={selected}
         onChange={(e) => handleSelect(e.target.value)}
-        className="rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-900 bg-white disabled:opacity-50"
+        className="krowe-set-select"
         disabled={saving}
       >
         <option value="">Select a repository...</option>
@@ -103,8 +103,10 @@ export function RepoSelector({ engagementId, currentRepo, initialRepos }: RepoSe
           </option>
         ))}
       </select>
-      {saving && <p className="text-xs text-neutral-400">Saving...</p>}
-      {!saving && saved && <p className="text-xs text-green-600">Saved</p>}
+      {saving && <p className="krowe-set-note" style={{ marginTop: "6px" }}>Saving...</p>}
+      {!saving && saved && (
+        <p className="krowe-set-note" style={{ marginTop: "6px", color: "var(--success)" }}>Saved</p>
+      )}
       {confirmDialog}
     </div>
   )

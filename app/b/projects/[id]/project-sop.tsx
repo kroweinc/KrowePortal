@@ -2,8 +2,9 @@
 
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { FileText, ClipboardList, Plus, ChevronDown, ChevronRight } from "lucide-react";
+import { FileText, ClipboardList, AudioLines, Plus, ChevronDown, ChevronRight } from "lucide-react";
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
+import { ImportFromGranolaDialog } from "@/components/granola/import-from-granola-dialog";
 import {
   addSopTranscriptText,
   uploadSopTranscript,
@@ -120,6 +121,8 @@ export function ProjectSop({
                 <span className="row-ico">
                   {t.source_type === "paste" ? (
                     <ClipboardList size={17} strokeWidth={1.9} />
+                  ) : t.source_type === "granola" ? (
+                    <AudioLines size={17} strokeWidth={1.9} />
                   ) : (
                     <FileText size={17} strokeWidth={1.9} />
                   )}
@@ -137,9 +140,16 @@ export function ProjectSop({
                       ) : (
                         <ChevronRight size={14} strokeWidth={2} />
                       )}
-                      {t.label || (t.source_type === "paste" ? "Pasted transcript" : t.file_name)}
+                      {t.label ||
+                        (t.source_type === "paste"
+                          ? "Pasted transcript"
+                          : t.source_type === "granola"
+                            ? "Granola call"
+                            : t.file_name)}
                     </button>
-                    <span className="chip chip-kind">{t.source_type === "paste" ? "Pasted" : "File"}</span>
+                    <span className="chip chip-kind">
+                      {t.source_type === "paste" ? "Pasted" : t.source_type === "granola" ? "Granola" : "File"}
+                    </span>
                   </div>
                   <div className="row-sub">
                     <span>
@@ -256,6 +266,10 @@ export function ProjectSop({
         >
           <span className="ai"><Plus size={14} strokeWidth={2} /></span>Upload file
         </button>
+        <ImportFromGranolaDialog
+          target={{ kind: "project", projectId }}
+          onImportedTranscript={(t) => setTranscripts((prev) => [t, ...prev])}
+        />
         <input
           ref={fileInputRef}
           type="file"

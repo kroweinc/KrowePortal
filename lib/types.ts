@@ -435,7 +435,7 @@ export interface ProjectMaterial {
 // A discovery-call transcript (SOP) on a project. Unlike a material, the
 // transcript TEXT is extracted on upload and stored in `content` — it's the
 // canonical discovery source the PRD/quote/contract generators read.
-export type SopSourceType = "file" | "paste";
+export type SopSourceType = "file" | "paste" | "granola";
 
 export interface ProjectSopTranscript {
   id: string;
@@ -448,6 +448,44 @@ export interface ProjectSopTranscript {
   mime_type: string | null;
   content: string; // extracted/pasted transcript text — what the AI reads
   char_count: number | null;
+  granola_note_id: string | null; // originating Granola note (granola source only)
+  created_at: string;
+}
+
+// ── Granola integration ────────────────────────────────────────────────
+// One Granola OAuth token set per builder, encrypted at rest via lib/crypto.ts
+// (same envelope as github_connections). sync_* columns are phase-2 auto-sync
+// bookkeeping, unused by the manual import picker.
+export interface GranolaConnection {
+  id: string;
+  user_id: string;
+  access_token: string; // iv:tag:ciphertext envelope — never plaintext
+  refresh_token: string | null; // envelope; null if Granola didn't grant one
+  token_expires_at: string | null; // null = unknown, treated as expired
+  granola_email: string | null; // account label from get_account_info
+  oauth_redirect_uri: string; // resolves the issuing DCR client at refresh time
+  connected_at: string;
+  sync_enabled: boolean;
+  last_synced_at: string | null;
+  sync_cursor: string | null;
+}
+
+// Dedupe ledger: one row per (note, container) import. A note may go to a
+// project AND an engagement, never twice into the same container.
+export type GranolaImportTarget = "project" | "engagement";
+
+export interface GranolaImport {
+  id: string;
+  user_id: string;
+  granola_note_id: string;
+  granola_note_title: string | null;
+  granola_created_at: string | null;
+  target_kind: GranolaImportTarget;
+  project_id: string | null; // set when target_kind = 'project'
+  engagement_id: string | null; // set when target_kind = 'engagement'
+  sop_transcript_id: string | null; // the SOP row a project import created
+  tasks_created: number; // engagement imports: approved task count
+  imported_via: "manual" | "cron";
   created_at: string;
 }
 

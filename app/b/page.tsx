@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
@@ -7,6 +6,7 @@ import { DEV_PROFILE_IDS } from "@/lib/auth";
 import { TaskBoard } from "@/components/task-board";
 import { NewTaskForm } from "@/components/new-task-form";
 import { CreateInvitationDialog } from "@/components/create-invitation-dialog";
+import { ImportFromGranolaDialog } from "@/components/granola/import-from-granola-dialog";
 import { getMyEngagements, getMyPendingInvites } from "@/lib/actions/invitations";
 import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-avatars";
 import type { Task } from "@/lib/types";
@@ -83,9 +83,17 @@ export default async function BuilderDashboard({
             </div>
           </div>
           <div className="krowe-board-actions">
-            <Link href="/b/engagements" className="krowe-pill-ghost">
-              Clients
-            </Link>
+            {firstEngagement && (
+              <ImportFromGranolaDialog
+                target={{
+                  kind: "engagement",
+                  engagementId: activeEngagement?.id ?? firstEngagement.id,
+                }}
+                engagements={engagementList.map((e) => ({ id: e.id, title: e.title }))}
+                triggerLabel="Tasks from meeting"
+                triggerClassName="krowe-pill-ghost"
+              />
+            )}
             {(showInvite || operatorName) && (
               <CreateInvitationDialog
                 engagementId={firstEngagement?.id}

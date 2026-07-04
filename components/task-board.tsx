@@ -170,7 +170,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
 
   return (
     <>
-      <div className="krowe-board-toolbar">
       {showFilters && (
         <div className="krowe-filter-row">
           <button
@@ -203,7 +202,6 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
           )}
         </div>
       )}
-      </div>
       {visibleTasks.length === 0 ? (
         <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
           {optimisticTasks.length === 0

@@ -25,6 +25,9 @@ const createTaskSchema = z.object({
   // flow (new-task-form). Absent on manual entry, which classifies after creation.
   type: z.enum(["feature", "bug", "change"]).optional(),
   tags: z.array(z.enum(TASK_TAGS)).max(1).optional(),
+  // Optional starting column, from the Granola review's "Lands in" select.
+  // Done is excluded so a freshly created task can't bypass the approval gate.
+  status: z.enum(["backlog", "todo", "in_progress"]).optional(),
 });
 
 export async function createTask(formData: FormData) {
@@ -50,6 +53,7 @@ export async function createTask(formData: FormData) {
     priority: formData.get("priority") || undefined,
     type: formData.get("type") || undefined,
     tags,
+    status: formData.get("status") || undefined,
   });
 
   if (!parsed.success) return { error: "Invalid input" };
@@ -66,6 +70,8 @@ export async function createTask(formData: FormData) {
     tags: parsed.data.tags ?? [],
     source: profile.role === "operator" ? "operator_request" : "builder_added",
     created_by: profile.id,
+    // Omit when unset so the column's DB default applies.
+    ...(parsed.data.status ? { status: parsed.data.status } : {}),
   }).select("id").single();
 
   if (error) return { error: error.message };
