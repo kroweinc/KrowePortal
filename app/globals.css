@@ -434,6 +434,45 @@ button:focus-visible {
   .krowe-sidebar { width: 216px; }
 }
 
+/* ── Collapsible sidebar (icon-only rail) ── */
+.krowe-sidebar-toggle {
+  margin-left: auto; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-full);
+  border: 1px solid transparent; background: none; cursor: pointer;
+  color: var(--faint-foreground);
+  transition: background 150ms var(--ease-out-smooth),
+              color 150ms var(--ease-out-smooth),
+              transform var(--duration-normal) var(--ease-out-smooth);
+}
+.krowe-sidebar-toggle:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent); color: var(--foreground);
+}
+.krowe-sidebar-toggle:focus-visible {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+/* Chevron points left when open, flips to point right (expand) when collapsed. */
+.krowe-sidebar.collapsed .krowe-sidebar-toggle { transform: rotate(180deg); }
+
+/* Only animate width once mounted, so the persisted state paints instantly. */
+.krowe-sidebar.ready { transition: width var(--duration-normal) var(--ease-out-smooth); }
+.krowe-sidebar.collapsed { width: 64px; }
+.krowe-sidebar.collapsed .krowe-sidebar-brand img,
+.krowe-sidebar.collapsed .krowe-sidebar-word,
+.krowe-sidebar.collapsed .krowe-sidebar-cap,
+.krowe-sidebar.collapsed .krowe-sidebar-label { display: none; }
+.krowe-sidebar.collapsed .krowe-sidebar-brand { justify-content: center; gap: 0; padding: 20px 0 16px; }
+.krowe-sidebar.collapsed .krowe-sidebar-nav  { padding: 8px 10px 0; }
+.krowe-sidebar.collapsed .krowe-sidebar-link { justify-content: center; padding: 0; gap: 0; }
+.krowe-sidebar.collapsed .krowe-sidebar-ic   { margin: 0; }
+.krowe-sidebar.collapsed .krowe-sidebar-foot { padding: 14px 10px 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .krowe-sidebar.ready { transition: none; }
+  .krowe-sidebar-toggle { transition: background 150ms var(--ease-out-smooth), color 150ms var(--ease-out-smooth); }
+}
+
 /* ── Settings (top-tab sub-route layout) ── */
 .krowe-settings-shell {
   display: flex;
@@ -563,6 +602,260 @@ button:focus-visible {
   background: var(--surface-subtle);
 }
 
+/* ── Staging (branch-grouped done view) ── */
+.krowe-stage-wrap {
+  display: flex; flex-direction: column; gap: 34px; max-width: 1320px;
+}
+.krowe-stage-section { display: flex; flex-direction: column; gap: 16px; }
+.krowe-stage-section-head { display: flex; align-items: center; gap: 10px; }
+.krowe-stage-rule {
+  flex: 1; height: 1px;
+  background: linear-gradient(to right, var(--border), transparent);
+}
+.krowe-stage-section-count {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--muted-foreground); white-space: nowrap;
+}
+.krowe-stage-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em;
+  padding: 4px 11px; border-radius: var(--radius-full); border: 1px solid transparent;
+  white-space: nowrap;
+}
+.krowe-stage-badge.staged {
+  background: var(--warning-soft); color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 22%, transparent);
+}
+.krowe-stage-badge.shipped {
+  background: var(--success-soft); color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 22%, transparent);
+}
+.krowe-stage-groups { display: flex; flex-direction: column; gap: 16px; }
+.krowe-stage-group {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface-subtle) 55%, white);
+  padding: 14px 16px 16px;
+}
+.krowe-stage-group-head {
+  display: flex; align-items: center; gap: 9px; padding-bottom: 12px;
+  color: var(--muted-foreground);
+}
+.krowe-stage-group-head svg { flex-shrink: 0; }
+.krowe-stage-branch {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 600;
+  color: var(--foreground); letter-spacing: -0.01em; flex-shrink: 0;
+}
+.krowe-stage-purpose {
+  font-family: var(--font-serif); font-style: italic; font-size: 13.5px;
+  color: var(--faint-foreground); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-stage-count {
+  margin-left: auto; flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--muted-foreground);
+  background: white; border: 1px solid var(--border);
+  padding: 1px 7px; border-radius: var(--radius-full); line-height: 1.5;
+}
+.krowe-stage-cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 12px;
+}
+.krowe-stage-empty {
+  border: 1px dashed var(--border); border-radius: var(--radius-lg);
+  padding: 20px 16px; font-size: 13px;
+  font-family: var(--font-serif); font-style: italic;
+  color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+}
+
+/* Branch field in the task-detail deliverable section */
+.krowe-branch-field {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px;
+}
+.krowe-branch-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11.5px; font-weight: 500;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  background: color-mix(in srgb, #6366f1 10%, white); color: #4338ca;
+  border: 1px solid color-mix(in srgb, #6366f1 20%, transparent);
+}
+.krowe-branch-pill[data-empty="true"] {
+  background: var(--surface-subtle); color: var(--muted-foreground); border-color: var(--border);
+}
+.krowe-branch-edit {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; font-weight: 500; color: var(--muted-foreground);
+  background: transparent; border: none; cursor: pointer; padding: 2px 4px;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-edit:hover { color: var(--foreground); }
+.krowe-branch-select {
+  height: 32px; padding: 0 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: white; color: var(--foreground);
+  font-size: 13px; min-width: 180px;
+}
+.krowe-branch-cancel {
+  font-size: 11.5px; color: var(--muted-foreground);
+  background: transparent; border: none; cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-cancel:hover { color: var(--foreground); }
+.krowe-branch-hint { font-size: 12px; color: var(--muted-foreground); }
+
+/* Branch chip picker — one-click branch selection (replaces the dropdown +
+   "pushed to main" checkbox). Default branch = green/shipped, others = amber/
+   staged, echoing the staging board's badge language. */
+.krowe-branch-chips-wrap { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.krowe-branch-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.krowe-branch-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11.5px; font-weight: 500;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--muted-foreground);
+  cursor: pointer; white-space: nowrap; max-width: 100%;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-chip:hover:not(:disabled) { color: var(--foreground); border-color: var(--border-strong); }
+.krowe-branch-chip:active:not(:disabled) { transform: scale(0.97); }
+.krowe-branch-chip:disabled { opacity: 0.5; cursor: default; }
+.krowe-branch-chip-name { overflow: hidden; text-overflow: ellipsis; }
+.krowe-branch-chip svg { flex-shrink: 0; }
+.krowe-branch-chip-tag {
+  font-family: var(--font-sans); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 1px 5px; border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success);
+}
+/* Selected feature branch → staged (amber) */
+.krowe-branch-chip.active {
+  background: var(--warning-soft); color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 24%, transparent);
+}
+/* Selected default branch → shipped / pushed to main (green) */
+.krowe-branch-chip.is-default.active {
+  background: var(--success-soft); color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 24%, transparent);
+}
+.krowe-branch-chip.is-default.active .krowe-branch-chip-tag {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+}
+/* Selected "No branch" → neutral */
+.krowe-branch-chip.is-none { font-family: var(--font-sans); }
+.krowe-branch-chip.is-none.active {
+  background: var(--foreground); color: var(--background); border-color: var(--foreground);
+}
+.krowe-branch-refresh {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-refresh:hover:not(:disabled) { color: var(--foreground); border-color: var(--border-strong); }
+.krowe-branch-refresh:disabled { opacity: 0.5; cursor: default; }
+.krowe-branch-chips-hint { font-size: 12px; color: var(--muted-foreground); }
+.krowe-branch-chips-purpose { font-family: var(--font-serif); font-style: italic; color: var(--faint-foreground); }
+@keyframes krowe-spin { to { transform: rotate(360deg); } }
+.krowe-spin { animation: krowe-spin 0.7s linear infinite; }
+
+/* Staging group field — assign a done task to a builder-created group,
+   separate from the branch. Mirrors the branch field layout. */
+.krowe-staging-field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.krowe-staging-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 500;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  background: var(--surface-subtle); color: var(--foreground);
+  border: 1px solid var(--border-strong);
+}
+.krowe-staging-pill[data-empty="true"] { color: var(--muted-foreground); border-color: var(--border); }
+.krowe-staging-pill svg { flex-shrink: 0; }
+.krowe-staging-edit {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; font-weight: 500; color: var(--muted-foreground);
+  background: transparent; border: none; cursor: pointer; padding: 2px 4px;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-staging-edit:hover { color: var(--foreground); }
+.krowe-staging-picker { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; width: 100%; }
+.krowe-staging-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.krowe-staging-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500;
+  padding: 4px 11px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--muted-foreground);
+  cursor: pointer; white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-staging-chip:hover:not(:disabled) { color: var(--foreground); border-color: var(--border-strong); }
+.krowe-staging-chip.active { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+.krowe-staging-chip:disabled { opacity: 0.5; cursor: default; }
+.krowe-staging-new { display: inline-flex; align-items: center; gap: 6px; }
+.krowe-staging-new input {
+  height: 28px; padding: 0 10px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--foreground);
+  font-size: 12px; min-width: 150px;
+}
+.krowe-staging-cancel {
+  font-size: 11.5px; color: var(--muted-foreground);
+  background: transparent; border: none; cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-staging-cancel:hover { color: var(--foreground); }
+
+/* Staging board — "Group by" segmented toggle + inline group management */
+.krowe-stage-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 4px; }
+.krowe-stage-groupby { display: inline-flex; align-items: center; gap: 8px; }
+.krowe-stage-groupby-label {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+.krowe-stage-groupby-seg {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-full); background: white;
+}
+.krowe-stage-groupby-btn {
+  font-size: 12px; font-weight: 500; color: var(--muted-foreground);
+  padding: 3px 12px; border-radius: var(--radius-full);
+  border: none; background: transparent; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-stage-groupby-btn.active { background: var(--foreground); color: var(--background); }
+.krowe-stage-newgroup {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; color: var(--muted-foreground);
+  padding: 4px 12px; border-radius: var(--radius-full);
+  border: 1px dashed var(--border-strong); background: transparent; cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth), border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-stage-newgroup:hover:not(:disabled) { color: var(--foreground); border-color: var(--foreground); }
+.krowe-stage-newgroup:disabled { opacity: 0.5; cursor: default; }
+.krowe-stage-newgroup-edit { display: inline-flex; align-items: center; gap: 6px; }
+.krowe-stage-newgroup-edit input,
+.krowe-stage-newgroup-input {
+  height: 28px; padding: 0 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--foreground);
+  font-size: 12px; min-width: 170px;
+}
+.krowe-stage-newgroup-input { min-width: 130px; height: 24px; }
+.krowe-stage-group-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: 6px; }
+.krowe-stage-group-action {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: var(--radius-full);
+  border: none; background: transparent; color: var(--faint-foreground); cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth), background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-stage-group-action:hover { color: var(--foreground); background: var(--surface-subtle); }
+.krowe-stage-group-action.danger:hover { color: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) {
+  .krowe-spin { animation: none; }
+  .krowe-branch-chip:active:not(:disabled) { transform: none; }
+}
+
 /* ── Card ── */
 .krowe-card {
   position: relative;
@@ -592,6 +885,9 @@ button:focus-visible {
 .krowe-card.priority-high   .krowe-rail { background: var(--warning); }
 .krowe-card.priority-medium .krowe-rail { background: var(--primary-accent); opacity: 0.85; }
 .krowe-card.priority-low    .krowe-rail { background: var(--success); }
+/* Done tasks read as uniformly "shipped": the priority rail goes green
+   regardless of urgency (this override sits after the priority rules above). */
+.krowe-card.status-done     .krowe-rail { background: var(--success); opacity: 1; }
 
 .krowe-card.status-done       { background: color-mix(in srgb, var(--success) 4.5%, white); }
 .krowe-card.approval-pending,
@@ -685,6 +981,17 @@ button:focus-visible {
 .krowe-card:hover .krowe-card-actions { opacity: 1; }
 
 /* ── Engagement filter chips ── */
+/* Board controls: engagement chips (left) + sort dropdown (right). */
+.krowe-board-controls {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.krowe-board-controls .krowe-filter-row { margin-bottom: 0; }
+.krowe-sort { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.krowe-sort-label {
+  font-size: 12px; font-weight: 500; color: var(--muted-foreground);
+}
+
 .krowe-filter-row {
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   margin-bottom: 16px;
@@ -1963,6 +2270,166 @@ button.krowe-desc-inline-text:hover {
 .krowe-changes-hint {
   font-size: 12px;
   color: color-mix(in srgb, var(--warning) 60%, var(--muted-foreground));
+}
+
+/* ── Regenerate section (task-regenerate.tsx) ─────────────────────────
+   Rewrite a task + reconcile its subtasks from a change note, previewed
+   before it's applied. Ember/sparkles motif; tokens only. */
+.krowe-task-regen { display: flex; flex-direction: column; gap: 10px; }
+.krowe-regen-hint {
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.krowe-regen-trigger {
+  align-self: flex-start;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 13px; border-radius: var(--radius-full);
+  background: var(--primary-soft); color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  font-size: 12.5px; font-weight: 550; cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-regen-trigger:hover {
+  background: color-mix(in srgb, var(--primary) 18%, white);
+  transform: translateY(-1px);
+}
+.krowe-regen-trigger:active { transform: translateY(0) scale(0.98); }
+
+.krowe-regen-label {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--muted-foreground);
+}
+.krowe-regen-textarea {
+  width: 100%; resize: vertical; min-height: 68px;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: white; color: var(--foreground);
+  font-family: inherit; font-size: 13.5px; line-height: 1.55;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-regen-textarea::placeholder { color: var(--faint-foreground); }
+.krowe-regen-textarea:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.krowe-regen-textarea:disabled { opacity: 0.6; }
+.krowe-regen-actions { display: flex; align-items: center; gap: 8px; }
+
+.krowe-regen-trigger:focus-visible,
+.krowe-task-regen .krowe-btn-pill:focus-visible,
+.krowe-task-regen .krowe-mini-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+/* Preview card */
+.krowe-regen-preview {
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 14px 16px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  animation: krowe-regen-in var(--duration-normal) var(--ease-out-smooth);
+}
+@keyframes krowe-regen-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.krowe-regen-field { display: flex; flex-direction: column; gap: 4px; }
+.krowe-regen-field .cap {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--muted-foreground);
+}
+.krowe-regen-field .ttl {
+  font-family: var(--font-serif);
+  font-size: 17px; line-height: 1.25; color: var(--foreground);
+  text-wrap: pretty;
+}
+.krowe-regen-field .desc {
+  font-size: 13.5px; line-height: 1.6; color: var(--foreground);
+  white-space: pre-wrap;
+}
+.krowe-regen-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.krowe-regen-chip {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: var(--radius-full);
+  font-size: 11px; font-weight: 550; text-transform: capitalize;
+  background: white; border: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+.krowe-regen-chip.prio-urgent { background: var(--danger-soft);  color: var(--danger);  border-color: transparent; }
+.krowe-regen-chip.prio-high   { background: var(--warning-soft); color: var(--warning); border-color: transparent; }
+.krowe-regen-chip.prio-medium { background: var(--primary-soft); color: var(--primary); border-color: transparent; }
+.krowe-regen-chip.prio-low    { background: var(--success-soft); color: var(--success); border-color: transparent; }
+
+/* Subtask diff */
+.krowe-regen-subs {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-top: 4px; border-top: 1px solid var(--border);
+}
+.krowe-regen-sub {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 4px; font-size: 13px; color: var(--foreground);
+}
+.krowe-regen-sub svg { flex-shrink: 0; }
+.krowe-regen-sub .t {
+  flex: 1; min-width: 0; line-height: 1.4;
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.krowe-regen-sub .tag {
+  flex-shrink: 0; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--faint-foreground);
+}
+.krowe-regen-sub.keep .dot {
+  width: 5px; height: 5px; border-radius: var(--radius-full);
+  background: var(--border-strong); flex-shrink: 0; margin: 0 5px;
+}
+.krowe-regen-sub.keep { color: var(--muted-foreground); }
+.krowe-regen-sub.add { color: var(--success); }
+.krowe-regen-sub.add .tag { color: var(--success); }
+.krowe-regen-sub.rename svg { color: var(--primary); }
+.krowe-regen-sub.rename .old {
+  color: var(--faint-foreground);
+  text-decoration: line-through; text-decoration-thickness: 1px;
+}
+.krowe-regen-sub.rename .tag { color: var(--primary); }
+.krowe-regen-sub.remove { color: var(--danger); }
+.krowe-regen-sub.remove .t { text-decoration: line-through; text-decoration-thickness: 1px; }
+.krowe-regen-sub.remove .tag { color: var(--danger); }
+.krowe-regen-sub.preserved { color: var(--muted-foreground); }
+.krowe-regen-sub.preserved svg { color: var(--faint-foreground); }
+
+.krowe-regen-assumptions {
+  margin: 0; padding: 10px 0 0; list-style: none;
+  display: flex; flex-direction: column; gap: 5px;
+  border-top: 1px solid var(--border);
+}
+.krowe-regen-assumptions li {
+  position: relative; padding-left: 15px;
+  font-size: 12px; line-height: 1.5; color: var(--muted-foreground);
+}
+.krowe-regen-assumptions li::before {
+  content: ""; position: absolute; left: 3px; top: 8px;
+  width: 4px; height: 4px; border-radius: var(--radius-full);
+  background: var(--primary); opacity: 0.6;
+}
+
+.krowe-regen-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.krowe-regen-foot .right { display: flex; align-items: center; gap: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .krowe-regen-preview { animation: none; }
+  .krowe-regen-trigger,
+  .krowe-regen-trigger:hover,
+  .krowe-regen-trigger:active { transform: none; }
 }
 
 /* Linked commits list (Deliverable section) */

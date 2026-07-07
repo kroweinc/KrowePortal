@@ -1,19 +1,28 @@
 "use client";
 
-import { useState, useTransition, useOptimistic } from "react";
+import { useEffect, useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CheckCircle2, ChevronUp, Plus } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
 import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
+import { GrSelect } from "@/components/granola/gr-select";
 import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
-import { isAwaitingApproval, sortWithApprovalPin } from "@/lib/utils";
-import type { Task, Engagement, TaskStatus } from "@/lib/types";
+import {
+  isAwaitingApproval,
+  sortWithApprovalPin,
+  sortTasksByKey,
+  TASK_SORT_OPTIONS,
+  type TaskSortKey,
+} from "@/lib/utils";
+import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
+import type { Task, Engagement, TaskStatus, StagingGroup } from "@/lib/types";
 
 const sortTasks = sortWithApprovalPin<Task>;
 
 const DONE_PREVIEW_COUNT = 3;
+const SORT_STORAGE_KEY = "krowe:board-sort";
 
 const COLUMNS: { status: TaskStatus; label: string }[] = [
   { status: "backlog",     label: "Backlog" },
@@ -31,9 +40,17 @@ interface TaskBoardProps {
   tasks: Task[];
   engagements: Engagement[];
   currentUserId: string;
+  branchesByEngagement?: Record<string, PreloadedBranches>;
+  stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
 }
 
-export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps) {
+export function TaskBoard({
+  tasks,
+  engagements,
+  currentUserId,
+  branchesByEngagement,
+  stagingGroupsByEngagement,
+}: TaskBoardProps) {
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const requestDone = useRequestDone();
   const router = useRouter();
@@ -59,6 +76,19 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
 
   const selectedTask = optimisticTasks.find((t) => t.id === selectedId) ?? null;
 
+  // Sort is a personal view preference, so it lives in client state (persisted to
+  // localStorage) rather than the URL — reordering is instant instead of paying a
+  // server round-trip for a query-param change on this Server Component route.
+  const [sortKey, setSortKey] = useState<TaskSortKey>("default");
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(SORT_STORAGE_KEY) as TaskSortKey | null;
+      if (stored && TASK_SORT_OPTIONS.some((o) => o.value === stored)) setSortKey(stored);
+    } catch {
+      /* storage disabled — keep the default */
+    }
+  }, []);
+
   // null = All, "personal" = tasks with no engagement, otherwise an engagement id
   const engagementFilter = searchParams.get("engagement");
   const hasPersonalTasks = tasks.some((t) => t.engagement_id === null);
@@ -80,6 +110,15 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set("engagement", value); else params.delete("engagement");
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  function setSort(value: TaskSortKey) {
+    setSortKey(value);
+    try {
+      localStorage.setItem(SORT_STORAGE_KEY, value);
+    } catch {
+      /* ignore */
+    }
   }
 
   function handleColumnDrop(e: React.DragEvent, status: TaskStatus) {
@@ -170,7 +209,8 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
 
   return (
     <>
-      {showFilters && (
+      <div className="krowe-board-controls">
+        {showFilters ? (
         <div className="krowe-filter-row">
           <button
             type="button"
@@ -201,7 +241,17 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
             </button>
           )}
         </div>
-      )}
+        ) : <span />}
+        <label className="krowe-sort">
+          <span className="krowe-sort-label">Sort</span>
+          <GrSelect
+            value={sortKey}
+            onChange={(v) => setSort(v as TaskSortKey)}
+            options={TASK_SORT_OPTIONS}
+            ariaLabel="Sort tasks"
+          />
+        </label>
+      </div>
       {visibleTasks.length === 0 ? (
         <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
           {optimisticTasks.length === 0
@@ -211,7 +261,7 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
       ) : (
       <div className="krowe-board">
         {COLUMNS.map(({ status, label }) => {
-          const columnTasks = sortTasks(visibleTasks.filter((t) => t.status === status));
+          const columnTasks = sortTasksByKey(visibleTasks.filter((t) => t.status === status), sortKey);
           // Done stays capped at a top-3 preview unless expanded.
           const collapseDone =
             status === "done" && !showAllDone && columnTasks.length > DONE_PREVIEW_COUNT;
@@ -299,6 +349,8 @@ export function TaskBoard({ tasks, engagements, currentUserId }: TaskBoardProps)
         currentUserId={currentUserId}
         engagementTitle={selectedTask ? engagementMap.get(selectedTask.engagement_id) : undefined}
         onOpenChange={(open) => !open && syncSelected(null)}
+        branchesByEngagement={branchesByEngagement}
+        stagingGroupsByEngagement={stagingGroupsByEngagement}
       />
     </>
   );

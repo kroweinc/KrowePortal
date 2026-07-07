@@ -16,6 +16,13 @@ import { uploadAttachment } from "@/lib/actions/attachments";
 import { markTaskDone } from "@/lib/actions/tasks";
 import { linkTaskCommit } from "@/lib/actions/task-commits";
 import {
+  getEngagementBranchesCached,
+  refreshEngagementBranches,
+  type EngagementBranch,
+} from "@/lib/actions/get-engagement-branches";
+import { BranchChipPicker } from "@/components/branch-chip-picker";
+import { isDefaultBranch } from "@/lib/tasks/staging-grouping";
+import {
   MAX_ATTACHMENT_SIZE,
   ALLOWED_ATTACHMENT_EXTENSIONS,
   ATTACHMENT_ACCEPT,
@@ -46,22 +53,95 @@ export function DoneDeliverableDialog({
   onSaved,
 }: DoneDeliverableDialogProps) {
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
-  const [pushedToMain, setPushedToMain] = useState(false);
   const [note, setNote] = useState("");
   const [pickedCommits, setPickedCommits] = useState<PickedCommit[]>([]);
   const [showNoteFallback, setShowNoteFallback] = useState(false);
+  // Branch is null = "No branch". Selecting the repo's default branch counts as
+  // "pushed to main" — see pushedToMain below.
+  const [branch, setBranch] = useState<string | null>(null);
+  const [defaultBranch, setDefaultBranch] = useState<string | null>(null);
+  const [branches, setBranches] = useState<EngagementBranch[]>([]);
+  const [branchState, setBranchState] =
+    useState<"idle" | "loading" | "ready" | "no_repo">("idle");
+  // For no-repo tasks (personal / unlinked) there's no branch to imply "pushed
+  // to main", so keep an explicit toggle for that case.
+  const [noRepoPushed, setNoRepoPushed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const branchIsDefault = isDefaultBranch(branch, defaultBranch);
+  const pushedToMain =
+    branchState === "no_repo" ? noRepoPushed : branchIsDefault;
 
   useEffect(() => {
     if (open) {
       setStagedFiles([]);
-      setPushedToMain(false);
       setNote("");
       setPickedCommits([]);
       setShowNoteFallback(false);
+      setBranch(null);
+      setDefaultBranch(null);
+      setBranches([]);
+      setBranchState("idle");
+      setNoRepoPushed(false);
+      setRefreshing(false);
     }
   }, [open]);
+
+  // Load the engagement repo's branches (from the persisted cache, so it paints
+  // instantly) so the deliverable can be filed under the branch it shipped on —
+  // the repo default is pre-selected, which counts as "pushed to main". Degrades
+  // to a hidden picker when the task has no linked repo.
+  useEffect(() => {
+    if (!open || !task) return;
+    let cancelled = false;
+    setBranchState("loading");
+    getEngagementBranchesCached(task.id)
+      .then((res) => {
+        if (cancelled) return;
+        if (!res.hasRepo || res.branches.length === 0) {
+          setBranchState("no_repo");
+          return;
+        }
+        setBranches(res.branches);
+        setDefaultBranch(res.defaultBranch);
+        // Default to "main" so the common case is one click away.
+        setBranch(res.defaultBranch);
+        setBranchState("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setBranchState("no_repo");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, task]);
+
+  function selectBranch(next: string | null, pushed: boolean) {
+    setBranch(next);
+    // Leaving the default branch clears the pushed-to-main extras.
+    if (!pushed) {
+      setPickedCommits([]);
+      setShowNoteFallback(false);
+    }
+  }
+
+  async function handleRefreshBranches() {
+    if (!task) return;
+    setRefreshing(true);
+    try {
+      const res = await refreshEngagementBranches(task.id);
+      if (res.hasRepo && res.branches.length > 0) {
+        setBranches(res.branches);
+        setDefaultBranch(res.defaultBranch);
+      }
+    } catch {
+      // keep the current list on failure
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -109,6 +189,7 @@ export function DoneDeliverableDialog({
       const result = await markTaskDone(task.id, {
         pushed_to_main: pushedToMain || pickedCommits.length > 0,
         completion_note: note.trim() || null,
+        branch_name: branch,
       });
 
       if ("error" in result) {
@@ -150,6 +231,7 @@ export function DoneDeliverableDialog({
       const result = await markTaskDone(task.id, {
         pushed_to_main: false,
         completion_note: null,
+        branch_name: branch,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -243,25 +325,62 @@ export function DoneDeliverableDialog({
           {/* Pushed to main */}
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Deliverable</p>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={pushedToMain}
-                onChange={(e) => {
-                  setPushedToMain(e.target.checked);
-                  if (!e.target.checked) {
+
+            {/* Branch: one-click chips. The repo default (main) is pre-selected
+                and counts as "pushed to main"; other branches stage for the next
+                push. Falls back to a Shipped/Not-yet toggle when there's no repo. */}
+            {branchState === "loading" && (
+              <p className="text-xs text-neutral-400">Loading branches…</p>
+            )}
+            {branchState === "ready" && (
+              <div className="space-y-1">
+                <p className="flex items-center gap-1.5 text-xs text-neutral-600">
+                  <GitBranch className="h-3.5 w-3.5" />
+                  Branch
+                </p>
+                <BranchChipPicker
+                  branches={branches}
+                  defaultBranch={defaultBranch}
+                  value={branch}
+                  onChange={selectBranch}
+                  disabled={isPending}
+                  onRefresh={handleRefreshBranches}
+                  refreshing={refreshing}
+                />
+              </div>
+            )}
+
+            {branchState === "no_repo" && (
+              <div
+                className="krowe-branch-chips"
+                role="group"
+                aria-label="Delivery status"
+              >
+                <button
+                  type="button"
+                  className={`krowe-branch-chip is-default${noRepoPushed ? " active" : ""}`}
+                  aria-pressed={noRepoPushed}
+                  disabled={isPending}
+                  onClick={() => setNoRepoPushed(true)}
+                >
+                  <GitBranch className="h-3.5 w-3.5" />
+                  Shipped
+                </button>
+                <button
+                  type="button"
+                  className={`krowe-branch-chip is-none${!noRepoPushed ? " active" : ""}`}
+                  aria-pressed={!noRepoPushed}
+                  disabled={isPending}
+                  onClick={() => {
+                    setNoRepoPushed(false);
                     setPickedCommits([]);
                     setShowNoteFallback(false);
-                  }
-                }}
-                disabled={isPending}
-                className="h-4 w-4 rounded border-neutral-300"
-              />
-              <span className="flex items-center gap-1.5 text-sm text-neutral-700">
-                <GitBranch className="h-3.5 w-3.5" />
-                Pushed to main
-              </span>
-            </label>
+                  }}
+                >
+                  Not yet
+                </button>
+              </div>
+            )}
 
             {pushedToMain && task && (
               <>

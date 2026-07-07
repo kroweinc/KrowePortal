@@ -86,6 +86,34 @@ export const TaskOnlyResult = z.object({
   item: TaskDraft,
 });
 
+// ── Task regeneration ────────────────────────────────────────────────────────
+// Revising an EXISTING task (+ its subtasks) from a builder's "what changed"
+// note, driven from the task-detail sidebar. The model returns the full revised
+// task plus a reconciled subtask plan: each entry references an existing subtask
+// by a short label ("S1"…) to keep/rename it, or has a null/absent ref to add a
+// new one. Existing labels the model omits are dropped (completed ones are
+// preserved server-side — see lib/tasks/reconcile-subtask-plan.ts).
+export const SubtaskPlanItem = z.object({
+  // Label ("S1"…) of an existing subtask to keep or rename. null/absent = a new
+  // subtask. Strict mode forces the key into `required` as nullable; the model
+  // emits null for new items and stripNullsDeep drops it, so `.nullish()` (not
+  // just `.nullable()`) is required to accept the resulting absence.
+  ref: z.string().max(20).nullish(),
+  title: z.string().min(1).max(300),
+});
+
+export const RegenerateTaskResult = z.object({
+  kind: z.literal("task"),
+  // The revised task itself. Reuses TaskDraft minus followUp — regeneration
+  // never asks a follow-up question — while keeping assumptions for the preview.
+  task: TaskDraft.omit({ followUp: true }),
+  // Final ordered subtask list. Soft-capped (strict mode strips maxItems) rather
+  // than failing the whole regeneration. Empty when the task had no subtasks.
+  subtasks: z
+    .preprocess((v) => (Array.isArray(v) ? v.slice(0, 30) : v), z.array(SubtaskPlanItem).max(30))
+    .default([]),
+});
+
 // A cross-person dependency on an extracted task: something ANOTHER participant
 // must deliver before this task can proceed ("Rahul sends the call sheet
 // template"). Another person sending a file/template is THEIR action item plus
@@ -542,6 +570,8 @@ export type TaskDraftDependency = z.infer<typeof TaskDraftDependency>;
 export type Question = z.infer<typeof Question>;
 export type TaskDraft = z.infer<typeof TaskDraft>;
 export type TaskOnlyResult = z.infer<typeof TaskOnlyResult>;
+export type SubtaskPlanItem = z.infer<typeof SubtaskPlanItem>;
+export type RegenerateTaskResult = z.infer<typeof RegenerateTaskResult>;
 export type ExtractedTaskDraft = z.infer<typeof ExtractedTaskDraft>;
 export type ExtractTasksResult = z.infer<typeof ExtractTasksResult>;
 export type SubtaskDraft = z.infer<typeof SubtaskDraft>;

@@ -39,7 +39,7 @@ export default async function OperatorDashboard() {
   const { data } = await supabase
     .from("tasks")
     .select(
-      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), task_subtasks(id, title, completed)"
+      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), task_subtasks(id, title, completed), staging_group:staging_groups(name)"
     )
     .or(filter)
     .order("created_at", { ascending: false });
