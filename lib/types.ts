@@ -139,6 +139,17 @@ export interface Task {
   approval_sent_at: string | null;
   approval_approved_at: string | null;
   milestone_id: string | null;
+  // The feature branch a done task's work lives on (migration 0069). Picked in
+  // the done dialog from the engagement repo's live branch list; nullable —
+  // personal tasks and pre-0069 done tasks read as "no branch". Powers the
+  // branch grouping on /b/staging.
+  branch_name: string | null;
+  // The staging group a done task is filed under (migration 0071) — a
+  // builder-created, per-engagement bucket independent of branch_name. Set
+  // from the detail sheet; nullable. staging_group is the embedded {name},
+  // joined so the read-only pill can render without the groups list.
+  staging_group_id: string | null;
+  staging_group?: { name: string } | null;
   engagement?: Engagement;
   // The person who submitted the task, joined on created_by. Surfaced in place of
   // the old operator/builder source badge. Absent unless the query selects it.
@@ -153,6 +164,17 @@ export interface Task {
   // selects it (the builder board does). At most one entry — newest-first,
   // limited to 1 at the query. Read via getActiveChangeRequest in lib/utils.
   change_requests?: TaskChangeRequest[];
+}
+
+// A builder-created staging group (migration 0071). Scoped to one engagement;
+// tasks are assigned to at most one. Managed on /b/staging and assigned from
+// the task detail sheet, separately from the git branch.
+export interface StagingGroup {
+  id: string;
+  engagement_id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
 }
 
 // A task.changes_requested audit entry projected for builder-facing UI.

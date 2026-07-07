@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import Link from "next/link";
+import { GitBranch } from "lucide-react";
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
@@ -9,6 +11,8 @@ import { CreateInvitationDialog } from "@/components/create-invitation-dialog";
 import { ImportFromGranolaDialog } from "@/components/granola/import-from-granola-dialog";
 import { getMyEngagements, getMyPendingInvites } from "@/lib/actions/invitations";
 import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-avatars";
+import { getBranchesByEngagement } from "@/lib/actions/get-engagement-branches";
+import { getStagingGroupsByEngagement } from "@/lib/actions/staging-groups";
 import type { Task } from "@/lib/types";
 
 export const metadata = { title: "Tasks" };
@@ -49,7 +53,7 @@ export default async function BuilderDashboard({
   const { data } = await supabase
     .from("tasks")
     .select(
-      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), change_requests:task_audit_log(metadata, created_at, actor:profiles!actor_id(display_name))"
+      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), staging_group:staging_groups(name), change_requests:task_audit_log(metadata, created_at, actor:profiles!actor_id(display_name))"
     )
     .or(filter)
     .eq("change_requests.action", "task.changes_requested")
@@ -60,6 +64,13 @@ export default async function BuilderDashboard({
   const rows = (data ?? []) as Task[];
   const avatars = await getSubmitterAvatarMap(rows.map((t) => t.created_by));
   const tasks = attachCreatorAvatars(rows, avatars);
+
+  // Preload the cached repo branches + staging groups per engagement so the
+  // task detail sheet's deliverable chips paint with no fetch.
+  const [branchesByEngagement, stagingGroupsByEngagement] = await Promise.all([
+    getBranchesByEngagement(engagementList),
+    getStagingGroupsByEngagement(engagementIds),
+  ]);
   const firstEngagement = engagementList[0];
 
   // Single-engagement first-run: surface the invite affordance right on the board.
@@ -83,6 +94,10 @@ export default async function BuilderDashboard({
             </div>
           </div>
           <div className="krowe-board-actions">
+            <Link href="/b/staging" className="krowe-pill-ghost">
+              <GitBranch width={15} height={15} strokeWidth={2} />
+              Staging
+            </Link>
             {firstEngagement && (
               <ImportFromGranolaDialog
                 target={{
@@ -105,7 +120,13 @@ export default async function BuilderDashboard({
         </div>
         <div data-tour="task-board">
           <Suspense>
-            <TaskBoard tasks={tasks} engagements={engagementList} currentUserId={profile.id} />
+            <TaskBoard
+              tasks={tasks}
+              engagements={engagementList}
+              currentUserId={profile.id}
+              branchesByEngagement={branchesByEngagement}
+              stagingGroupsByEngagement={stagingGroupsByEngagement}
+            />
           </Suspense>
         </div>
       </div>

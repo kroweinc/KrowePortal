@@ -48,6 +48,49 @@ export function sortWithApprovalPin<
   });
 }
 
+/** Board sort options surfaced in the sort dropdown. "default" keeps the
+ *  approval-pin + priority + manual-order rule above; the rest are pure sorts. */
+export type TaskSortKey = "default" | "updated" | "completed" | "name" | "created";
+
+export const TASK_SORT_OPTIONS: { value: TaskSortKey; label: string }[] = [
+  { value: "default", label: "Priority" },
+  { value: "updated", label: "Recently updated" },
+  { value: "completed", label: "Recently completed" },
+  { value: "name", label: "Name (A–Z)" },
+  { value: "created", label: "Newest created" },
+];
+
+type SortableTask = ApprovalFields & {
+  priority: TaskPriority;
+  sort_order?: number | null;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+/** Board display ordering. "default" delegates to the pinned priority sort;
+ *  the explicit keys are pure and intentionally ignore the approval pin. */
+export function sortTasksByKey<T extends SortableTask>(items: T[], key: TaskSortKey): T[] {
+  if (key === "default") return sortWithApprovalPin(items);
+  const desc = (a?: string | null, b?: string | null) =>
+    new Date(b ?? 0).getTime() - new Date(a ?? 0).getTime();
+  return [...items].sort((a, b) => {
+    switch (key) {
+      case "updated":
+        return desc(a.updated_at, b.updated_at);
+      case "completed":
+        return desc(a.completed_at, b.completed_at);
+      case "created":
+        return desc(a.created_at, b.created_at);
+      case "name":
+        return a.title.localeCompare(b.title, undefined, { sensitivity: "base" });
+      default:
+        return 0;
+    }
+  });
+}
+
 export const PRIORITY_LABELS: Record<TaskPriority, string> = {
   urgent: "Urgent",
   low: "Low",

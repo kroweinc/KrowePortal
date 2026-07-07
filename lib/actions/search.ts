@@ -159,10 +159,14 @@ async function builderIndex(supabase: SupabaseClient, ownerId: string): Promise<
   }
 
   // Tasks across the builder's engagements (mirrors app/b/page.tsx filter), plus
-  // the per-project documents and transcripts — all in parallel.
+  // the per-project documents and transcripts — all in parallel. Personal
+  // (no-engagement) tasks are scoped to their creator: the dev admin client
+  // bypasses RLS, so a bare engagement_id.is.null would surface every user's
+  // personal tasks.
+  const personalFilter = `and(engagement_id.is.null,created_by.eq.${ownerId})`;
   const taskFilter = engagementIds.length
-    ? `engagement_id.in.(${engagementIds.join(",")}),engagement_id.is.null`
-    : "engagement_id.is.null";
+    ? `engagement_id.in.(${engagementIds.join(",")}),${personalFilter}`
+    : personalFilter;
 
   const docsPromise = projectIds.length
     ? Promise.all([
@@ -258,9 +262,13 @@ async function operatorIndex(supabase: SupabaseClient, operatorId: string): Prom
     });
   }
 
+  // Personal (no-engagement) tasks are scoped to their creator — the dev admin
+  // client bypasses RLS, so a bare engagement_id.is.null would leak every user's
+  // personal tasks into this operator's search index.
+  const personalFilter = `and(engagement_id.is.null,created_by.eq.${operatorId})`;
   const taskFilter = engagementIds.length
-    ? `engagement_id.in.(${engagementIds.join(",")}),engagement_id.is.null`
-    : "engagement_id.is.null";
+    ? `engagement_id.in.(${engagementIds.join(",")}),${personalFilter}`
+    : personalFilter;
   const { data: taskData } = await supabase
     .from("tasks")
     .select("id, title, description, status")

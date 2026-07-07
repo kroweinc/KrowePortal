@@ -154,6 +154,83 @@ export function buildTaskUserPrompt(
   return lines.join("\n");
 }
 
+export function buildTaskRegenerateSystemPrompt(repoContext: RepoContext | null): string {
+  const labelList = TASK_TAGS.map((t) => `    • "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
+  const taskShape = `{
+  "title": "imperative verb phrase, ≤80 chars, summarizes the deliverable",
+  "description": "plain-language overview of WHAT is being built (see rules)",
+  "priority": "one of: low | medium | high | urgent",
+  "type": "one of: feature | bug | change",
+  "tags": ["exactly one area label from the list in the rules"],
+  "assumptions": ["0–6 short sentences, each one judgment call you made interpreting the change"]
+}`;
+
+  const instructions = `You are an expert engineering task author REVISING an existing task and its subtasks to reflect a change the builder just described. You are given the CURRENT task (title, description, priority, type, area tag) and its CURRENT subtasks (each labeled S1, S2, …), plus a short "change requested" note. Apply that change and return the full revised task and the reconciled subtask list.
+
+Core rules:
+- Apply the change faithfully and MINIMALLY. Rewrite only what the change touches; keep everything the change does not mention as close to the current wording as possible. Do NOT re-scope, re-prioritize, or re-title beyond what the change implies.
+- If the change narrows scope (e.g. "only 3 of the screens"), tighten the description AND drop the subtasks that no longer apply. If it broadens scope, add what's now needed.
+
+Rules for the revised task:
+- title: imperative verb phrase, ≤80 chars, reflecting the new scope.
+- description: a thorough plain-language overview of WHAT is being built and what it does — the user-facing behavior, the flow end to end, and relevant edge cases. Write for a non-technical product owner: NO file paths, library names, function names, or code-level detail. At least 20 characters.
+- priority: keep the current priority unless the change clearly implies a different urgency.
+- type: classify Linear-style — "feature" (adds a new user-facing capability), "bug" (fixes broken behavior), or "change" (modifies/improves/removes something that already works; use as the DEFAULT).
+- tags: exactly ONE area label as a one-element array — the single best fit for the PRIMARY area the work touches. NEVER invent a label, NEVER return more than one, and NEVER use a label outside this list:
+${labelList}
+- assumptions: list only genuine judgment calls you made interpreting the change (one short plain-language sentence each, ≤300 chars, max 6). Return [] when the change was unambiguous.${
+    repoContext ? `\n- ${FORBIDDEN_ASSUMPTION_TOPICS}` : ""
+  }
+
+Rules for the subtasks — reconcile against the CURRENT list, do not rebuild it from scratch:
+- Return the FINAL ordered subtask list as an array of {ref, title}.
+- KEEP an existing subtask unchanged → {"ref": "S1", "title": "<its exact current title>"}.
+- RENAME / rewrite an existing subtask → {"ref": "S1", "title": "<new title>"}.
+- ADD a new subtask → {"ref": null, "title": "<new title>"}.
+- DROP a subtask that no longer applies → simply OMIT its label from the list.
+- Order the list the way the work would actually be done.
+- Never DROP a subtask marked [done] unless the change makes it clearly obsolete — completed work should survive the revision.
+- If the current task has NO subtasks, return an empty subtasks array — do not invent a checklist.
+
+Output format — respond ONLY with valid JSON in this exact shape:
+{"kind":"task","task":${taskShape},"subtasks":[{"ref":"S1","title":"..."},{"ref":null,"title":"..."}]}
+No markdown, no explanation, no wrapper — raw JSON only.`;
+
+  return `${instructions}\n\n${formatRepoContext(repoContext, { withTools: repoContext !== null })}`;
+}
+
+export function buildTaskRegenerateUserPrompt(input: {
+  current: {
+    title: string;
+    description: string | null;
+    priority: string;
+    type: string | null;
+    tags: string[];
+  };
+  subtasks: { label: string; title: string; completed: boolean }[];
+  changeNote: string;
+}): string {
+  const { current, subtasks, changeNote } = input;
+  return [
+    "## Current task",
+    `Title: ${current.title}`,
+    `Description: ${current.description?.trim() ? current.description.trim() : "(none)"}`,
+    `Priority: ${current.priority}`,
+    `Type: ${current.type ?? "(unset)"}`,
+    `Area tag: ${current.tags[0] ?? "(none)"}`,
+    "",
+    "## Current subtasks",
+    subtasks.length > 0
+      ? subtasks.map((s) => `${s.label}: ${s.title}${s.completed ? " [done]" : ""}`).join("\n")
+      : "(none)",
+    "",
+    "## Change requested",
+    changeNote.trim(),
+    "",
+    "Apply the change and respond with JSON only.",
+  ].join("\n");
+}
+
 export function buildSubtasksSystemPrompt(repoContext: RepoContext | null): string {
   const instructions = `You are an expert engineer breaking a single task down into the concrete subtasks needed to complete it. Given the task title and description${
     repoContext ? " plus its linked GitHub repo" : ""

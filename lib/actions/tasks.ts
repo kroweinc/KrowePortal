@@ -8,9 +8,9 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { classifyAndSaveTask } from "@/lib/actions/classify-task";
-import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { writeAuditEntry, writeAuditEntries, type AuditEntryInput } from "@/lib/actions/audit-log";
 import { isTaskMember } from "@/lib/actions/task-access";
-import { TASK_TAGS, type TaskStatus } from "@/lib/types";
+import { TASK_TAGS, type TaskStatus, type TaskTag } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -201,11 +201,19 @@ const markDoneSchema = z.object({
   taskId: z.string().uuid(),
   pushed_to_main: z.boolean().default(false),
   completion_note: z.string().trim().max(2000).nullish(),
+  // The feature branch this work lives on — used to group done tasks on
+  // /b/staging. Empty string coerces to null so "no branch picked" is stored
+  // consistently.
+  branch_name: z.string().trim().max(200).nullish(),
 });
 
 export async function markTaskDone(
   taskId: string,
-  payload: { pushed_to_main: boolean; completion_note: string | null }
+  payload: {
+    pushed_to_main: boolean;
+    completion_note: string | null;
+    branch_name?: string | null;
+  }
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -214,6 +222,8 @@ export async function markTaskDone(
   if (!parsed.success) return { error: "Invalid input" };
   if (!(await isTaskMember(taskId, profile.id)))
     return { error: "You don't have access to this task." };
+
+  const branchName = parsed.data.branch_name?.trim() || null;
 
   const supabase = await getClient(profile.id);
 
@@ -229,6 +239,7 @@ export async function markTaskDone(
       status: "done",
       pushed_to_main: parsed.data.pushed_to_main,
       completion_note: parsed.data.completion_note ?? null,
+      branch_name: branchName,
       completed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
@@ -246,6 +257,15 @@ export async function markTaskDone(
       newValue: "done",
     });
   }
+  if (branchName) {
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.branch_set",
+      field: "branch_name",
+      newValue: branchName,
+    });
+  }
   await writeAuditEntry({
     taskId,
     actorId: profile.id,
@@ -258,6 +278,73 @@ export async function markTaskDone(
 
   revalidatePath("/b");
   revalidatePath("/o");
+  return { success: true };
+}
+
+const setBranchSchema = z.object({
+  taskId: z.string().uuid(),
+  branch_name: z.string().trim().max(200).nullish(),
+  pushed_to_main: z.boolean().optional(),
+});
+
+/** Reassign (or clear) the feature branch a done task is grouped under on the
+ *  staging view. Empty/whitespace clears it back to "no branch". When
+ *  pushedToMain is passed (the branch picker sets it — true iff the chosen
+ *  branch is the repo default), it's updated in the same write so the staged
+ *  vs shipped split stays correct after an edit. */
+export async function setTaskBranch(
+  taskId: string,
+  branchName: string | null,
+  pushedToMain?: boolean
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsed = setBranchSchema.safeParse({
+    taskId,
+    branch_name: branchName,
+    pushed_to_main: pushedToMain,
+  });
+  if (!parsed.success) return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
+
+  const next = parsed.data.branch_name?.trim() || null;
+
+  const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("branch_name")
+    .eq("id", taskId)
+    .single();
+
+  const update: {
+    branch_name: string | null;
+    updated_at: string;
+    pushed_to_main?: boolean;
+  } = { branch_name: next, updated_at: new Date().toISOString() };
+  if (parsed.data.pushed_to_main !== undefined) {
+    update.pushed_to_main = parsed.data.pushed_to_main;
+  }
+
+  const { error } = await supabase.from("tasks").update(update).eq("id", taskId);
+
+  if (error) return { error: error.message };
+
+  if (before && (before.branch_name ?? null) !== next) {
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.branch_changed",
+      field: "branch_name",
+      oldValue: before.branch_name ?? null,
+      newValue: next,
+    });
+  }
+
+  revalidatePath("/b");
+  revalidatePath("/b/staging");
   return { success: true };
 }
 
@@ -469,6 +556,215 @@ export async function reorderTask(taskId: string, sortOrder: number) {
 
   if (error) return { error: error.message };
   revalidatePath("/b");
+  return { success: true };
+}
+
+// ── Apply an AI task regeneration ────────────────────────────────────────────
+// Persists the rewrite the builder approved in the sidebar (see
+// regenerateTask in lib/actions/ai-tasks.ts): the revised task fields plus the
+// reconciled subtask plan, atomically-ish, with an audit trail and a deferred
+// re-estimate. The subtask `final`/`remove` shape mirrors reconcileSubtaskPlan;
+// display-only keys (from/completed/reason) are ignored by the schema.
+const applyRegenSchema = z.object({
+  taskId: z.string().uuid(),
+  changeNote: z.string().trim().max(1000).optional(),
+  task: z.object({
+    title: z.string().min(1).max(300),
+    description: z.string().max(2000),
+    priority: z.enum(["low", "medium", "high", "urgent"]),
+    type: z.enum(["feature", "bug", "change"]),
+    tags: z.array(z.enum(TASK_TAGS)).max(1),
+  }),
+  final: z
+    .array(
+      z.discriminatedUnion("op", [
+        z.object({ op: z.literal("keep"), id: z.string().uuid(), title: z.string().min(1).max(300) }),
+        z.object({ op: z.literal("rename"), id: z.string().uuid(), title: z.string().min(1).max(300) }),
+        z.object({ op: z.literal("add"), title: z.string().min(1).max(300) }),
+        z.object({ op: z.literal("preserved"), id: z.string().uuid(), title: z.string().min(1).max(300) }),
+      ])
+    )
+    .max(40),
+  remove: z.array(z.object({ id: z.string().uuid() })).max(40),
+});
+
+export interface ApplyTaskRegenerationInput {
+  taskId: string;
+  changeNote?: string;
+  task: {
+    title: string;
+    description: string;
+    priority: "low" | "medium" | "high" | "urgent";
+    type: "feature" | "bug" | "change";
+    tags: TaskTag[];
+  };
+  final: { op: "keep" | "rename" | "add" | "preserved"; id?: string; title: string }[];
+  remove: { id: string }[];
+}
+
+export async function applyTaskRegeneration(
+  input: ApplyTaskRegenerationInput
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders can regenerate tasks." };
+
+  const parsed = applyRegenSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid input" };
+  const { taskId, task: fields, final, remove, changeNote } = parsed.data;
+
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
+
+  const supabase = await getClient(profile.id);
+
+  // The task's real subtasks are the source of truth for which ids we may touch,
+  // guarding against a stale or tampered proposal referencing foreign rows.
+  const { data: currentRows } = await supabase
+    .from("task_subtasks")
+    .select("id, title")
+    .eq("task_id", taskId);
+  const currentById = new Map<string, string>(
+    (currentRows ?? []).map((r) => [r.id as string, r.title as string])
+  );
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("title, description, priority, type, tags")
+    .eq("id", taskId)
+    .single();
+
+  // ── Task fields ──
+  const { error: taskErr } = await supabase
+    .from("tasks")
+    .update({
+      title: fields.title,
+      description: fields.description,
+      priority: fields.priority,
+      type: fields.type,
+      tags: fields.tags,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", taskId);
+  if (taskErr) return { error: taskErr.message };
+
+  const audits: AuditEntryInput[] = [];
+
+  // ── Subtasks: deletes → updates (rename + reorder) → inserts ──
+  // Position is the index in `final`, so the approved order is what lands.
+  const removeIds = remove.map((r) => r.id).filter((id) => currentById.has(id));
+  if (removeIds.length > 0) {
+    const { error } = await supabase
+      .from("task_subtasks")
+      .delete()
+      .in("id", removeIds)
+      .eq("task_id", taskId);
+    if (!error) {
+      for (const id of removeIds) {
+        audits.push({
+          taskId,
+          actorId: profile.id,
+          action: "subtask.deleted",
+          metadata: { title: currentById.get(id) ?? null },
+        });
+      }
+    }
+  }
+
+  const inserts: { task_id: string; created_by: string; title: string; position: number }[] = [];
+  const updates: PromiseLike<unknown>[] = [];
+  final.forEach((item, position) => {
+    if (item.op === "add") {
+      inserts.push({ task_id: taskId, created_by: profile.id, title: item.title, position });
+      return;
+    }
+    // keep / rename / preserved reference an existing row; skip anything the
+    // task no longer owns (deleted between preview and apply, or foreign).
+    if (!item.id || !currentById.has(item.id)) return;
+    const oldTitle = currentById.get(item.id)!;
+    const patch: Record<string, unknown> = { position, updated_at: new Date().toISOString() };
+    if (item.op === "rename" && item.title !== oldTitle) {
+      patch.title = item.title;
+      audits.push({
+        taskId,
+        subtaskId: item.id,
+        actorId: profile.id,
+        action: "subtask.renamed",
+        field: "title",
+        oldValue: oldTitle,
+        newValue: item.title,
+      });
+    }
+    updates.push(supabase.from("task_subtasks").update(patch).eq("id", item.id).eq("task_id", taskId));
+  });
+
+  if (updates.length > 0) await Promise.all(updates);
+
+  if (inserts.length > 0) {
+    const { data: created } = await supabase
+      .from("task_subtasks")
+      .insert(inserts)
+      .select("id, title");
+    for (const row of created ?? []) {
+      audits.push({
+        taskId,
+        subtaskId: row.id as string,
+        actorId: profile.id,
+        action: "subtask.created",
+        metadata: { title: row.title as string },
+      });
+    }
+  }
+
+  // ── Audit: the regenerate itself + each changed task field ──
+  audits.push({
+    taskId,
+    actorId: profile.id,
+    action: "task.regenerated",
+    metadata: { changeNote: changeNote ?? null },
+  });
+  if (before) {
+    const fieldEntries: [string, unknown][] = [
+      ["title", fields.title],
+      ["description", fields.description],
+      ["priority", fields.priority],
+      ["type", fields.type],
+      ["tags", fields.tags],
+    ];
+    for (const [field, newValue] of fieldEntries) {
+      const old = (before as Record<string, unknown>)[field];
+      const changed =
+        field === "tags"
+          ? JSON.stringify(old ?? []) !== JSON.stringify(newValue)
+          : old !== newValue;
+      if (changed) {
+        audits.push({
+          taskId,
+          actorId: profile.id,
+          action: "task.field_changed",
+          field,
+          oldValue: old,
+          newValue,
+        });
+      }
+    }
+  }
+  await writeAuditEntries(audits);
+
+  // Re-derive the hour estimate from the revised scope (deferred, same as
+  // create/edit) — regenerating often grows or shrinks the work.
+  after(() =>
+    estimateAndSaveTaskHours({
+      taskId,
+      title: fields.title,
+      description: fields.description,
+      priority: fields.priority,
+      userId: profile.id,
+    })
+  );
+
+  revalidatePath("/b");
+  revalidatePath("/o");
   return { success: true };
 }
 

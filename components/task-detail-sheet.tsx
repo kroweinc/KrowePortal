@@ -12,11 +12,15 @@ import {
   Paperclip,
   RotateCcw,
   Sparkles,
+  WandSparkles,
   X,
 } from "lucide-react";
 import { TaskAuditLog } from "@/components/task-audit-log";
 import { TaskBuildPrompt } from "@/components/task-build-prompt";
 import { TaskCommits } from "@/components/task-commits";
+import { TaskBranchField } from "@/components/task-branch-field";
+import { TaskStagingField } from "@/components/task-staging-field";
+import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 import {
   Sheet,
   SheetClose,
@@ -36,6 +40,7 @@ import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
 import { TaskSubtasks } from "@/components/task-subtasks";
+import { TaskRegenerate } from "@/components/task-regenerate";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
 import { PlainEnglishToggle } from "@/components/plain-english-toggle";
 import { TaskTags } from "@/components/task-type-badge";
@@ -46,7 +51,7 @@ import {
   relativeTime,
   submitterName,
 } from "@/lib/utils";
-import type { Task, Role, TaskStatus } from "@/lib/types";
+import type { Task, Role, TaskStatus, StagingGroup } from "@/lib/types";
 
 const PRIORITY_OPTIONS = [
   { value: "urgent", label: "Urgent" },
@@ -81,6 +86,10 @@ interface TaskDetailSheetProps {
   currentUserId: string;
   engagementTitle?: string;
   onOpenChange: (open: boolean) => void;
+  // Cached repo branches keyed by engagement id, so the deliverable branch
+  // chips paint with no fetch. Staging groups likewise, for the group field.
+  branchesByEngagement?: Record<string, PreloadedBranches>;
+  stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
 }
 
 export function TaskDetailSheet({
@@ -89,6 +98,8 @@ export function TaskDetailSheet({
   currentUserId,
   engagementTitle,
   onOpenChange,
+  branchesByEngagement,
+  stagingGroupsByEngagement,
 }: TaskDetailSheetProps) {
   return (
     <Sheet open={!!task} onOpenChange={onOpenChange}>
@@ -104,6 +115,8 @@ export function TaskDetailSheet({
             currentUserId={currentUserId}
             engagementTitle={engagementTitle}
             onOpenChange={onOpenChange}
+            branchesByEngagement={branchesByEngagement}
+            stagingGroupsByEngagement={stagingGroupsByEngagement}
           />
         )}
       </SheetContent>
@@ -117,6 +130,8 @@ interface TaskDetailBodyProps {
   currentUserId: string;
   engagementTitle?: string;
   onOpenChange: (open: boolean) => void;
+  branchesByEngagement?: Record<string, PreloadedBranches>;
+  stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
 }
 
 function TaskDetailBody({
@@ -125,6 +140,8 @@ function TaskDetailBody({
   currentUserId,
   engagementTitle,
   onOpenChange,
+  branchesByEngagement,
+  stagingGroupsByEngagement,
 }: TaskDetailBodyProps) {
   const router = useRouter();
   const requestDone = useRequestDone();
@@ -393,6 +410,24 @@ function TaskDetailBody({
           </div>
         </section>
 
+        {/* REGENERATE — builder-only: rewrite the task (and reconcile its
+            subtasks) from a change note, with a preview before it's applied */}
+        {role !== "operator" && (
+          <section className="krowe-task-section">
+            <div className="krowe-task-section-h">
+              <span className="label">
+                <WandSparkles className="h-3 w-3" />
+                Regenerate
+              </span>
+            </div>
+            <TaskRegenerate
+              key={`regen-${task.id}`}
+              taskId={task.id}
+              onApplied={() => router.refresh()}
+            />
+          </section>
+        )}
+
         {/* DELIVERABLE (status === done) */}
         {hasDeliverable && (
           <section className="krowe-task-section">
@@ -414,6 +449,28 @@ function TaskDetailBody({
                   <p className="krowe-deliverable-note">{task.completion_note}</p>
                 )}
               </div>
+            )}
+            <TaskBranchField
+              key={`branch-${task.id}`}
+              taskId={task.id}
+              branch={task.branch_name}
+              readOnly={role === "operator"}
+              preloaded={
+                task.engagement_id
+                  ? branchesByEngagement?.[task.engagement_id]
+                  : undefined
+              }
+            />
+            {task.engagement_id && (
+              <TaskStagingField
+                key={`staging-${task.id}`}
+                taskId={task.id}
+                engagementId={task.engagement_id}
+                groupId={task.staging_group_id}
+                groupName={task.staging_group?.name ?? null}
+                readOnly={role === "operator"}
+                groups={stagingGroupsByEngagement?.[task.engagement_id]}
+              />
             )}
             <TaskCommits
               key={`commits-${task.id}`}
