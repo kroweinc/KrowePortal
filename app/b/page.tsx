@@ -76,8 +76,6 @@ export default async function BuilderDashboard({
   // Single-engagement first-run: surface the invite affordance right on the board.
   // Once there are multiple engagements, the Engagements page owns invites.
   const showInvite = engagementList.length <= 1 && !firstEngagement?.operator_id;
-  const operatorName =
-    engagementList.length === 1 ? firstEngagement?.operator?.display_name ?? null : null;
 
   return (
     <main className="krowe-page krowe-page-grid">
@@ -109,11 +107,10 @@ export default async function BuilderDashboard({
                 triggerClassName="krowe-pill-ghost"
               />
             )}
-            {(showInvite || operatorName) && (
+            {showInvite && (
               <CreateInvitationDialog
                 engagementId={firstEngagement?.id}
                 existingToken={firstEngagement ? pendingInvites[firstEngagement.id]?.token : undefined}
-                operatorName={operatorName ?? undefined}
               />
             )}
           </div>
