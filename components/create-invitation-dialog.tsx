@@ -15,11 +15,10 @@ import { createInvitation } from "@/lib/actions/invitations";
 
 interface Props {
   existingToken?: string;
-  operatorName?: string;
   engagementId?: string;
 }
 
-export function CreateInvitationDialog({ existingToken, operatorName, engagementId }: Props) {
+export function CreateInvitationDialog({ existingToken, engagementId }: Props) {
   const [open, setOpen] = useState(false);
   const [token, setToken] = useState<string | null>(existingToken ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -45,15 +44,6 @@ export function CreateInvitationDialog({ existingToken, operatorName, engagement
     navigator.clipboard.writeText(inviteUrl).then(() => {
       toast.success("Link copied to clipboard");
     });
-  }
-
-  if (operatorName) {
-    return (
-      <span className="text-sm text-neutral-500 flex items-center gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-        Connected with {operatorName}
-      </span>
-    );
   }
 
   return (
