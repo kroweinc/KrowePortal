@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Plus,
   X,
@@ -49,6 +49,15 @@ const ACCEPT = [
 
 function getExt(fileName: string) {
   return "." + (fileName.split(".").pop()?.toLowerCase() ?? "bin");
+}
+
+// Clipboard images often arrive unnamed (or as a bare "image.png"); give them a
+// real, allowed filename so the upload path accepts them.
+function namePastedImage(file: File, index: number): File {
+  if (file.name && ALLOWED_EXTENSIONS.has(getExt(file.name))) return file;
+  const subtype = file.type.split("/")[1] ?? "png";
+  const ext = subtype === "jpeg" ? "jpg" : subtype === "svg+xml" ? "svg" : subtype;
+  return new File([file], `pasted-image-${index}.${ext}`, { type: file.type });
 }
 
 interface NewTaskFormProps {
@@ -188,6 +197,18 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     return () => window.removeEventListener(OPEN_NEW_TASK_EVENT, open);
   }, []);
 
+  // Object-URL thumbnails for image attachments (pasted or picked), shown in the
+  // AI view where the helper note normally sits.
+  const imagePreviews = useMemo(
+    () =>
+      files
+        .filter((f) => f.type.startsWith("image/"))
+        .map((file) => ({ file, url: URL.createObjectURL(file) })),
+    [files]
+  );
+  // Revoke a preview set's URLs once it's replaced (files changed) or on unmount.
+  useEffect(() => () => imagePreviews.forEach((p) => URL.revokeObjectURL(p.url)), [imagePreviews]);
+
   function resetForm() {
     setTitle("");
     setDescription("");
@@ -228,6 +249,27 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
 
   function removeFile(index: number) {
     setFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function removeFileByRef(file: File) {
+    setFiles((prev) => prev.filter((f) => f !== file));
+  }
+
+  // Cmd/Ctrl+V of an image anywhere in the AI view attaches it to the task's
+  // context. Text pastes fall through to the textarea's default handling.
+  function handleImagePaste(e: React.ClipboardEvent) {
+    const images = Array.from(e.clipboardData.files).filter((f) =>
+      f.type.startsWith("image/")
+    );
+    if (images.length === 0) return;
+    e.preventDefault();
+    const valid = images.filter((f) => f.size > 0 && f.size <= MAX_SIZE);
+    if (valid.length < images.length) toast.error("That image is over the 25 MB limit.");
+    if (valid.length === 0) return;
+    setFiles((prev) => [
+      ...prev,
+      ...valid.map((f, i) => namePastedImage(f, prev.length + i)),
+    ]);
   }
 
   function applyDraft(draft: TaskDraft) {
@@ -542,7 +584,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
 
   const aiView = (
     <>
-      <div className="krowe-nt-scroll">
+      <div className="krowe-nt-scroll" onPaste={handleImagePaste}>
         <p className="krowe-nt-lede">Describe what you want built — krowe drafts the rest.</p>
         <div className="krowe-nt-inputwrap is-focus">
           <textarea
@@ -558,10 +600,29 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
             placeholder='e.g. "Stripe checkout flow with webhook handling, a success page, and an email receipt."'
           />
         </div>
-        <p className="krowe-nt-note">
-          Don&rsquo;t overthink it. A sentence or two is fine — you can edit the draft before
-          anything is created.
-        </p>
+        {imagePreviews.length > 0 ? (
+          <div className="krowe-nt-pastes">
+            {imagePreviews.map(({ file, url }) => (
+              <div key={url} className="krowe-nt-paste">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="krowe-nt-paste-img" src={url} alt={file.name} />
+                <button
+                  type="button"
+                  className="krowe-nt-paste-rm"
+                  onClick={() => removeFileByRef(file)}
+                  aria-label={`Remove ${file.name}`}
+                >
+                  <X width={13} height={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="krowe-nt-note">
+            Don&rsquo;t overthink it. A sentence or two is fine — you can edit the draft before
+            anything is created.
+          </p>
+        )}
       </div>
       <div className="krowe-nt-foot">
         <button type="button" className="krowe-nt-textbtn" onClick={toggleAi} disabled={isBusy}>

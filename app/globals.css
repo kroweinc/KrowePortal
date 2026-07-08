@@ -458,11 +458,27 @@ button:focus-visible {
 /* Only animate width once mounted, so the persisted state paints instantly. */
 .krowe-sidebar.ready { transition: width var(--duration-normal) var(--ease-out-smooth); }
 .krowe-sidebar.collapsed { width: 64px; }
-.krowe-sidebar.collapsed .krowe-sidebar-brand img,
 .krowe-sidebar.collapsed .krowe-sidebar-word,
 .krowe-sidebar.collapsed .krowe-sidebar-cap,
 .krowe-sidebar.collapsed .krowe-sidebar-label { display: none; }
-.krowe-sidebar.collapsed .krowe-sidebar-brand { justify-content: center; gap: 0; padding: 20px 0 16px; }
+.krowe-sidebar.collapsed .krowe-sidebar-brand {
+  position: relative; justify-content: center; gap: 0; padding: 18px 0 14px;
+}
+/* Collapsed: the Krowe mark fills the brand and doubles as the expand control —
+   hovering or focusing fades the mark out and the expand chevron in. */
+.krowe-sidebar.collapsed .krowe-sidebar-brand img {
+  height: 30px; transition: opacity 150ms var(--ease-out-smooth);
+}
+.krowe-sidebar.collapsed .krowe-sidebar-toggle {
+  position: absolute; inset: 12px; width: auto; height: auto; margin: 0;
+  opacity: 0; border-radius: var(--radius-md);
+  transition: opacity 150ms var(--ease-out-smooth),
+              transform var(--duration-normal) var(--ease-out-smooth);
+}
+.krowe-sidebar.collapsed .krowe-sidebar-brand:hover img,
+.krowe-sidebar.collapsed .krowe-sidebar-brand:focus-within img { opacity: 0; }
+.krowe-sidebar.collapsed .krowe-sidebar-brand:hover .krowe-sidebar-toggle,
+.krowe-sidebar.collapsed .krowe-sidebar-brand:focus-within .krowe-sidebar-toggle { opacity: 1; }
 .krowe-sidebar.collapsed .krowe-sidebar-nav  { padding: 8px 10px 0; }
 .krowe-sidebar.collapsed .krowe-sidebar-link { justify-content: center; padding: 0; gap: 0; }
 .krowe-sidebar.collapsed .krowe-sidebar-ic   { margin: 0; }
@@ -471,6 +487,8 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .krowe-sidebar.ready { transition: none; }
   .krowe-sidebar-toggle { transition: background 150ms var(--ease-out-smooth), color 150ms var(--ease-out-smooth); }
+  .krowe-sidebar.collapsed .krowe-sidebar-brand img,
+  .krowe-sidebar.collapsed .krowe-sidebar-toggle { transition: none; }
 }
 
 /* ── Settings (top-tab sub-route layout) ── */
@@ -4498,6 +4516,28 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-nt-file-rm:hover { color: var(--danger); }
 
+/* ── Pasted image thumbnails (AI view — replaces the helper note) ── */
+.krowe-nt-pastes { display: flex; flex-wrap: wrap; gap: 8px; }
+.krowe-nt-paste {
+  position: relative;
+  width: 68px; height: 68px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+}
+.krowe-nt-paste-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.krowe-nt-paste-rm {
+  position: absolute; top: 4px; right: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  border: none; border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--foreground) 58%, transparent);
+  color: #fff; cursor: pointer;
+  transition: transform 150ms var(--ease-out-smooth);
+}
+.krowe-nt-paste-rm:hover { background: var(--danger); transform: scale(1.08); }
+
 @media (prefers-reduced-motion: reduce) {
   .krowe-nt-sheen,
   .krowe-nt-breathe,
@@ -4506,7 +4546,8 @@ button.krowe-desc-inline-text:hover {
   .krowe-nt-panel-modal,
   .krowe-nt-backdrop,
   .krowe-nt-fab,
-  .krowe-nt-fab-plus { animation: none; transition: none; }
+  .krowe-nt-fab-plus,
+  .krowe-nt-paste-rm { animation: none; transition: none; }
 }
 /* ═══════════ Granola meeting-import modal — Build Board design ═══════════
    Ported from the claude.ai/design project (Build Board.html, .gr-* /
