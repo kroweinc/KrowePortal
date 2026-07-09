@@ -229,21 +229,40 @@ export async function markTaskDone(
 
   const { data: before } = await supabase
     .from("tasks")
-    .select("status")
+    .select("status, approval_sent_at, approval_approved_at")
     .eq("id", taskId)
     .single();
 
-  const { error } = await supabase
-    .from("tasks")
-    .update({
-      status: "done",
-      pushed_to_main: parsed.data.pushed_to_main,
-      completion_note: parsed.data.completion_note ?? null,
-      branch_name: branchName,
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", taskId);
+  const now = new Date().toISOString();
+  const updates: {
+    status: "done";
+    pushed_to_main: boolean;
+    completion_note: string | null;
+    branch_name: string | null;
+    completed_at: string;
+    updated_at: string;
+    approval_approved_at?: string;
+  } = {
+    status: "done",
+    pushed_to_main: parsed.data.pushed_to_main,
+    completion_note: parsed.data.completion_note ?? null,
+    branch_name: branchName,
+    completed_at: now,
+    updated_at: now,
+  };
+
+  // Shipping a task resolves any open approval gate. A task can be sent for
+  // approval and then marked Done before the operator signs off in-app (e.g.
+  // the go-ahead happened on a call), which used to leave it stuck in the
+  // operator's "Ready for your review" queue forever — isAwaitingApproval keys
+  // off approval_sent_at && !approval_approved_at and never looked at status.
+  // Stamp approval_approved_at so a done task never reads as awaiting approval.
+  const resolvingApproval = !!before?.approval_sent_at && !before.approval_approved_at;
+  if (resolvingApproval) {
+    updates.approval_approved_at = now;
+  }
+
+  const { error } = await supabase.from("tasks").update(updates).eq("id", taskId);
 
   if (error) return { error: error.message };
 
