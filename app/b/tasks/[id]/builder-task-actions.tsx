@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import { updateTask, updateTaskStatus } from "@/lib/actions/tasks";
+import { updateTask, updateTaskStatus, withdrawTaskApproval } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { DeleteTaskButton } from "@/components/delete-task-button";
@@ -95,6 +95,23 @@ export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps)
             }
           >
             Send for approval
+          </Button>
+        )}
+        {task.approval_sent_at && !task.approval_approved_at && (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full"
+            disabled={isPending}
+            onClick={() =>
+              startTransition(async () => {
+                const result = await withdrawTaskApproval(task.id);
+                if ("error" in result) setError(result.error);
+                else router.refresh();
+              })
+            }
+          >
+            Unsend from approval
           </Button>
         )}
       </div>

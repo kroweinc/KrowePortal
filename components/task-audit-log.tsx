@@ -132,6 +132,8 @@ function describe(entry: AuditEntry): React.ReactNode {
       return <>marked task done</>;
     case "task.sent_for_approval":
       return <>sent task for approval</>;
+    case "task.approval_withdrawn":
+      return <>pulled the task back from approval</>;
     case "task.changes_requested":
       return (
         <>
@@ -201,6 +203,8 @@ function plainDescribe(entry: AuditEntry): string {
       return meta.pushed_to_main ? "marked it done and pushed to main" : "marked it done";
     case "task.sent_for_approval":
       return "sent it for approval";
+    case "task.approval_withdrawn":
+      return "pulled it back from approval";
     case "task.changes_requested":
       return "requested changes";
     case "subtask.completed":

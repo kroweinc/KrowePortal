@@ -2539,6 +2539,17 @@ button.krowe-desc-inline-text:hover {
   color: var(--danger); background: var(--danger-soft);
 }
 .krowe-btn-pill.ghost-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+.krowe-btn-pill.ghost {
+  color: var(--muted-foreground); border-color: var(--border);
+}
+.krowe-btn-pill.ghost:hover {
+  color: var(--foreground); background: var(--surface-subtle);
+  transform: translateY(-1px);
+}
+.krowe-btn-pill.ghost:active { transform: translateY(0) scale(0.98); }
+.krowe-btn-pill.ghost:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+/* Right-aligned action cluster in the sheet footer (e.g. Unsend + primary). */
+.krowe-task-sheet-footer-actions { display: inline-flex; align-items: center; gap: 10px; }
 
 /* ── Build tab (task-build-prompt.tsx) ────────────────────────────── */
 .krowe-build-section { display: flex; flex-direction: column; gap: 14px; }
