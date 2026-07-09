@@ -1,20 +1,18 @@
 "use client";
 
-import { useEffect, useState, useTransition, useOptimistic } from "react";
+import { useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CheckCircle2, ChevronUp, Plus } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
 import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
-import { GrSelect } from "@/components/granola/gr-select";
+import { useTaskSort } from "@/components/task-sort-context";
 import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import {
   isAwaitingApproval,
   sortWithApprovalPin,
   sortTasksByKey,
-  TASK_SORT_OPTIONS,
-  type TaskSortKey,
 } from "@/lib/utils";
 import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 import type { Task, Engagement, TaskStatus, StagingGroup } from "@/lib/types";
@@ -22,7 +20,6 @@ import type { Task, Engagement, TaskStatus, StagingGroup } from "@/lib/types";
 const sortTasks = sortWithApprovalPin<Task>;
 
 const DONE_PREVIEW_COUNT = 3;
-const SORT_STORAGE_KEY = "krowe:board-sort";
 
 const COLUMNS: { status: TaskStatus; label: string }[] = [
   { status: "backlog",     label: "Backlog" },
@@ -76,18 +73,9 @@ export function TaskBoard({
 
   const selectedTask = optimisticTasks.find((t) => t.id === selectedId) ?? null;
 
-  // Sort is a personal view preference, so it lives in client state (persisted to
-  // localStorage) rather than the URL — reordering is instant instead of paying a
-  // server round-trip for a query-param change on this Server Component route.
-  const [sortKey, setSortKey] = useState<TaskSortKey>("default");
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(SORT_STORAGE_KEY) as TaskSortKey | null;
-      if (stored && TASK_SORT_OPTIONS.some((o) => o.value === stored)) setSortKey(stored);
-    } catch {
-      /* storage disabled — keep the default */
-    }
-  }, []);
+  // Sort lives in the header (next to Staging / Tasks from meeting) via a shared
+  // context so the control and the board stay in sync — see TaskSortProvider.
+  const { sortKey } = useTaskSort();
 
   // null = All, "personal" = tasks with no engagement, otherwise an engagement id
   const engagementFilter = searchParams.get("engagement");
@@ -110,15 +98,6 @@ export function TaskBoard({
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set("engagement", value); else params.delete("engagement");
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }
-
-  function setSort(value: TaskSortKey) {
-    setSortKey(value);
-    try {
-      localStorage.setItem(SORT_STORAGE_KEY, value);
-    } catch {
-      /* ignore */
-    }
   }
 
   function handleColumnDrop(e: React.DragEvent, status: TaskStatus) {
@@ -209,49 +188,40 @@ export function TaskBoard({
 
   return (
     <>
-      <div className="krowe-board-controls">
-        {showFilters ? (
-        <div className="krowe-filter-row">
-          <button
-            type="button"
-            className={`krowe-filter-chip ${engagementFilter === null ? "active" : ""}`}
-            onClick={() => setEngagementFilter(null)}
-          >
-            All <span className="count">{tasks.length}</span>
-          </button>
-          {engagements.map((e) => (
-            <button
-              key={e.id}
-              type="button"
-              className={`krowe-filter-chip ${engagementFilter === e.id ? "active" : ""}`}
-              onClick={() => setEngagementFilter(e.id)}
-            >
-              {e.title}{" "}
-              <span className="count">{tasks.filter((t) => t.engagement_id === e.id).length}</span>
-            </button>
-          ))}
-          {hasPersonalTasks && (
+      {showFilters && (
+        <div className="krowe-board-controls">
+          <div className="krowe-filter-row">
             <button
               type="button"
-              className={`krowe-filter-chip ${engagementFilter === "personal" ? "active" : ""}`}
-              onClick={() => setEngagementFilter("personal")}
+              className={`krowe-filter-chip ${engagementFilter === null ? "active" : ""}`}
+              onClick={() => setEngagementFilter(null)}
             >
-              Personal{" "}
-              <span className="count">{tasks.filter((t) => t.engagement_id === null).length}</span>
+              All <span className="count">{tasks.length}</span>
             </button>
-          )}
+            {engagements.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                className={`krowe-filter-chip ${engagementFilter === e.id ? "active" : ""}`}
+                onClick={() => setEngagementFilter(e.id)}
+              >
+                {e.title}{" "}
+                <span className="count">{tasks.filter((t) => t.engagement_id === e.id).length}</span>
+              </button>
+            ))}
+            {hasPersonalTasks && (
+              <button
+                type="button"
+                className={`krowe-filter-chip ${engagementFilter === "personal" ? "active" : ""}`}
+                onClick={() => setEngagementFilter("personal")}
+              >
+                Personal{" "}
+                <span className="count">{tasks.filter((t) => t.engagement_id === null).length}</span>
+              </button>
+            )}
+          </div>
         </div>
-        ) : <span />}
-        <label className="krowe-sort">
-          <span className="krowe-sort-label">Sort</span>
-          <GrSelect
-            value={sortKey}
-            onChange={(v) => setSort(v as TaskSortKey)}
-            options={TASK_SORT_OPTIONS}
-            ariaLabel="Sort tasks"
-          />
-        </label>
-      </div>
+      )}
       {visibleTasks.length === 0 ? (
         <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
           {optimisticTasks.length === 0
