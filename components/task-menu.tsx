@@ -23,12 +23,14 @@ import {
   ListTodo,
   Play,
   Hourglass,
+  Undo2,
   CheckCircle2,
   Trash2,
 } from "lucide-react";
 import { useContextMenu, type MenuItem } from "@/components/ui/context-menu";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { updateTaskStatus, deleteTask } from "@/lib/actions/tasks";
+import { updateTaskStatus, withdrawTaskApproval, deleteTask } from "@/lib/actions/tasks";
+import { isAwaitingApproval } from "@/lib/utils";
 import type { Task, Role, TaskStatus } from "@/lib/types";
 
 const STATUS_MOVES: { status: TaskStatus; label: string; icon: typeof Inbox }[] = [
@@ -108,14 +110,29 @@ export function useTaskMenu({ task, role, onOpen, requestDone, requestApproval, 
 
       // Approval is a gate, not a column — the task keeps its status and the
       // approval_sent_at stamp pins it to the top of its column with a pill.
-      list.push({
-        label: "Send for approval",
-        icon: <Hourglass size={15} strokeWidth={1.9} />,
-        separatorBefore: true,
-        disabled: !!task.approval_sent_at,
-        disabledReason: "Already sent for approval",
-        onSelect: () => requestApproval({ task }),
-      });
+      // Once sent (and not yet approved), the same slot flips to "Unsend" so the
+      // builder can pull the task back out of the operator's review queue.
+      if (isAwaitingApproval(task)) {
+        list.push({
+          label: "Unsend from approval",
+          icon: <Undo2 size={15} strokeWidth={1.9} />,
+          separatorBefore: true,
+          onSelect: async () => {
+            const r = await withdrawTaskApproval(task.id);
+            if (isErr(r)) toast.error(r.error);
+            else toast.success("Pulled back from approval");
+          },
+        });
+      } else {
+        list.push({
+          label: "Send for approval",
+          icon: <Hourglass size={15} strokeWidth={1.9} />,
+          separatorBefore: true,
+          disabled: !!task.approval_approved_at,
+          disabledReason: "Already approved",
+          onSelect: () => requestApproval({ task }),
+        });
+      }
     }
 
     list.push({
@@ -147,7 +164,7 @@ export function useTaskMenu({ task, role, onOpen, requestDone, requestApproval, 
     return list;
     // task is the only data input; router/confirm/onOpen/request* are stable per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id, task.title, task.status, task.approval_sent_at, role, href]);
+  }, [task.id, task.title, task.status, task.approval_sent_at, task.approval_approved_at, role, href]);
 
   return { menu, items, dialogs: confirmDialog };
 }

@@ -413,6 +413,58 @@ export async function markTaskForApproval(
   return { success: true };
 }
 
+const withdrawApprovalSchema = z.object({
+  taskId: z.string().uuid(),
+});
+
+// Builder-side reverse of markTaskForApproval: pulls a task back out of the
+// approval queue by clearing approval_sent_at. Approval is a timestamp gate,
+// not a status, so the task keeps its column (stays In Progress) — we only drop
+// the stamp that pins it and feeds the operator's review queue. The builder's
+// completion_note is left intact so an unsend → edit → resend keeps their note.
+export async function withdrawTaskApproval(
+  taskId: string
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  if (!withdrawApprovalSchema.safeParse({ taskId }).success)
+    return { error: "Invalid input" };
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
+
+  const supabase = await getClient(profile.id);
+
+  const { data: before } = await supabase
+    .from("tasks")
+    .select("approval_sent_at, approval_approved_at")
+    .eq("id", taskId)
+    .single();
+
+  if (!before) return { error: "Task not found." };
+  if (!before.approval_sent_at) return { error: "Task hasn't been sent for approval." };
+  if (before.approval_approved_at)
+    return { error: "This task was already approved and can't be unsent." };
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("tasks")
+    .update({ approval_sent_at: null, updated_at: now })
+    .eq("id", taskId);
+
+  if (error) return { error: error.message };
+
+  await writeAuditEntry({
+    taskId,
+    actorId: profile.id,
+    action: "task.approval_withdrawn",
+  });
+
+  revalidatePath("/b");
+  revalidatePath("/o");
+  return { success: true };
+}
+
 // Operator sign-off on a task that the builder sent for approval. Orthogonal to
 // the Done transition — it only stamps approval_approved_at; the builder still
 // advances the task to Done separately.
