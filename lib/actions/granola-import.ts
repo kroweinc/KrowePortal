@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/server";
+import { isUniqueViolation } from "@/lib/supabase/errors";
+import { findSimilarTitles, normalizeTitle } from "@/lib/tasks/dedupe";
 import { getCurrentProfile } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
@@ -138,9 +140,44 @@ export async function listGranolaNotesForImport(
   }
 }
 
-// Duplicate-key from the partial unique indexes on granola_imports.
-function isUniqueViolation(error: { code?: string } | null): boolean {
-  return error?.code === "23505";
+/** Near-duplicate check for the review screen: for each drafted title, find the
+    best-matching OPEN task already in the engagement. Returns a map keyed by the
+    normalized draft title so the review UI can badge and default-uncheck likely
+    duplicates. Read-only and ownership-gated; extraction stays stateless, so
+    this is the layer that makes a re-recorded/overlapping call not silently
+    re-create tasks that already exist. */
+export async function matchExistingOpenTasks(input: {
+  engagementId: string;
+  titles: string[];
+}): Promise<Record<string, { id: string; title: string }>> {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "builder") return {};
+
+  const parsed = z
+    .object({
+      engagementId: z.string().uuid(),
+      titles: z.array(z.string().max(300)).max(40),
+    })
+    .safeParse(input);
+  if (!parsed.success) return {};
+  if (!(await assertEngagementBuilder(parsed.data.engagementId, profile.id))) return {};
+
+  const supabase = await getClient(profile.id);
+  const { data } = await supabase
+    .from("tasks")
+    .select("id, title, status")
+    .eq("engagement_id", parsed.data.engagementId)
+    .neq("status", "done");
+
+  const candidates = (data ?? []).map((t) => ({ id: t.id as string, title: t.title as string }));
+  if (candidates.length === 0) return {};
+
+  const out: Record<string, { id: string; title: string }> = {};
+  for (const title of parsed.data.titles) {
+    const match = findSimilarTitles(title, candidates)[0];
+    if (match) out[normalizeTitle(title)] = { id: match.id, title: match.title };
+  }
+  return out;
 }
 
 export async function importGranolaNoteToProject(

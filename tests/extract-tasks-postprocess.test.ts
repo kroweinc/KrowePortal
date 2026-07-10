@@ -18,8 +18,8 @@ import {
   postProcessExtraction,
   reconstructAllSourceText,
   reconstructSourceText,
-  significantTokens,
 } from "@/lib/ai/extract-tasks-postprocess";
+import { significantTokens } from "@/lib/tasks/dedupe";
 
 const STEVEN_TITLE_PATTERNS: RegExp[] = [
   /credential/i,

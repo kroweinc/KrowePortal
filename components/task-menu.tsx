@@ -45,6 +45,10 @@ interface TaskMenuArgs {
   role: Role;
   /** Open the task in the detail sheet; falls back to navigating to the task page. */
   onOpen?: () => void;
+  /** Optimistic plain-status mover from the board — when present, "Move to …"
+      paints instantly instead of awaiting the server round-trip. Falls back to
+      calling updateTaskStatus directly when absent. */
+  onStatusMove?: (taskId: string, status: TaskStatus) => void;
   /** Builder deliverable dialogs — pass from useRequestDone/useRequestApproval
       where those providers are mounted. Status moves are hidden without them. */
   requestDone?: (args: { task: Task }) => void;
@@ -58,7 +62,7 @@ function isErr(r: unknown): r is { error: string } {
   return !!r && typeof r === "object" && "error" in r && !!(r as { error?: string }).error;
 }
 
-export function useTaskMenu({ task, role, onOpen, requestDone, requestApproval, onDelete }: TaskMenuArgs) {
+export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, requestApproval, onDelete }: TaskMenuArgs) {
   const router = useRouter();
   const menu = useContextMenu();
   const [confirm, confirmDialog] = useConfirm();
@@ -100,6 +104,8 @@ export function useTaskMenu({ task, role, onOpen, requestDone, requestApproval, 
           onSelect: async () => {
             if (status === "done") {
               requestDone({ task });
+            } else if (onStatusMove) {
+              onStatusMove(task.id, status);
             } else {
               const r = await updateTaskStatus(task.id, status);
               if (isErr(r)) toast.error(r.error);

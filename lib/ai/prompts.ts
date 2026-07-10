@@ -101,7 +101,7 @@ function formatRepoContext(repoContext: RepoContext | null, opts: { withTools: b
 export function buildTaskSystemPrompt(repoContext: RepoContext | null): string {
   const taskShape = `{
   "title": "imperative verb phrase, ≤80 chars, summarizes the deliverable",
-  "description": "optional 1–3 short paragraphs of scope / acceptance criteria. Omit if title is self-evident.",
+  "description": "a bullet list (one '• ' bullet per line) of scope / acceptance criteria. Omit if title is self-evident.",
   "priority": "one of: low | medium | high | urgent",
   "type": "one of: feature | bug | change",
   "tags": ["exactly one area label from the list in the rules"],
@@ -123,7 +123,7 @@ ${labelList}`;
 
 Rules for the task:
 - title: imperative verb phrase, ≤80 chars (e.g. "Add Stripe checkout flow with webhook handler").
-- description: ALWAYS write a thorough plain-language overview (≥20 chars, aim for 4–7 sentences). Describe in detail WHAT is being built and what it will do — the user-facing behavior, the flow end to end, and what the finished thing looks/feels like when used. Cover edge cases the user should know about (e.g. "if the user is logged out, they see…", "if no results are found, show…"). Write for a non-technical product owner: NO file paths, NO library names, NO function names, NO code-level detail. Do not describe implementation steps. Just explain the thing being delivered as a human would describe it.
+- description: ALWAYS write a thorough plain-language overview as a BULLET LIST (≥20 chars) — 3–6 concise bullet points, each on its own line starting with "• ", one idea per bullet. Bullets only: NO intro sentence and NO trailing paragraph. Cover in detail WHAT is being built and what it will do — the user-facing behavior, the flow end to end, what the finished thing looks/feels like when used, and the edge cases the user should know about (e.g. "• If the user is logged out, they see…", "• If no results are found, show…"). Write for a non-technical product owner: NO file paths, NO library names, NO function names, NO code-level detail. Do not describe implementation steps. Just explain the thing being delivered as a human would describe it.
 - priority: infer from urgency cues in the user's text (default "medium"). Use "urgent" only if the user says it's blocking or time-critical.
 ${classificationRules}
 - assumptions: list each material assumption you made where the description was ambiguous or silent — scope boundaries, default behavior, which surface/feature the user meant, edge-case handling you chose. One short plain-language sentence each (≤300 chars), most important first, max 6. Only genuine judgment calls: do NOT list restatements of what the user said, and do NOT list codebase facts you verified with tools. Return [] when the description was unambiguous.${
@@ -158,7 +158,7 @@ export function buildTaskRegenerateSystemPrompt(repoContext: RepoContext | null)
   const labelList = TASK_TAGS.map((t) => `    • "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
   const taskShape = `{
   "title": "imperative verb phrase, ≤80 chars, summarizes the deliverable",
-  "description": "plain-language overview of WHAT is being built (see rules)",
+  "description": "bullet list (one '• ' bullet per line) covering WHAT is being built (see rules)",
   "priority": "one of: low | medium | high | urgent",
   "type": "one of: feature | bug | change",
   "tags": ["exactly one area label from the list in the rules"],
@@ -173,7 +173,7 @@ Core rules:
 
 Rules for the revised task:
 - title: imperative verb phrase, ≤80 chars, reflecting the new scope.
-- description: a thorough plain-language overview of WHAT is being built and what it does — the user-facing behavior, the flow end to end, and relevant edge cases. Write for a non-technical product owner: NO file paths, library names, function names, or code-level detail. At least 20 characters.
+- description: a thorough plain-language overview of WHAT is being built and what it does, written as a BULLET LIST — 3–6 concise bullet points, each on its own line starting with "• ", one idea per bullet (user-facing behavior, the flow end to end, and relevant edge cases). Bullets only: no intro or trailing paragraph. Write for a non-technical product owner: NO file paths, library names, function names, or code-level detail. At least 20 characters.
 - priority: keep the current priority unless the change clearly implies a different urgency.
 - type: classify Linear-style — "feature" (adds a new user-facing capability), "bug" (fixes broken behavior), or "change" (modifies/improves/removes something that already works; use as the DEFAULT).
 - tags: exactly ONE area label as a one-element array — the single best fit for the PRIMARY area the work touches. NEVER invent a label, NEVER return more than one, and NEVER use a label outside this list:
@@ -368,7 +368,7 @@ JARGON HANDLING — the most important rule:
 
 Rules for each rewritten field:
 - simpleTitle: imperative verb phrase, ≤80 chars when possible (longer is OK if a definition is needed). No file paths, no function names. Describe the user-visible outcome ("Add a way for customers to reset their password") not the implementation ("Wire up POST /api/auth/reset").
-- simpleDescription: 1–3 short paragraphs of plain English describing what the finished thing does and what the operator will see. Skip code-level detail. If the original description is null or empty, return null.
+- simpleDescription: a bullet list of plain English — 3–6 concise bullet points, each on its own line starting with "• ", one idea per bullet — describing what the finished thing does and what the operator will see. Bullets only: no intro or trailing paragraph. Skip code-level detail. If the original description is null or empty, return null.
 - simpleSubtasks: same plain-English treatment for each subtask title. Inline definitions still apply on first mention within each subtask title. Keep the same id for each subtask. Preserve order.
 
 Output format — respond ONLY with valid JSON in this exact shape:

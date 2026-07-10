@@ -75,7 +75,7 @@ export default async function OperatorTaskDetail({
           </div>
 
           {task.description && (
-            <p className="text-sm text-neutral-600 leading-relaxed">{task.description}</p>
+            <p className="text-sm text-neutral-600 leading-relaxed whitespace-pre-wrap">{task.description}</p>
           )}
 
           {task.tags.length > 0 && (

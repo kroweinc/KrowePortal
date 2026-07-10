@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
+import { toast } from "sonner";
 import { CheckCircle2, ChevronUp, Plus } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
 import { openNewTask } from "@/components/add-task-button";
@@ -98,6 +99,18 @@ export function TaskBoard({
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set("engagement", value); else params.delete("engagement");
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  // Plain status move (card advance button + right-click menu), routed through
+  // the same optimistic dispatch the drag-and-drop uses so the card jumps
+  // columns instantly instead of waiting on the server round-trip + revalidate.
+  // Done/approval moves keep their dialog flows and don't come through here.
+  function moveStatus(taskId: string, status: TaskStatus) {
+    startTransition(async () => {
+      dispatchOptimistic({ type: "status", taskId, status });
+      const r = await updateTaskStatus(taskId, status);
+      if (r && "error" in r && r.error) toast.error(r.error);
+    });
   }
 
   function handleColumnDrop(e: React.DragEvent, status: TaskStatus) {
@@ -278,6 +291,7 @@ export function TaskBoard({
                         role="builder"
                         engagementTitle={engagementMap.get(task.engagement_id)}
                         onSelect={(t) => syncSelected(t.id)}
+                        onStatusMove={moveStatus}
                         onDragStart={(t) => setDraggingTask(t)}
                         onDragEnd={() => { setDraggingTask(null); setDropTarget(null); }}
                       />

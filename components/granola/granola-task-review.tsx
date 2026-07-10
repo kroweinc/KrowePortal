@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AudioLines,
   Check,
@@ -24,11 +24,13 @@ import {
   SquareKanban,
   Tag,
   TrendingUp,
+  TriangleAlert,
   User,
 } from "lucide-react";
 import { isBuilderOwnedDraft, type ExtractedTaskDraft } from "@/lib/ai/schemas";
 import type { ApprovedTaskDraft } from "@/lib/actions/granola-import";
 import { TASK_TAGS, type TaskStatus, type TaskTag } from "@/lib/types";
+import { normalizeTitle } from "@/lib/tasks/dedupe";
 import { GrSelect } from "@/components/granola/gr-select";
 import { reconcileDraftRows } from "@/components/granola/review-reconcile";
 
@@ -84,6 +86,7 @@ function toRow(d: ExtractedTaskDraft): ReviewRow {
 
 export function GranolaTaskReview({
   drafts,
+  duplicateMatches = {},
   submitting,
   streaming = false,
   sourceLabel = "from the call",
@@ -91,6 +94,9 @@ export function GranolaTaskReview({
   onCancel,
 }: {
   drafts: ExtractedTaskDraft[];
+  /** Normalized draft title → an existing OPEN task it likely duplicates. Drives
+      the "Possible duplicate" badge and a one-time default-uncheck. */
+  duplicateMatches?: Record<string, { id: string; title: string }>;
   submitting: boolean;
   /** True while drafts are still streaming in — rows append live and the
       Create button stays disabled until the final (authoritative) list lands. */
@@ -102,6 +108,9 @@ export function GranolaTaskReview({
 }) {
   const [rows, setRows] = useState<ReviewRow[]>(drafts.map(toRow));
   const [prevStreaming, setPrevStreaming] = useState(streaming);
+  // Titles already auto-unchecked, so re-checking a flagged row sticks instead
+  // of being undone the next time matches resolve.
+  const autoUncheckedRef = useRef<Set<string>>(new Set());
 
   // Streaming appends raw per-item drafts; the `done` payload swaps in the
   // finalized array (owner repairs, merges, synthesized tasks) — possibly at
@@ -111,6 +120,19 @@ export function GranolaTaskReview({
   const nextRows = reconcileDraftRows(rows, drafts, streaming, prevStreaming, toRow);
   if (streaming !== prevStreaming) setPrevStreaming(streaming);
   if (nextRows) setRows(nextRows);
+
+  // When duplicate matches resolve (async, after the final list lands), uncheck
+  // each newly-flagged row once. Builder-owned tasks default checked; a likely
+  // duplicate shouldn't, so it only lands on the board if explicitly opted in.
+  useEffect(() => {
+    const fresh = Object.keys(duplicateMatches).filter((k) => !autoUncheckedRef.current.has(k));
+    if (fresh.length === 0) return;
+    fresh.forEach((k) => autoUncheckedRef.current.add(k));
+    const set = new Set(fresh);
+    setRows((prev) =>
+      prev.map((row) => (set.has(normalizeTitle(row.title)) ? { ...row, selected: false } : row))
+    );
+  }, [duplicateMatches]);
 
   const selectedCount = rows.filter((r) => r.selected).length;
   const allSelected = rows.length > 0 && selectedCount === rows.length;
@@ -191,6 +213,14 @@ export function GranolaTaskReview({
                     title={`The call assigned this to ${row.owner} — it starts unchecked and only lands on your board if you include it.`}
                   >
                     <User size={11} strokeWidth={2} /> {row.owner}
+                  </span>
+                )}
+                {duplicateMatches[normalizeTitle(row.title)] && (
+                  <span
+                    className="krowe-gr-dupe"
+                    title={`Looks like an existing task: "${duplicateMatches[normalizeTitle(row.title)].title}". Unchecked by default — include it only if it's genuinely new.`}
+                  >
+                    <TriangleAlert size={11} strokeWidth={2} /> Possible duplicate
                   </span>
                 )}
                 {row.confidence !== "high" && (
