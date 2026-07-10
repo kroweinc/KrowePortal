@@ -1,5 +1,6 @@
 import type { ExtractedTaskDraft } from "./schemas";
 import { isBuilderOwnedDraft } from "./schemas";
+import { significantTokens, tokenCoverage, jaccard } from "@/lib/tasks/dedupe";
 
 /**
  * Deterministic post-processing for transcript task extraction
@@ -49,46 +50,8 @@ export interface PostProcessResult {
 }
 
 // ── Tokenization ─────────────────────────────────────────────────────────────
-
-const STOPWORDS = new Set([
-  "the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "at", "it",
-  "its", "is", "are", "be", "was", "were", "with", "then", "that", "this",
-  "his", "her", "their", "them", "they", "he", "she", "we", "i", "you", "your",
-  "our", "from", "into", "up", "out", "as", "by", "will", "would", "should",
-  "can", "could", "have", "has", "had", "do", "does", "did", "not", "all",
-  "any", "also", "when", "once", "make", "get", "new",
-]);
-
-const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
-
-/** Lowercased significant tokens: words ≥3 chars (stopwords removed, trailing
-    plural "s" stripped so "fields"/"field" match), all numbers, and whole
-    email addresses kept intact. */
-export function significantTokens(text: string): Set<string> {
-  const out = new Set<string>();
-  const lower = text.toLowerCase();
-  for (const email of lower.match(EMAIL_RE) ?? []) out.add(email);
-  // Hyphenated compounds ("docket-sheet") split so they match their spaced
-  // spellings ("docket sheet").
-  const stripped = lower.replace(EMAIL_RE, " ");
-  for (const raw of stripped.match(/[a-z0-9][a-z0-9']*/g) ?? []) {
-    const word = raw.replace(/'s$/, "");
-    if (/^\d+$/.test(word)) {
-      out.add(word);
-    } else if (word.length >= 3 && !STOPWORDS.has(word)) {
-      out.add(word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word);
-    }
-  }
-  return out;
-}
-
-/** Fraction of `needle`'s significant tokens present in `haystack` (0..1). */
-export function tokenCoverage(needle: Set<string>, haystack: Set<string>): number {
-  if (needle.size === 0) return 0;
-  let hit = 0;
-  for (const t of needle) if (haystack.has(t)) hit++;
-  return hit / needle.size;
-}
+// significantTokens / tokenCoverage / jaccard live in lib/tasks/dedupe (shared
+// with createTask + the Granola review's near-duplicate detection).
 
 function draftMatchTokens(d: ExtractedTaskDraft): Set<string> {
   // Grounding fields only — description may contain inferred context that
@@ -412,13 +375,6 @@ function bestBulletIndex(
     }
   });
   return { index, score };
-}
-
-function jaccard(a: Set<string>, b: Set<string>): number {
-  if (a.size === 0 || b.size === 0) return 0;
-  let inter = 0;
-  for (const t of a) if (b.has(t)) inter++;
-  return inter / (a.size + b.size - inter);
 }
 
 // ── Merging / synthesis ──────────────────────────────────────────────────────

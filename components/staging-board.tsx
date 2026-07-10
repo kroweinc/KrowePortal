@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { GitBranch, Layers, Plus, Pencil, Trash2, Check, X } from "lucide-react";
+import { GitBranch, Layers, Plus, Pencil, Trash2, Check, X, Rocket, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { TaskCard } from "@/components/task-card";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
@@ -11,6 +11,7 @@ import {
   renameStagingGroup,
   deleteStagingGroup,
 } from "@/lib/actions/staging-groups";
+import { setTasksPushedToMain, pollBranchMerges } from "@/lib/actions/tasks";
 import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 import {
   groupTasksByBranch,
@@ -58,6 +59,69 @@ export function StagingBoard({
   const [renameValue, setRenameValue] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // PR-merge auto-detect: on mount and whenever "Check for pushes" bumps the
+  // tick, ask the server which staged branches were merged into main and move
+  // their tasks to Shipped, toasting (with Undo) for each.
+  const [pollTick, setPollTick] = useState(0);
+  const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    const ids = engagements.map((e) => e.id);
+    // Nothing to detect unless some done task is queued for the next push on a
+    // real branch — skip the GitHub/DB round-trips otherwise.
+    const hasStaged = tasks.some((t) => !t.pushed_to_main && t.branch_name);
+    if (ids.length === 0 || !hasStaged) return;
+    let cancelled = false;
+    setChecking(true);
+    pollBranchMerges(ids)
+      .then((results) => {
+        if (cancelled) return;
+        for (const r of results) {
+          toast.success(`Moved ${plural(r.taskIds.length, "task")} on ${r.branch} to Shipped`, {
+            action: {
+              label: "Undo",
+              onClick: () =>
+                setTasksPushedToMain(r.taskIds, false).then(() => router.refresh()),
+            },
+          });
+        }
+        if (results.length > 0) router.refresh();
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Re-runs only when the user hits "Check for pushes"; engagements/router are
+    // stable for the life of the board.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pollTick]);
+
+  function shipBranch(g: TaskBucket) {
+    const ids = g.tasks.map((t) => t.id);
+    const label = g.label;
+    startTransition(async () => {
+      const res = await setTasksPushedToMain(ids, true);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Moved ${plural(res.movedIds.length, "task")} on ${label} to Shipped`, {
+        action: {
+          label: "Undo",
+          onClick: () =>
+            startTransition(async () => {
+              await setTasksPushedToMain(res.movedIds, false);
+              router.refresh();
+            }),
+        },
+      });
+      router.refresh();
+    });
+  }
 
   const stagingGroupsByEngagement: Record<string, StagingGroup[]> = {};
   for (const g of stagingGroups) {
@@ -252,8 +316,11 @@ export function StagingBoard({
     );
   }
 
-  function renderGroup(g: TaskBucket) {
+  function renderGroup(g: TaskBucket, section?: "staged" | "shipped") {
     const purpose = mode === "branch" && g.branch ? purposes[g.branch] : null;
+    // A real branch queued for the next push can be shipped in one click.
+    const canShip =
+      mode === "branch" && section === "staged" && g.branch !== null && g.tasks.length > 0;
     return (
       <div key={g.key} className="krowe-stage-group">
         <div className="krowe-stage-group-head">
@@ -266,6 +333,17 @@ export function StagingBoard({
           {purpose && <span className="krowe-stage-purpose">{purpose}</span>}
           <span className="krowe-stage-count">{g.tasks.length}</span>
           {renderGroupActions(g)}
+          {canShip && (
+            <button
+              type="button"
+              className="krowe-stage-ship"
+              disabled={isPending}
+              onClick={() => shipBranch(g)}
+            >
+              <Rocket width={13} height={13} />
+              Mark as pushed to main
+            </button>
+          )}
         </div>
         {g.tasks.length > 0 && (
           <div className="krowe-stage-cards">
@@ -301,11 +379,25 @@ export function StagingBoard({
             </span>
           )}
           <span className="krowe-stage-rule" />
+          {kind === "staged" && engagements.length > 0 && (
+            <button
+              type="button"
+              className="krowe-stage-check"
+              disabled={checking}
+              onClick={() => setPollTick((n) => n + 1)}
+              title="Check GitHub for branches merged into main"
+            >
+              <RefreshCw width={13} height={13} />
+              {checking ? "Checking…" : "Check for pushes"}
+            </button>
+          )}
         </div>
         {groups.length === 0 ? (
           <div className="krowe-stage-empty">{empty}</div>
         ) : (
-          <div className="krowe-stage-groups">{groups.map(renderGroup)}</div>
+          <div className="krowe-stage-groups">
+            {groups.map((g) => renderGroup(g, kind))}
+          </div>
         )}
       </section>
     );
@@ -463,7 +555,9 @@ export function StagingBoard({
         </div>
       ) : (
         <div className="krowe-stage-wrap">
-          <div className="krowe-stage-groups">{groups.map(renderGroup)}</div>
+          <div className="krowe-stage-groups">
+            {groups.map((g) => renderGroup(g))}
+          </div>
         </div>
       )}
 

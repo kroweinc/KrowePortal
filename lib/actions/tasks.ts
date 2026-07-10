@@ -10,6 +10,11 @@ import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { classifyAndSaveTask } from "@/lib/actions/classify-task";
 import { writeAuditEntry, writeAuditEntries, type AuditEntryInput } from "@/lib/actions/audit-log";
 import { isTaskMember } from "@/lib/actions/task-access";
+import { getMyEngagements } from "@/lib/actions/invitations";
+import { getEngagementRepoById } from "@/lib/github/engagement-repo";
+import { getMergedPrSha, isNewMerge } from "@/lib/github/merged-prs";
+import { isUniqueViolation } from "@/lib/supabase/errors";
+import { findSimilarTitles } from "@/lib/tasks/dedupe";
 import { TASK_TAGS, type TaskStatus, type TaskTag } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -28,6 +33,10 @@ const createTaskSchema = z.object({
   // Optional starting column, from the Granola review's "Lands in" select.
   // Done is excluded so a freshly created task can't bypass the approval gate.
   status: z.enum(["backlog", "todo", "in_progress"]).optional(),
+  // Per-form idempotency key (crypto.randomUUID). A retried/double-fired submit
+  // reuses it, so the unique index collapses it to the same task instead of a
+  // second row. Absent on non-browser callers, which simply skip idempotency.
+  client_request_id: z.string().uuid().optional(),
 });
 
 export async function createTask(formData: FormData) {
@@ -54,11 +63,35 @@ export async function createTask(formData: FormData) {
     type: formData.get("type") || undefined,
     tags,
     status: formData.get("status") || undefined,
+    client_request_id: formData.get("client_request_id") || undefined,
   });
 
   if (!parsed.success) return { error: "Invalid input" };
 
+  // "Create anyway" from the near-duplicate warning below re-submits with this
+  // set, bypassing the check so a legitimately-distinct task is never blocked.
+  const confirmDuplicate = formData.get("confirm_duplicate") === "true";
+
   const supabase = await getClient(profile.id);
+
+  // Near-duplicate warn (engagement-scoped only): surface an existing OPEN task
+  // that looks like this one and let the caller decide, rather than silently
+  // creating a second copy. Skipped for personal tasks (no engagement scope).
+  if (parsed.data.engagement_id && !confirmDuplicate) {
+    const { data: openTasks } = await supabase
+      .from("tasks")
+      .select("id, title, status")
+      .eq("engagement_id", parsed.data.engagement_id)
+      .neq("status", "done");
+    const matches = findSimilarTitles(
+      parsed.data.title,
+      (openTasks ?? []).map((t) => ({ id: t.id as string, title: t.title as string }))
+    );
+    if (matches.length > 0) {
+      return { duplicateWarning: matches.map((m) => ({ id: m.id, title: m.title })) };
+    }
+  }
+
   const { data, error } = await supabase.from("tasks").insert({
     engagement_id: parsed.data.engagement_id ?? null,
     title: parsed.data.title,
@@ -72,9 +105,26 @@ export async function createTask(formData: FormData) {
     created_by: profile.id,
     // Omit when unset so the column's DB default applies.
     ...(parsed.data.status ? { status: parsed.data.status } : {}),
+    // Idempotency key — a retry with the same key hits the partial unique index
+    // (migration 0075) and resolves to the already-created task below.
+    ...(parsed.data.client_request_id ? { client_request_id: parsed.data.client_request_id } : {}),
   }).select("id").single();
 
-  if (error) return { error: error.message };
+  if (error) {
+    // A double-submit lost the race: the first insert already created the task.
+    // Return it as success so the retry is a no-op, not a duplicate or an error.
+    if (isUniqueViolation(error) && parsed.data.client_request_id) {
+      const { data: existing } = await supabase
+        .from("tasks")
+        .select("id")
+        .eq("client_request_id", parsed.data.client_request_id)
+        .maybeSingle();
+      if (existing) {
+        return { success: true, taskId: existing.id as string, deduped: true };
+      }
+    }
+    return { error: error.message };
+  }
 
   await writeAuditEntry({
     taskId: data.id as string,
@@ -367,6 +417,178 @@ export async function setTaskBranch(
   return { success: true };
 }
 
+const setTasksPushedSchema = z.object({
+  taskIds: z.array(z.string().uuid()).min(1).max(200),
+  pushed: z.boolean(),
+});
+
+/** Bulk-flip pushed_to_main across many done tasks at once — powers the manual
+ *  "Mark as pushed to main" button on the staging board (and its Undo, which
+ *  calls back with pushed=false). Moves tasks between the Next-push and Shipped
+ *  sections without touching branch_name. Only done tasks the builder may touch
+ *  are affected: engagement tasks they're a member of, or their own personal
+ *  (no-engagement) tasks. We filter by membership explicitly because a branch
+ *  bucket can span engagements under the "All" filter (groupTasksByBranch keys
+ *  on branch name only) and the dev admin client bypasses RLS. */
+export async function setTasksPushedToMain(
+  taskIds: string[],
+  pushed: boolean
+): Promise<{ success: true; movedIds: string[] } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsed = setTasksPushedSchema.safeParse({ taskIds, pushed });
+  if (!parsed.success) return { error: "Invalid input" };
+
+  const supabase = await getClient(profile.id);
+
+  const { data: rows } = await supabase
+    .from("tasks")
+    .select("id, engagement_id, created_by, status, pushed_to_main")
+    .in("id", parsed.data.taskIds);
+  if (!rows || rows.length === 0) return { success: true, movedIds: [] };
+
+  const myEngagementIds = new Set((await getMyEngagements()).map((e) => e.id));
+  const allowedIds = rows
+    .filter(
+      (t) =>
+        t.status === "done" &&
+        t.pushed_to_main !== parsed.data.pushed &&
+        (t.engagement_id
+          ? myEngagementIds.has(t.engagement_id)
+          : t.created_by === profile.id)
+    )
+    .map((t) => t.id);
+  if (allowedIds.length === 0) return { success: true, movedIds: [] };
+
+  const { error } = await supabase
+    .from("tasks")
+    .update({ pushed_to_main: parsed.data.pushed, updated_at: new Date().toISOString() })
+    .in("id", allowedIds);
+  if (error) return { error: error.message };
+
+  // Audit isn't needed to render the move — defer it past the response like the
+  // status-change path.
+  after(() =>
+    writeAuditEntries(
+      allowedIds.map((id) => ({
+        taskId: id,
+        actorId: profile.id,
+        action: "task.pushed_to_main_changed",
+        field: "pushed_to_main",
+        oldValue: !parsed.data.pushed,
+        newValue: parsed.data.pushed,
+      }))
+    )
+  );
+
+  revalidatePath("/b");
+  revalidatePath("/b/staging");
+  return { success: true, movedIds: allowedIds };
+}
+
+const pollBranchMergesSchema = z.array(z.string().uuid()).max(50);
+
+/** Auto-detect which staged feature branches have been merged into their repo's
+ *  default branch and move their done tasks to Shipped. Runs on staging-board
+ *  load and the "Check for pushes" button. Idempotent and undo-safe via the
+ *  branch_push_marks table: a given merge sha ships once; undoing it leaves the
+ *  recorded sha in place so the next poll won't re-ship. Returns the branches it
+ *  just shipped so the client can toast (with Undo). */
+export async function pollBranchMerges(
+  engagementIds: string[]
+): Promise<{ branch: string; taskIds: string[] }[]> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsed = pollBranchMergesSchema.safeParse(engagementIds);
+  if (!parsed.success || parsed.data.length === 0) return [];
+
+  const admin = createAdminClient();
+  const shipped: { branch: string; taskIds: string[] }[] = [];
+
+  for (const engagementId of parsed.data) {
+    // getEngagementRepoById gates membership (null for non-members) and yields
+    // the repo coords + a usable OAuth token.
+    const repo = await getEngagementRepoById(engagementId, profile.id);
+    if (!repo) continue;
+
+    const { data: staged } = await admin
+      .from("tasks")
+      .select("branch_name")
+      .eq("engagement_id", engagementId)
+      .eq("status", "done")
+      .eq("pushed_to_main", false)
+      .not("branch_name", "is", null);
+
+    const branches = Array.from(
+      new Set(
+        (staged ?? [])
+          .map((r) => (r.branch_name as string | null)?.trim() || null)
+          .filter(
+            (b): b is string => b !== null && b !== repo.defaultBranch
+          )
+      )
+    );
+
+    for (const branch of branches) {
+      const sha = await getMergedPrSha(repo, branch);
+      if (!sha) continue;
+
+      const { data: mark } = await admin
+        .from("branch_push_marks")
+        .select("merge_sha")
+        .eq("repo_full_name", repo.fullName)
+        .eq("branch_name", branch)
+        .maybeSingle();
+      if (!isNewMerge(mark?.merge_sha, sha)) continue; // already actioned or undone
+
+      const { data: flipped } = await admin
+        .from("tasks")
+        .update({ pushed_to_main: true, updated_at: new Date().toISOString() })
+        .eq("engagement_id", engagementId)
+        .eq("status", "done")
+        .eq("pushed_to_main", false)
+        .eq("branch_name", branch)
+        .select("id");
+
+      await admin.from("branch_push_marks").upsert(
+        {
+          repo_full_name: repo.fullName,
+          branch_name: branch,
+          merge_sha: sha,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "repo_full_name,branch_name" }
+      );
+
+      const taskIds = (flipped ?? []).map((t) => t.id);
+      if (taskIds.length > 0) {
+        after(() =>
+          writeAuditEntries(
+            taskIds.map((id) => ({
+              taskId: id,
+              actorId: profile.id,
+              action: "task.pushed_to_main_changed",
+              field: "pushed_to_main",
+              oldValue: false,
+              newValue: true,
+              metadata: { via: "pr_merge_poll", branch, merge_sha: sha },
+            }))
+          )
+        );
+        shipped.push({ branch, taskIds });
+      }
+    }
+  }
+
+  if (shipped.length > 0) {
+    revalidatePath("/b");
+    revalidatePath("/b/staging");
+  }
+  return shipped;
+}
+
 const markForApprovalSchema = z.object({
   taskId: z.string().uuid(),
   note: z.string().trim().max(2000).nullish(),
@@ -579,16 +801,17 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
   if (!profile) redirect("/login");
   if (!taskStatusSchema.safeParse(status).success)
     return { error: "Invalid status" };
-  if (!(await isTaskMember(taskId, profile.id)))
-    return { error: "You don't have access to this task." };
 
   const supabase = await getClient(profile.id);
 
-  const { data: before } = await supabase
-    .from("tasks")
-    .select("status")
-    .eq("id", taskId)
-    .single();
+  // Membership gate and the current status are independent single-row reads, so
+  // fetch them together rather than serially — this is the hot path for every
+  // to-do → in-progress style move and each round-trip is felt.
+  const [member, { data: before }] = await Promise.all([
+    isTaskMember(taskId, profile.id),
+    supabase.from("tasks").select("status").eq("id", taskId).single(),
+  ]);
+  if (!member) return { error: "You don't have access to this task." };
 
   const { error } = await supabase
     .from("tasks")
@@ -597,15 +820,20 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
 
   if (error) return { error: error.message };
 
+  // The audit entry isn't needed to render the move — defer it past the response
+  // (like the create-task estimate) so the status change returns as soon as the
+  // row is written instead of blocking on another DB round-trip.
   if (before && before.status !== status) {
-    await writeAuditEntry({
-      taskId,
-      actorId: profile.id,
-      action: "task.status_changed",
-      field: "status",
-      oldValue: before.status,
-      newValue: status,
-    });
+    after(() =>
+      writeAuditEntry({
+        taskId,
+        actorId: profile.id,
+        action: "task.status_changed",
+        field: "status",
+        oldValue: before.status,
+        newValue: status,
+      })
+    );
   }
 
   revalidatePath("/b");

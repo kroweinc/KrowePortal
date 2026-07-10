@@ -17,6 +17,7 @@ import {
   Sparkles,
   Bug,
   GitPullRequestArrow,
+  TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -133,10 +134,16 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   const [expanded, setExpanded] = useState(false);
   const [modal, setModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Existing open tasks this one looks like — set from createTask's soft warn,
+  // cleared on a fresh submit or "Create anyway".
+  const [dupWarning, setDupWarning] = useState<{ id: string; title: string }[] | null>(null);
   const [isPending, startTransition] = useTransition();
   const [files, setFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  // One idempotency key per open form. A retried / double-fired submit reuses
+  // it so createTask collapses the duplicate to a single task; reset on close.
+  const requestIdRef = useRef<string | null>(null);
 
   // undefined = follow the engagementId prop (the board's active filter / first engagement)
   const [engagementChoice, setEngagementChoice] = useState<string | undefined>(undefined);
@@ -227,6 +234,9 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     setAiMode({ kind: "input", prompt: "" });
     setFiles([]);
     setError(null);
+    setDupWarning(null);
+    // Fresh key for the next task, so a new create can't collide with the last.
+    requestIdRef.current = null;
     setEngagementChoice(undefined);
   }
 
@@ -358,8 +368,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     );
   }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  function submitTask({ force = false }: { force?: boolean } = {}) {
     setError(null);
 
     if (!title.trim()) {
@@ -379,10 +388,19 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
         fd.set("type", aiType);
         fd.set("tags", JSON.stringify(aiTags));
       }
+      // Idempotency: same key across a retry / double-fire of this open form.
+      requestIdRef.current ??= crypto.randomUUID();
+      fd.set("client_request_id", requestIdRef.current);
+      // "Create anyway" past the near-duplicate warning.
+      if (force) fd.set("confirm_duplicate", "true");
 
       const result = await createTask(fd);
       if (result?.error) {
         setError(result.error);
+        return;
+      }
+      if (result?.duplicateWarning) {
+        setDupWarning(result.duplicateWarning);
         return;
       }
 
@@ -393,6 +411,13 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
       handleClose();
       onSuccess?.();
     });
+  }
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    // A plain submit re-checks for duplicates; only "Create anyway" forces past.
+    setDupWarning(null);
+    submitTask();
   }
 
   const isBusy = isPending || aiMode.kind === "loading";
@@ -730,6 +755,42 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   const typeLabel = TYPES.find((t) => t.value === reviewType)!.label;
   const priorityLabel = PRIORITIES.find((p) => p.value === priority)!.label;
 
+  // Soft near-duplicate warning from createTask — the builder decides whether
+  // this is genuinely a new task or a copy of one already on the board.
+  const dupCallout = dupWarning && dupWarning.length > 0 && (
+    <div className="krowe-nt-dupe" role="alert">
+      <div className="krowe-nt-dupe-head">
+        <TriangleAlert width={13} height={13} />
+        {dupWarning.length === 1
+          ? "This looks like an existing task"
+          : "This looks like existing tasks"}
+      </div>
+      <ul className="krowe-nt-dupe-list">
+        {dupWarning.map((t) => (
+          <li key={t.id}>{t.title}</li>
+        ))}
+      </ul>
+      <div className="krowe-nt-dupe-actions">
+        <button
+          type="button"
+          className="krowe-nt-dupe-keep"
+          onClick={() => setDupWarning(null)}
+          disabled={isBusy}
+        >
+          Keep editing
+        </button>
+        <button
+          type="button"
+          className="krowe-nt-dupe-confirm"
+          onClick={() => submitTask({ force: true })}
+          disabled={isBusy}
+        >
+          Create anyway
+        </button>
+      </div>
+    </div>
+  );
+
   const reviewView = (
     <form ref={formRef} onSubmit={handleSubmit} className="krowe-nt-form">
       <div className="krowe-nt-scroll">
@@ -826,6 +887,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
           </button>
         </div>
         {fileList}
+        {dupCallout}
         {error && <p className="krowe-nt-error">{error}</p>}
       </div>
       <div className="krowe-nt-foot krowe-nt-foot-solo">
@@ -905,6 +967,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
           </label>
         </div>
         {attachments}
+        {dupCallout}
         {error && <p className="krowe-nt-error">{error}</p>}
       </div>
       <div className="krowe-nt-foot krowe-nt-foot-solo">

@@ -63,7 +63,7 @@ function buildSystemPrompt(input: ExtractTasksInput): string {
     "",
     "For each task set:",
     "- title: short, imperative, specific to the deliverable ('Add CSV export to reports page'). The title is a label — it must never be the only place a requirement lives.",
-    "- description: what and why, with the key context from the call in 2-4 sentences. Preserve exact email addresses, dates, day counts, time windows, field names, status names, and quoted replacement copy VERBATIM — never paraphrase an exact value.",
+    "- description: what and why, with the key context from the call, written as a bullet list of 3–6 concise bullet points, each on its own line starting with '• ' (bullets only, no intro or trailing paragraph). Preserve exact email addresses, dates, day counts, time windows, field names, status names, and quoted replacement copy VERBATIM — never paraphrase an exact value.",
     "- checklist: when an action item has multiple requirements or steps (nested bullets, ';'-separated clauses, 'X and Y', 'then push it live'), list EACH one as its own checklist entry, preserving exact values. Completion criteria like 'then push it live' are checklist entries. Single-step tasks get an empty checklist. Every nested sub-bullet of the source item MUST appear as a checklist entry.",
     "- dependencies: what another person must provide before this task can proceed, as {owner, requirement} (e.g. Rahul sending the template). Only real blockers stated on the call.",
     "- owner: per the attribution rules above",

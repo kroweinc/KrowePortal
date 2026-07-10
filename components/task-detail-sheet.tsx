@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlignLeft,
@@ -157,6 +157,11 @@ function TaskDetailBody({
 
   const [toast, setToast] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "build" | "audit">("overview");
+  // Optimistic status drives the pipeline + hero pill so a move paints on click
+  // instead of waiting on the server action and the router.refresh() that
+  // follows it. Resets to task.status once the refresh brings the real value.
+  const [optimisticStatus, setOptimisticStatus] = useOptimistic(task.status);
+  const [, startStatusTransition] = useTransition();
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 1800);
@@ -187,8 +192,10 @@ function TaskDetailBody({
   }
 
   async function saveStatus(value: TaskStatus) {
-    if (value === task.status) return;
+    if (value === optimisticStatus) return;
     if (value === "done" && task.status !== "done") {
+      // Done goes through the deliverable dialog, so there's nothing to paint
+      // optimistically — the pipeline advances once the dialog commits.
       return new Promise<void>((resolve) => {
         requestDone({
           task,
@@ -201,13 +208,16 @@ function TaskDetailBody({
         });
       });
     }
-    const result = await updateTaskStatus(task.id, value);
-    if (result && "error" in result) {
-      setToast(result.error || "Couldn't update status");
-      return;
-    }
-    setToast(`Moved to ${statusLabel(value)}`);
-    router.refresh();
+    startStatusTransition(async () => {
+      setOptimisticStatus(value);
+      const result = await updateTaskStatus(task.id, value);
+      if (result && "error" in result) {
+        setToast(result.error || "Couldn't update status");
+        return;
+      }
+      setToast(`Moved to ${statusLabel(value)}`);
+      router.refresh();
+    });
   }
 
   // Operators don't drive the pipeline — they only sign off on work the builder
@@ -338,9 +348,9 @@ function TaskDetailBody({
         {/* HERO */}
         <header className="krowe-task-hero">
           <div className="krowe-task-hero-top">
-            <span className={`krowe-status-pill ${task.status}`}>
+            <span className={`krowe-status-pill ${optimisticStatus}`}>
               <span className="pulse" aria-hidden />
-              {statusLabel(task.status)}
+              {statusLabel(optimisticStatus)}
             </span>
             <span className={`krowe-prio-dot ${task.priority}`}>
               <span className="d" aria-hidden />
@@ -370,7 +380,7 @@ function TaskDetailBody({
         </header>
 
         {/* STATUS PIPELINE */}
-        <StatusPipeline status={task.status} role={role} onChange={saveStatus} />
+        <StatusPipeline status={optimisticStatus} role={role} onChange={saveStatus} />
 
         {/* Operator-only plain-English control */}
         {role === "operator" && (

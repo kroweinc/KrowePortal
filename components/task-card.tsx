@@ -22,18 +22,22 @@ import {
   isAwaitingApproval,
   relativeTime,
 } from "@/lib/utils";
-import type { Task, Role } from "@/lib/types";
+import type { Task, Role, TaskStatus } from "@/lib/types";
 
 interface TaskCardProps {
   task: Task;
   role: Role;
   engagementTitle?: string;
   onSelect?: (task: Task) => void;
+  // Optimistic plain-status mover supplied by the board so a move paints
+  // instantly. When absent (e.g. the staging board) the card calls the server
+  // action directly. Done/approval moves always go through their dialogs.
+  onStatusMove?: (taskId: string, status: TaskStatus) => void;
   onDragStart?: (task: Task) => void;
   onDragEnd?: () => void;
 }
 
-export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
+export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDragEnd }: TaskCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
   const requestDone = useRequestDone();
@@ -44,6 +48,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
     task,
     role,
     onOpen: onSelect ? () => onSelect(task) : undefined,
+    onStatusMove,
     requestDone,
     requestApproval,
   });
@@ -54,6 +59,8 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
       requestDone({ task });
     } else if (advance.kind === "approval") {
       requestApproval({ task });
+    } else if (onStatusMove) {
+      onStatusMove(task.id, advance.status);
     } else {
       await updateTaskStatus(task.id, advance.status);
     }

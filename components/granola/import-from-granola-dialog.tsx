@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ import {
   draftTasksFromTranscriptFile,
   approveGranolaTasks,
   approveExtractedTasks,
+  matchExistingOpenTasks,
   type ApprovedTaskDraft,
   type GranolaFolderItem,
   type GranolaImportTargetInput,
@@ -97,6 +98,11 @@ export function ImportFromGranolaDialog({
   const [busyNoteId, setBusyNoteId] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewState | null>(null);
   const [creating, setCreating] = useState(false);
+  // Extracted-title → existing OPEN task it likely duplicates, keyed by
+  // normalized title. Filled once the final draft list lands (below).
+  const [duplicateMatches, setDuplicateMatches] = useState<
+    Record<string, { id: string; title: string }>
+  >({});
   const [query, setQuery] = useState("");
   // Granola folders (paid workspaces only — [] hides the filter row) are
   // account-level, so they survive client switches and folder filtering.
@@ -207,6 +213,36 @@ export function ImportFromGranolaDialog({
       ? { kind: "engagement", engagementId: selectedEngagementId }
       : target;
 
+  // Primitive, so the match effect below doesn't refire on every render.
+  const reviewEngagementId =
+    effectiveTarget.kind === "engagement" ? effectiveTarget.engagementId : null;
+
+  // Once the authoritative draft list settles, flag which drafts look like a
+  // task already open in this engagement — the review badges & unchecks them so
+  // a re-recorded/overlapping call doesn't silently re-create existing tasks.
+  useEffect(() => {
+    // Matches are reset when a fresh review starts (onOpenChange / engagement
+    // switch), so the guard only needs to skip the async fetch — not clear here
+    // (a synchronous setState in an effect triggers cascading renders).
+    if (!review || review.streaming || review.drafts.length === 0 || !reviewEngagementId) {
+      return;
+    }
+    let cancelled = false;
+    matchExistingOpenTasks({
+      engagementId: reviewEngagementId,
+      titles: review.drafts.map((d) => d.title),
+    })
+      .then((matches) => {
+        if (!cancelled) setDuplicateMatches(matches);
+      })
+      .catch(() => {
+        if (!cancelled) setDuplicateMatches({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [review, reviewEngagementId]);
+
   async function loadNotes(
     cursor?: string,
     forTarget: GranolaImportTargetInput = effectiveTarget,
@@ -258,6 +294,7 @@ export function ImportFromGranolaDialog({
     if (!next) cancelStream();
     if (next) {
       setReview(null);
+      setDuplicateMatches({});
       resetPaste();
       setQuery("");
       setFolders([]);
@@ -271,6 +308,7 @@ export function ImportFromGranolaDialog({
   function onEngagementChange(id: string) {
     setSelectedEngagementId(id);
     setReview(null);
+    setDuplicateMatches({});
     resetPaste();
     setQuery("");
     setList({ status: "loading" });
@@ -537,6 +575,7 @@ export function ImportFromGranolaDialog({
           {review ? (
             <GranolaTaskReview
               drafts={review.drafts}
+              duplicateMatches={duplicateMatches}
               submitting={creating}
               streaming={review.streaming ?? false}
               sourceLabel={review.source.kind === "granola" ? "from the call" : "from the transcript"}
