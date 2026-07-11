@@ -117,7 +117,9 @@ type RoundData = {
 
 type WizardState =
   | { kind: "intro" }
-  | { kind: "loading"; label: string }
+  // `sections` accumulates the PRD content keys the model has streamed so far (the
+  // final, streamed round only) — it drives WizLoading's real progress meter.
+  | { kind: "loading"; label: string; sections?: string[] }
   | {
       kind: "questions";
       items: Question[];
@@ -246,6 +248,36 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
 const EXPECTED_FIRST_MS = 9000; // round 0: reading notes / preparing questions
 const EXPECTED_GENERATE_MS = 22000; // later rounds: may be the full PRD (the long one)
 
+// The PRD content keys the model streams (in document order), each mapped to the
+// section name shown as it's written. createPrdSectionScanner emits these keys as
+// they land, driving WizLoading's real progress meter. Trailing envelope keys that
+// aren't sections (e.g. contextSummary) are intentionally absent.
+const PRD_SECTION_LABELS: Record<string, string> = {
+  overview: "Overview",
+  goals: "Goals",
+  successMetrics: "Success metrics",
+  users: "Users & roles",
+  coreUserFlow: "Core user flow",
+  features: "Features",
+  requirements: "Requirements",
+  pagesScreens: "Pages & screens",
+  successCriteria: "Success criteria",
+  nonFunctionalRequirements: "Non-functional requirements",
+  scopeLater: "Out of scope",
+  futureExpansion: "Future expansion",
+  dataModel: "Data model",
+  integrations: "Integrations",
+  techStack: "Tech stack",
+  uxFlows: "UX flows",
+  assumptions: "Assumptions",
+  constraintsDetail: "Constraints",
+  risks: "Risks",
+  openQuestions: "Open questions",
+  milestoneList: "Timeline & milestones",
+  milestoneDueDate: "Deadline",
+};
+const PRD_SECTION_TOTAL = Object.keys(PRD_SECTION_LABELS).length;
+
 // m:ss for a duration in ms.
 function fmtClock(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -260,10 +292,14 @@ function WizLoading({
   label,
   expectedMs,
   onCancel,
+  sections,
 }: {
   label: string;
   expectedMs: number;
   onCancel?: () => void;
+  /** Content keys streamed so far (final PRD round). When present, the meter shows
+      real progress off the model's actual output instead of a time estimate. */
+  sections?: string[];
 }) {
   const [elapsed, setElapsed] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -275,8 +311,16 @@ function WizLoading({
     return () => clearInterval(t);
   }, []);
 
+  // Real streamed progress: bar fills as the model writes each section, capped just
+  // shy of 100% until the parent unmounts on `done` (same "snap to done" feel as the
+  // eased estimate). Falls back to the time estimate for question rounds / blocking.
+  const live = !!sections && sections.length > 0;
+  const seen = live ? Math.min(sections!.length, PRD_SECTION_TOTAL) : 0;
+  const currentLabel = live ? PRD_SECTION_LABELS[sections![sections!.length - 1]] ?? "Finishing up" : "";
+
   const ratio = elapsed / expectedMs;
-  const pct = Math.min(92, (1 - Math.exp(-1.6 * ratio)) * 92);
+  const estPct = Math.min(92, (1 - Math.exp(-1.6 * ratio)) * 92);
+  const pct = live ? Math.min(96, (seen / PRD_SECTION_TOTAL) * 100) : estPct;
   const over = elapsed >= expectedMs;
 
   return (
@@ -297,7 +341,13 @@ function WizLoading({
 
       <div className="prd-progress-meta">
         <span>{fmtClock(elapsed)} elapsed</span>
-        <span>{over ? "Taking a little longer than usual…" : `~${fmtClock(expectedMs - elapsed)} left`}</span>
+        {live ? (
+          <span>
+            Writing {currentLabel} · {String(seen).padStart(2, "0")}/{String(PRD_SECTION_TOTAL).padStart(2, "0")}
+          </span>
+        ) : (
+          <span>{over ? "Taking a little longer than usual…" : `~${fmtClock(expectedMs - elapsed)} left`}</span>
+        )}
       </div>
 
       {onCancel && (
@@ -498,6 +548,12 @@ export function PrdWizard({
         try {
           const evt = await streamDraft("/api/ai/prd/stream", payload, {
             signal: controller.signal,
+            // Each section the model streams advances the real progress meter. Guard
+            // on the gen token so a cancelled round's late deltas can't update state.
+            onSection: (key) => {
+              if (myGen !== genId.current) return;
+              setState((s) => (s.kind === "loading" ? { ...s, sections: [...(s.sections ?? []), key] } : s));
+            },
           });
           if (myGen !== genId.current) return;
           if (evt.type === "questions") handle({ kind: "questions", items: evt.items });
@@ -1066,7 +1122,7 @@ export function PrdWizard({
             <section className="ed-sheet">
               <div className="ed-sheet-body">
                 <div className="ed-sheet-inner">
-                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} />
+                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} sections={state.sections} />
                 </div>
               </div>
             </section>
@@ -1074,7 +1130,7 @@ export function PrdWizard({
         ) : (
           // First load (no answers yet): in-page progress meter.
           <div className="prd-loading">
-            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} />
+            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} sections={state.sections} />
           </div>
         ))}
 

@@ -5,6 +5,7 @@
  */
 
 import type { ExtractedTaskDraft, Question } from "@/lib/ai/schemas";
+import { createPrdSectionScanner } from "@/lib/ai/prd-section-scanner";
 
 /** The terminal event of a stream — what the wizard acts on. */
 export type StreamFinal =
@@ -20,11 +21,17 @@ type WireEvent = { type: "delta"; text: string } | StreamFinal;
  * come back as a JSON body and surface as an `error` event. Aborting `opts.signal`
  * cancels the fetch (and the server generation); the resulting AbortError
  * propagates to the caller to handle alongside its gen token.
+ *
+ * `opts.onSection` (optional) turns the model's text deltas — otherwise discarded —
+ * into honest progress: it fires with each top-level PRD `content` key the instant
+ * that section streams in, so the wizard can show a real "drafting section N of M"
+ * meter instead of a time-based estimate. It fires only during a finished-PRD
+ * round (question rounds carry no `content` object, so the scanner stays silent).
  */
 export async function streamDraft(
   url: string,
   body: unknown,
-  opts: { signal: AbortSignal }
+  opts: { signal: AbortSignal; onSection?: (key: string) => void }
 ): Promise<StreamFinal> {
   const res = await fetch(url, {
     method: "POST",
@@ -50,6 +57,8 @@ export async function streamDraft(
   const decoder = new TextDecoder();
   let buffer = "";
   let final: StreamFinal | null = null;
+  // Scans the streamed PRD JSON and yields each top-level section key as it lands.
+  const scanSection = createPrdSectionScanner();
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -68,9 +77,13 @@ export async function streamDraft(
       } catch {
         continue;
       }
-      // Text deltas only drove the (now removed) section checklist — ignore them
-      // and act on the terminal event.
-      if (evt.type !== "delta") final = evt;
+      // Drive real progress off the text deltas (feeding the section scanner), then
+      // act on the terminal event.
+      if (evt.type === "delta") {
+        if (opts.onSection) for (const key of scanSection(evt.text)) opts.onSection(key);
+      } else {
+        final = evt;
+      }
     }
   }
 
