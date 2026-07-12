@@ -34,6 +34,9 @@ async function callJson(
     model: AI_MODEL,
     max_completion_tokens: 3000,
     response_format: responseFormat,
+    // The ~1.5k-token system prompt (free-tier limits + rules) is fully static and
+    // re-sent on every check — a stable key lets OpenAI cache that prefix.
+    prompt_cache_key: "free-tier-fit-v1",
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },

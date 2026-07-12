@@ -12,7 +12,23 @@
  * envelope (`{ "kind": "questions", "items": [ … ] }`) has no `content` object, so
  * the scanner simply never arms and yields nothing.
  */
-export function createPrdSectionScanner(): (delta: string) => string[] {
+/** The scanner is callable (feed it deltas → get newly-completed section keys) and
+    also exposes `safeContentBody()` for progressive rendering: the JSON body of all
+    COMPLETE sections so far (see the method's doc). */
+export type PrdSectionScanner = ((delta: string) => string[]) & {
+  /**
+   * The JSON body — comma-separated `"key": value` pairs, WITHOUT the surrounding
+   * braces — of every top-level content section completed so far, i.e. every pair
+   * before the section currently being written. Wrap in `{ … }` to `JSON.parse`.
+   * Returns null until the content object has opened and at least one full section
+   * precedes the current one. Because it stops at the last section boundary, the
+   * half-written value is never included — a caller can render each finished
+   * section with no partial-JSON parsing and no flicker.
+   */
+  safeContentBody(): string | null;
+};
+
+export function createPrdSectionScanner(): PrdSectionScanner {
   let buf = "";
   // Scan cursor: everything before `pos` has been consumed by the state machine.
   let pos = 0;
@@ -32,8 +48,14 @@ export function createPrdSectionScanner(): (delta: string) => string[] {
   // Whether the currently-open string began at a key position (captured on the
   // opening quote, since depth/expectKey can change before it closes).
   let keyContext = false;
+  // Index just after the content object's opening `{` (set on arm), and the buffer
+  // index where the most-recently-emitted section key began. Everything in
+  // buf[contentStart .. lastKeyStart) is complete, comma-separated key:value pairs —
+  // the value of the current section (which starts at lastKeyStart) is excluded.
+  let contentStart = -1;
+  let lastKeyStart = -1;
 
-  return function push(delta: string): string[] {
+  const push = (delta: string): string[] => {
     if (finished) return [];
     buf += delta;
     const found: string[] = [];
@@ -47,6 +69,7 @@ export function createPrdSectionScanner(): (delta: string) => string[] {
       if (brace === -1) return found;
       armed = true;
       pos = brace + 1;
+      contentStart = brace + 1;
     }
 
     for (; pos < buf.length; pos++) {
@@ -59,7 +82,10 @@ export function createPrdSectionScanner(): (delta: string) => string[] {
           // A string that opened at the key position (depth 0, expecting a key) is
           // a section key — emit it the moment it closes. Section keys are plain
           // identifiers with no escapes, so a raw slice is safe.
-          if (keyContext) found.push(buf.slice(stringStart + 1, pos));
+          if (keyContext) {
+            found.push(buf.slice(stringStart + 1, pos));
+            lastKeyStart = stringStart;
+          }
         }
         continue;
       }
@@ -86,4 +112,14 @@ export function createPrdSectionScanner(): (delta: string) => string[] {
     }
     return found;
   };
+
+  return Object.assign(push, {
+    safeContentBody(): string | null {
+      if (!armed || lastKeyStart < 0) return null;
+      // Strip the trailing comma/whitespace before the current key so `{ body }`
+      // parses cleanly.
+      const body = buf.slice(contentStart, lastKeyStart).replace(/[\s,]*$/, "");
+      return body.length > 0 ? body : null;
+    },
+  });
 }

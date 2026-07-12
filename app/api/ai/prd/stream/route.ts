@@ -64,6 +64,9 @@ export async function POST(request: NextRequest) {
             model: AI_MODEL,
             max_completion_tokens: PRD_MAX_TOKENS,
             response_format: prdResponseFormat(genInput.forceFinal),
+            // Shares the static system prefix with the blocking path — same key so
+            // both hit the same cached prefix (see callOpenAI in generate-prd.ts).
+            prompt_cache_key: "prd-gen-v1",
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },

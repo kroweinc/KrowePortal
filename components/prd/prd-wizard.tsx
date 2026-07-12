@@ -25,6 +25,7 @@ import {
 import { draftPrd } from "@/lib/actions/prds";
 import type { DraftPrdResult } from "@/lib/prd/draft-core";
 import { streamDraft } from "@/lib/ai/stream-client";
+import { PrdDocument } from "@/components/prd/prd-document";
 import {
   addSopTranscriptText,
   uploadSopTranscript,
@@ -33,7 +34,7 @@ import {
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
 import { SCOPE_STAGE_COUNT, SCOPE_OPENER, deepStageIndex, scopeStageAt } from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
-import type { ProjectSopTranscript } from "@/lib/types";
+import type { ProjectSopTranscript, PrdContent } from "@/lib/types";
 
 const OTHER = "__other__";
 
@@ -119,7 +120,8 @@ type WizardState =
   | { kind: "intro" }
   // `sections` accumulates the PRD content keys the model has streamed so far (the
   // final, streamed round only) — it drives WizLoading's real progress meter.
-  | { kind: "loading"; label: string; sections?: string[] }
+  // `partial` is the PRD-so-far (completed sections) for the live document preview.
+  | { kind: "loading"; label: string; sections?: string[]; partial?: PrdContent }
   | {
       kind: "questions";
       items: Question[];
@@ -234,6 +236,37 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// While the final PRD streams, show it building for real: each section pops into
+// the stage the instant the model finishes writing it (fed by streamDraft's
+// onContent). Replaces the answer-facts DraftStage during the final round so the
+// ~30s wait is a document you watch assemble, not a bare progress bar. Reuses the
+// read-only PrdDocument renderer (it guards every section, so a partial is safe)
+// and the existing .ed-doc/.ed-fill styling — no new layout.
+function LivePrdStage({ content, docTitle, docMeta }: { content: PrdContent; docTitle: string; docMeta: string }) {
+  return (
+    <section className="ed-stage">
+      <div className="ed-stage-head">
+        <span className="ed-stage-eyebrow">
+          <Ember size={14} />
+          Drafting live
+        </span>
+      </div>
+      <div className="ed-stage-body">
+        <h2 className="ed-stage-h">Your PRD, taking shape.</h2>
+        <div className="ed-doc">
+          <div className="ed-doc-top">
+            <span className="ed-doc-title">{docTitle}</span>
+            <span className="ed-doc-meta">{docMeta}</span>
+          </div>
+          <div className="ed-fill">
+            <PrdDocument content={content} />
           </div>
         </div>
       </div>
@@ -553,6 +586,11 @@ export function PrdWizard({
             onSection: (key) => {
               if (myGen !== genId.current) return;
               setState((s) => (s.kind === "loading" ? { ...s, sections: [...(s.sections ?? []), key] } : s));
+            },
+            // The PRD-so-far, for the live document preview. Same gen-token guard.
+            onContent: (partial) => {
+              if (myGen !== genId.current) return;
+              setState((s) => (s.kind === "loading" ? { ...s, partial } : s));
             },
           });
           if (myGen !== genId.current) return;
@@ -1105,34 +1143,57 @@ export function PrdWizard({
       )}
 
       {state.kind === "loading" &&
-        (back.length > 0 ? (
-          // Mid-interview: keep the editorial overlay up with the draft visible
-          // on the left while the next round (or the final PRD) generates.
-          <div className="ed">
-            <DraftStage
-              facts={roundToAnswers(back).map((a) => ({
-                key: a.questionId,
-                label: factLabel(a.question),
-                value: a.answer,
-                status: "done" as const,
-              }))}
-              docTitle={title.trim() || `${projectName} — PRD`}
-              docMeta={projectName.toUpperCase()}
-            />
-            <section className="ed-sheet">
-              <div className="ed-sheet-body">
-                <div className="ed-sheet-inner">
-                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} sections={state.sections} />
-                </div>
+        (() => {
+          const docTitle = title.trim() || `${projectName} — PRD`;
+          const docMeta = projectName.toUpperCase();
+          // Once the final PRD starts streaming its sections, show it building live.
+          const livePartial = state.partial && Object.keys(state.partial).length > 0 ? state.partial : null;
+
+          if (livePartial) {
+            // The document assembles on the left; the meter + Cancel ride along right.
+            return (
+              <div className="ed">
+                <LivePrdStage content={livePartial} docTitle={docTitle} docMeta={docMeta} />
+                <section className="ed-sheet">
+                  <div className="ed-sheet-body">
+                    <div className="ed-sheet-inner">
+                      <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} sections={state.sections} />
+                    </div>
+                  </div>
+                </section>
               </div>
-            </section>
-          </div>
-        ) : (
-          // First load (no answers yet): in-page progress meter.
-          <div className="prd-loading">
-            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} sections={state.sections} />
-          </div>
-        ))}
+            );
+          }
+
+          return back.length > 0 ? (
+            // Mid-interview: keep the editorial overlay up with the draft visible
+            // on the left while the next round (or the final PRD) generates.
+            <div className="ed">
+              <DraftStage
+                facts={roundToAnswers(back).map((a) => ({
+                  key: a.questionId,
+                  label: factLabel(a.question),
+                  value: a.answer,
+                  status: "done" as const,
+                }))}
+                docTitle={docTitle}
+                docMeta={docMeta}
+              />
+              <section className="ed-sheet">
+                <div className="ed-sheet-body">
+                  <div className="ed-sheet-inner">
+                    <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} sections={state.sections} />
+                  </div>
+                </div>
+              </section>
+            </div>
+          ) : (
+            // First load (no answers yet): in-page progress meter.
+            <div className="prd-loading">
+              <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} sections={state.sections} />
+            </div>
+          );
+        })()}
 
       {state.kind === "questions" &&
         (() => {
