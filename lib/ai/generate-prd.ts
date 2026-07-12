@@ -131,6 +131,12 @@ function buildSystemPrompt(forceFinal: boolean, deepContext = false, stageIndex?
 No-context mode (the builder provided NO written notes): whenever you return the finished PRD (kind:"prd"), ALSO include a top-level "contextSummary" — a concise 1–2 paragraph business-context narrative (what the business does, the problem being solved, who the users are, and the goal) synthesized from the answers, written so it can be saved and reused as the starting context for future documents about this client.`
     : "";
 
+  // `base` is deliberately kept BYTE-IDENTICAL across every round (deep or not,
+  // final or interview) so it forms one large static prefix OpenAI can cache
+  // (prompt_cache_key: "prd-gen-v1"). All round-varying text — the deep-mode
+  // contextSummary instruction, the forceFinal/interview clauses, the staged block
+  // — is appended AFTER base, never spliced into it. Don't reintroduce a volatile
+  // value here or the shared prefix (and its cache hit) shrinks.
   const base = `You are drafting an OUTBOUND Product Requirements Document (PRD) for a prospective software product, working from a builder's notes about a client they are pitching, plus answers the builder gave to your clarifying questions. The builder refines it and sends it to the prospect to align on scope before any contract. There is no existing codebase.
 
 Voice: clear, concrete, non-technical where possible. A small-business owner should recognize their own product. No marketing fluff.
@@ -143,7 +149,7 @@ ${COST_RULES}
 
 ${STACK_RULES}
 
-${CONDITIONAL_RULES}${contextSummaryBlock}
+${CONDITIONAL_RULES}
 
 Output ONLY valid JSON.`;
 
@@ -153,14 +159,14 @@ Output ONLY valid JSON.`;
   const staged = deepContext && stageIndex != null ? buildStagedBlock(stageIndex) : "";
 
   if (forceFinal) {
-    return `${base}
+    return `${base}${contextSummaryBlock}
 
 You have reached the question limit. Return a finished PRD now:
 { "kind": "prd", "content": { ...the full section object... } }
 Fill every section from the notes + answers, with rich, concrete content. Do NOT ask any more questions, and do NOT leave any open questions — for anything still unknown, state a sensible assumption under "assumptions" and keep openQuestions empty. If an exact deadline date was provided, set constraintsDetail.deadline to that date in MM/DD/YYYY format, set milestoneDueDate to that date in MM/DD/YYYY format, and back-plan milestoneList so the final milestone's dueDate equals it and every dueDate is a real calendar date in MM/DD/YYYY format.`;
   }
 
-  return `${base}
+  return `${base}${contextSummaryBlock}
 
 Your goal is to interview the builder until you can fill EVERY section richly with NO open questions remaining.
 - BEFORE asking anything, mine the business context (especially any "SOP / Discovery Call Transcript"), the builder's notes, and the answers so far for facts already stated — but only facts about the SAME product the builder is specifying now (see "Scope authority" above). If the saved business context describes a DIFFERENT product than the builder's stated idea, DISREGARD it for scope and interview around the stated idea as if there were no prior context. NEVER ask a question whose answer is already given (in matching context, the notes, or the answers) or can be reasonably inferred from it — treat it as known and write it straight into the PRD. Re-asking something discovery already captured is a failure. Example: if the SOP says "mainly me, the front desk, and our instructors — I'd want admin access and instructors should add notes and update cases," the staff roles ARE established → do NOT ask "which staff roles should have accounts." When a topic is only PARTIALLY answered, ask ONLY about the missing slice (e.g. the front desk's exact permissions), never the part already answered.
@@ -207,6 +213,11 @@ async function callOpenAI(
       model: AI_MODEL,
       max_completion_tokens: maxTokens,
       response_format: responseFormat,
+      // Steer OpenAI's automatic prompt cache: the large static system prefix
+      // (SECTIONS + rules) is identical across rounds, so a stable key raises the
+      // cache-hit rate on the repeated prefix. Quality-neutral — caching never
+      // changes output.
+      prompt_cache_key: "prd-gen-v1",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

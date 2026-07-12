@@ -35,50 +35,62 @@ export interface ExtractTasksInput {
   builderName?: string | null;
 }
 
-function buildSystemPrompt(input: ExtractTasksInput): string {
-  const builderIdentity = input.builderName
-    ? `The builder's name is "${input.builderName}" — when the notes or transcript assign work to that name (or its first name), that IS the builder: set owner to exactly 'builder'.`
-    : "If speakers are only labeled 'Me'/'Them', 'Me' is the builder.";
+// The full extraction instruction block, kept BYTE-IDENTICAL across every call so
+// it forms one large static prefix OpenAI can cache (prompt_cache_key:
+// "granola-task-extraction-v1"). The ONLY per-builder text — the builder's identity
+// — is appended AFTER this base in buildSystemPrompt, never spliced into it, so the
+// shared cacheable prefix stays intact across calls (and across builders). The
+// `${TASK_TAGS}` interpolation is a compile-time constant, so this whole string is
+// still identical every request. Don't reintroduce a per-call value here or the
+// cache hit shrinks.
+const EXTRACTION_SYSTEM_BASE = [
+  "You extract action items from a client-call transcript and its meeting notes for a solo software builder. Capture EVERY participant's explicitly assigned action items — the builder's own work AND commitments made by other participants (client-side homework, third-party follow-ups). Each task carries an owner; assignee filtering happens AFTER extraction, so never discard another person's task during extraction.",
+  "",
+  "Work through the call in three passes:",
+  "1. If meeting notes / a summary are present, enumerate EVERY assigned action item in them and account for each one: each becomes exactly one task, or matches an exclusion. Notes almost always restate each commitment — an assigned note item you did not turn into a task is a defect. One bullet = one task: never fold two separately-listed items into one task just because they are similar, and never split one bullet into several tasks.",
+  "2. Scan the transcript top to bottom and flag every commitment or request cue: builder commitments ('I'll…', 'I can…', 'let me…'), client asks ('can we…', 'could you…', 'we need…'), other participants' commitments ('Rahul said he'd…', 'I'll send you the list'), problem reports, and agreements even when tentative. Pay special attention to the wrap-up — action items are usually restated at the end.",
+  "3. Merge duplicate MENTIONS of the same deliverable into one task (a task recapped at the end of the call is still one task), drop anything matching the exclusions, and turn the rest into tasks.",
+  "",
+  "Owner attribution — strict rules:",
+  "- The builder is named in the 'Builder identity' note at the END of these instructions; when the notes or transcript assign work to the builder — by that name, its first name, or (when speakers are only labeled 'Me'/'Them') as 'Me' — set owner to exactly 'builder'.",
+  "- Set owner to 'builder' ONLY when the notes or transcript explicitly assign the work to the builder, or the builder explicitly committed to it. Never assign work to the builder just because it sounds technical or plausible.",
+  "- For work another participant committed to, set owner to that person's name as written ('Rahul', 'Kathleen'). Never invent a name.",
+  "- Another person sending the builder a file, template, list, or link is THAT PERSON'S action item (owner = their name). If a builder task cannot proceed until it arrives, also record it in that builder task's `dependencies` — it is NOT a separate builder task.",
+  "- If ownership is genuinely ambiguous, keep the task, OMIT owner, and set confidence to 'medium' or 'low' — never silently guess an owner.",
+  "",
+  "Do NOT create tasks for:",
+  "- chit-chat, scheduling the next meeting, pleasantries",
+  "- general discussion, context, or an implied next step nobody explicitly took on ('we should probably…' that was never assigned)",
+  "- pure brainstorming with no ask behind it",
+  "- duplicate mentions of the same deliverable (merge them into one task)",
+  "",
+  "For each task set:",
+  "- title: short, imperative, specific to the deliverable ('Add CSV export to reports page'). The title is a label — it must never be the only place a requirement lives.",
+  "- description: what and why, with the key context from the call, written as a bullet list of 3–6 concise bullet points, each on its own line starting with '• ' (bullets only, no intro or trailing paragraph). Preserve exact email addresses, dates, day counts, time windows, field names, status names, and quoted replacement copy VERBATIM — never paraphrase an exact value.",
+  "- checklist: when an action item has multiple requirements or steps (nested bullets, ';'-separated clauses, 'X and Y', 'then push it live'), list EACH one as its own checklist entry, preserving exact values. Completion criteria like 'then push it live' are checklist entries. Single-step tasks get an empty checklist. Every nested sub-bullet of the source item MUST appear as a checklist entry.",
+  "- dependencies: what another person must provide before this task can proceed, as {owner, requirement} (e.g. Rahul sending the template). Only real blockers stated on the call.",
+  "- owner: per the attribution rules above",
+  "- confidence: 'high' when explicitly assigned in plain terms; 'medium' when assignment or scope required interpretation; 'low' when you are unsure it was really agreed.",
+  "- priority: urgency as expressed on the call (default 'medium' when unstated)",
+  "- type: 'feature' (new capability), 'bug' (broken behavior), or 'change' (tweak to existing behavior)",
+  `- tags: at most one of: ${TASK_TAGS.join(", ")}`,
+  "- sourceQuote: a short verbatim excerpt (≤300 chars) that grounds the task — for a note bullet, the bullet's own line copied exactly",
+  "",
+  "Every task must be grounded in a specific moment of the call: copy sourceQuote verbatim. If no line of the transcript or notes supports a task, do not invent it.",
+  "These drafts are reviewed before anything is created, so when something WAS explicitly assigned, err on the side of including it — a missed assigned task costs real work; an extra draft just gets unchecked. That leeway applies only to genuinely assigned items, never to unassigned discussion.",
+  "Return at most 40 tasks; if the call somehow yields more, keep the 40 most concrete.",
+  "If the call contains no action items at all, return an empty items array.",
+  "Return JSON matching the provided schema exactly.",
+].join("\n");
 
-  return [
-    "You extract action items from a client-call transcript and its meeting notes for a solo software builder. Capture EVERY participant's explicitly assigned action items — the builder's own work AND commitments made by other participants (client-side homework, third-party follow-ups). Each task carries an owner; assignee filtering happens AFTER extraction, so never discard another person's task during extraction.",
-    "",
-    "Work through the call in three passes:",
-    "1. If meeting notes / a summary are present, enumerate EVERY assigned action item in them and account for each one: each becomes exactly one task, or matches an exclusion. Notes almost always restate each commitment — an assigned note item you did not turn into a task is a defect. One bullet = one task: never fold two separately-listed items into one task just because they are similar, and never split one bullet into several tasks.",
-    "2. Scan the transcript top to bottom and flag every commitment or request cue: builder commitments ('I'll…', 'I can…', 'let me…'), client asks ('can we…', 'could you…', 'we need…'), other participants' commitments ('Rahul said he'd…', 'I'll send you the list'), problem reports, and agreements even when tentative. Pay special attention to the wrap-up — action items are usually restated at the end.",
-    "3. Merge duplicate MENTIONS of the same deliverable into one task (a task recapped at the end of the call is still one task), drop anything matching the exclusions, and turn the rest into tasks.",
-    "",
-    "Owner attribution — strict rules:",
-    `- ${builderIdentity}`,
-    "- Set owner to 'builder' ONLY when the notes or transcript explicitly assign the work to the builder, or the builder explicitly committed to it. Never assign work to the builder just because it sounds technical or plausible.",
-    "- For work another participant committed to, set owner to that person's name as written ('Rahul', 'Kathleen'). Never invent a name.",
-    "- Another person sending the builder a file, template, list, or link is THAT PERSON'S action item (owner = their name). If a builder task cannot proceed until it arrives, also record it in that builder task's `dependencies` — it is NOT a separate builder task.",
-    "- If ownership is genuinely ambiguous, keep the task, OMIT owner, and set confidence to 'medium' or 'low' — never silently guess an owner.",
-    "",
-    "Do NOT create tasks for:",
-    "- chit-chat, scheduling the next meeting, pleasantries",
-    "- general discussion, context, or an implied next step nobody explicitly took on ('we should probably…' that was never assigned)",
-    "- pure brainstorming with no ask behind it",
-    "- duplicate mentions of the same deliverable (merge them into one task)",
-    "",
-    "For each task set:",
-    "- title: short, imperative, specific to the deliverable ('Add CSV export to reports page'). The title is a label — it must never be the only place a requirement lives.",
-    "- description: what and why, with the key context from the call, written as a bullet list of 3–6 concise bullet points, each on its own line starting with '• ' (bullets only, no intro or trailing paragraph). Preserve exact email addresses, dates, day counts, time windows, field names, status names, and quoted replacement copy VERBATIM — never paraphrase an exact value.",
-    "- checklist: when an action item has multiple requirements or steps (nested bullets, ';'-separated clauses, 'X and Y', 'then push it live'), list EACH one as its own checklist entry, preserving exact values. Completion criteria like 'then push it live' are checklist entries. Single-step tasks get an empty checklist. Every nested sub-bullet of the source item MUST appear as a checklist entry.",
-    "- dependencies: what another person must provide before this task can proceed, as {owner, requirement} (e.g. Rahul sending the template). Only real blockers stated on the call.",
-    "- owner: per the attribution rules above",
-    "- confidence: 'high' when explicitly assigned in plain terms; 'medium' when assignment or scope required interpretation; 'low' when you are unsure it was really agreed.",
-    "- priority: urgency as expressed on the call (default 'medium' when unstated)",
-    "- type: 'feature' (new capability), 'bug' (broken behavior), or 'change' (tweak to existing behavior)",
-    `- tags: at most one of: ${TASK_TAGS.join(", ")}`,
-    "- sourceQuote: a short verbatim excerpt (≤300 chars) that grounds the task — for a note bullet, the bullet's own line copied exactly",
-    "",
-    "Every task must be grounded in a specific moment of the call: copy sourceQuote verbatim. If no line of the transcript or notes supports a task, do not invent it.",
-    "These drafts are reviewed before anything is created, so when something WAS explicitly assigned, err on the side of including it — a missed assigned task costs real work; an extra draft just gets unchecked. That leeway applies only to genuinely assigned items, never to unassigned discussion.",
-    "Return at most 40 tasks; if the call somehow yields more, keep the 40 most concrete.",
-    "If the call contains no action items at all, return an empty items array.",
-    "Return JSON matching the provided schema exactly.",
-  ].join("\n");
+function buildSystemPrompt(input: ExtractTasksInput): string {
+  // The ONE per-builder line — appended last so EXTRACTION_SYSTEM_BASE stays a
+  // cacheable static prefix (see the note on the constant). Same instruction as
+  // before, just moved out of the middle of the attribution rules.
+  const builderIdentity = input.builderName
+    ? `Builder identity: the builder's name is "${input.builderName}" — when the notes or transcript assign work to that name (or its first name), that IS the builder: set owner to exactly 'builder'.`
+    : "Builder identity: no name was given — if speakers are only labeled 'Me'/'Them', 'Me' is the builder.";
+  return `${EXTRACTION_SYSTEM_BASE}\n\n${builderIdentity}`;
 }
 
 function buildUserPrompt(input: ExtractTasksInput): string {
@@ -114,6 +126,12 @@ export function buildExtractionParams(input: ExtractTasksInput) {
     // "low") via runChat/runChatStream — the deterministic post-process safety
     // net (completeness, misattribution repair) backstops the recall a deeper
     // pass would buy, at a fraction of the latency.
+    // Steer OpenAI's automatic prompt cache: EXTRACTION_SYSTEM_BASE (the ~40-line
+    // instruction block) is a large static prefix re-sent on every extraction, so a
+    // stable key raises the cache-hit rate on that prefix — cutting TTFT with zero
+    // quality change (caching never alters output). Shared by the blocking and
+    // streaming paths since both build params here.
+    prompt_cache_key: "granola-task-extraction-v1",
     response_format: jsonResponseFormat(ModelExtractTasksResult, "granola_task_extraction"),
     messages: [
       { role: "system", content: buildSystemPrompt(input) },
