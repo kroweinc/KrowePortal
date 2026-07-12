@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useRef } from "react";
+import { useState, useTransition, useEffect, useRef, useCallback } from "react";
 import { toast } from "sonner";
 import { Paperclip, X } from "lucide-react";
 import {
@@ -23,6 +23,21 @@ import type { Task } from "@/lib/types";
 
 function getExt(fileName: string) {
   return "." + (fileName.split(".").pop()?.toLowerCase() ?? "bin");
+}
+
+/** Screenshots land on the clipboard as a nameless (or generic "image.png")
+ *  blob, so give pasted images a unique, correctly-suffixed name. Named files
+ *  copied from disk keep their own name. */
+function pastedImageName(file: File, index: number): string {
+  const original = file.name?.trim();
+  const usable =
+    original &&
+    original.toLowerCase() !== "image.png" &&
+    ALLOWED_ATTACHMENT_EXTENSIONS.has(getExt(original));
+  if (usable) return original;
+  const sub = file.type.split("/")[1] ?? "png";
+  const ext = sub === "svg+xml" ? "svg" : sub === "jpeg" ? "jpg" : sub;
+  return `pasted-image-${Date.now()}-${index + 1}.${ext}`;
 }
 
 function formatBytes(bytes: number) {
@@ -55,13 +70,11 @@ export function ApprovalDeliverableDialog({
     }
   }, [open]);
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
+  const stageFiles = useCallback((files: File[]) => {
     const valid: File[] = [];
     for (const file of files) {
       if (file.size > MAX_ATTACHMENT_SIZE) {
-        toast.error(`${file.name} exceeds the 25 MB limit`);
+        toast.error(`${file.name || "Pasted image"} exceeds the 25 MB limit`);
         continue;
       }
       if (!ALLOWED_ATTACHMENT_EXTENSIONS.has(getExt(file.name))) {
@@ -70,7 +83,31 @@ export function ApprovalDeliverableDialog({
       }
       valid.push(file);
     }
-    setStagedFiles((prev) => [...prev, ...valid]);
+    if (valid.length) setStagedFiles((prev) => [...prev, ...valid]);
+  }, []);
+
+  // Paste-to-attach: while the dialog is open, capture screenshots/images from
+  // the clipboard (⌘V) anywhere in the dialog and stage them like picked files.
+  // Non-image pastes (e.g. text into the note) fall through untouched.
+  useEffect(() => {
+    if (!open) return;
+    function onPaste(e: ClipboardEvent) {
+      const images = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+        f.type.startsWith("image/")
+      );
+      if (images.length === 0) return;
+      e.preventDefault();
+      stageFiles(images.map((file, i) => new File([file], pastedImageName(file, i), { type: file.type })));
+      toast.success(images.length === 1 ? "Image pasted" : `${images.length} images pasted`);
+    }
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [open, stageFiles]);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    stageFiles(files);
   }
 
   function removeStaged(idx: number) {
@@ -168,7 +205,7 @@ export function ApprovalDeliverableDialog({
                 disabled={isPending}
                 className="w-full rounded-lg border border-dashed border-neutral-200 py-4 text-center text-xs text-neutral-400 hover:border-neutral-300 hover:text-neutral-600 transition-colors disabled:opacity-50"
               >
-                Click to attach files (PDF, HTML, screenshots, text, etc.)
+                Click to attach files, or paste a screenshot (⌘V)
               </button>
             ) : (
               <ul className="space-y-1.5">

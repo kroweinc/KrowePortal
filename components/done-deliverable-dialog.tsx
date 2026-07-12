@@ -19,6 +19,7 @@ import {
   getEngagementBranchesCached,
   refreshEngagementBranches,
   type EngagementBranch,
+  type PreloadedBranches,
 } from "@/lib/actions/get-engagement-branches";
 import { BranchChipPicker } from "@/components/branch-chip-picker";
 import { isDefaultBranch } from "@/lib/tasks/staging-grouping";
@@ -42,7 +43,10 @@ function formatBytes(bytes: number) {
 interface DoneDeliverableDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task: Pick<Task, "id" | "title"> | null;
+  task: Pick<Task, "id" | "title" | "engagement_id"> | null;
+  // Server-preloaded branch list for the task's engagement, so the picker paints
+  // instantly with no on-open fetch. Falls back to the cached fetch when absent.
+  preloaded?: PreloadedBranches;
   onSaved: () => void;
 }
 
@@ -50,6 +54,7 @@ export function DoneDeliverableDialog({
   open,
   onOpenChange,
   task,
+  preloaded,
   onSaved,
 }: DoneDeliverableDialogProps) {
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
@@ -95,6 +100,18 @@ export function DoneDeliverableDialog({
   // to a hidden picker when the task has no linked repo.
   useEffect(() => {
     if (!open || !task) return;
+
+    // Instant paint: when the server preheated this engagement's cached branch
+    // list, hydrate straight from it — no fetch, no "Loading branches…" flash.
+    if (preloaded && preloaded.branches.length > 0) {
+      setBranches(preloaded.branches);
+      setDefaultBranch(preloaded.defaultBranch);
+      // Default to "main" so the common case is one click away.
+      setBranch(preloaded.defaultBranch);
+      setBranchState("ready");
+      return;
+    }
+
     let cancelled = false;
     setBranchState("loading");
     getEngagementBranchesCached(task.id)
@@ -116,7 +133,7 @@ export function DoneDeliverableDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, task]);
+  }, [open, task, preloaded]);
 
   function selectBranch(next: string | null, pushed: boolean) {
     setBranch(next);

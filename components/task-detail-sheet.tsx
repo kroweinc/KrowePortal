@@ -12,7 +12,6 @@ import {
   Paperclip,
   RotateCcw,
   Sparkles,
-  Undo2,
   WandSparkles,
   X,
 } from "lucide-react";
@@ -36,7 +35,7 @@ import {
   InlineSelect,
   InlineEstimate,
 } from "@/components/inline-edit";
-import { approveTask, updateTask, updateTaskStatus, withdrawTaskApproval } from "@/lib/actions/tasks";
+import { approveTask, updateTask, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
@@ -44,6 +43,7 @@ import { TaskSubtasks } from "@/components/task-subtasks";
 import { TaskRegenerate } from "@/components/task-regenerate";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
 import { PlainEnglishToggle } from "@/components/plain-english-toggle";
+import { ApprovalPill } from "@/components/approval-pill";
 import { TaskTags } from "@/components/task-type-badge";
 import {
   TASK_TYPE_OPTIONS,
@@ -235,20 +235,6 @@ function TaskDetailBody({
     router.refresh();
   }
 
-  // Builder-only: pull a task back out of approval before the operator signs off.
-  const canUnsendApproval =
-    role !== "operator" && !!task.approval_sent_at && !task.approval_approved_at;
-
-  async function handleUnsend() {
-    const result = await withdrawTaskApproval(task.id);
-    if (result && "error" in result) {
-      setToast(result.error || "Couldn't unsend");
-      return;
-    }
-    setToast("Pulled back from approval");
-    router.refresh();
-  }
-
   async function handleCopyLink() {
     if (typeof window === "undefined") return;
     try {
@@ -356,6 +342,11 @@ function TaskDetailBody({
               <span className="d" aria-hidden />
               {task.priority} priority
             </span>
+            {(task.approval_sent_at || task.approval_approved_at) && (
+              <span className="krowe-task-hero-approval">
+                <ApprovalPill task={task} role={role} onUnsent={() => router.refresh()} />
+              </span>
+            )}
           </div>
 
           <h1 className="krowe-task-hero-title">
@@ -582,43 +573,29 @@ function TaskDetailBody({
                 Approve deliverable
               </button>
             )
-          : (advance || canUnsendApproval) && (
-              <div className="krowe-task-sheet-footer-actions">
-                {canUnsendApproval && (
-                  <button
-                    type="button"
-                    className="krowe-btn-pill ghost"
-                    onClick={handleUnsend}
-                  >
-                    <Undo2 className="h-3.5 w-3.5" />
-                    Unsend
-                  </button>
-                )}
-                {advance && (
-                  <button
-                    type="button"
-                    className="krowe-btn-pill primary"
-                    onClick={() => {
-                      if (advance.kind === "approval") {
-                        requestApproval({
-                          task,
-                          onCommit: () => {
-                            setToast("Sent for approval");
-                            router.refresh();
-                          },
-                        });
-                      } else {
-                        saveStatus(advance.kind === "done" ? "done" : advance.status);
-                      }
-                    }}
-                  >
-                    <ArrowRight className="h-3.5 w-3.5" />
-                    {advance.kind === "approval"
-                      ? "Send for approval"
-                      : `Move to ${advance.label}`}
-                  </button>
-                )}
-              </div>
+          : advance && (
+              <button
+                type="button"
+                className="krowe-btn-pill primary"
+                onClick={() => {
+                  if (advance.kind === "approval") {
+                    requestApproval({
+                      task,
+                      onCommit: () => {
+                        setToast("Sent for approval");
+                        router.refresh();
+                      },
+                    });
+                  } else {
+                    saveStatus(advance.kind === "done" ? "done" : advance.status);
+                  }
+                }}
+              >
+                <ArrowRight className="h-3.5 w-3.5" />
+                {advance.kind === "approval"
+                  ? "Send for approval"
+                  : `Move to ${advance.label}`}
+              </button>
             )}
       </footer>
 

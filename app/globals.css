@@ -2584,6 +2584,68 @@ button.krowe-desc-inline-text:hover {
 /* Right-aligned action cluster in the sheet footer (e.g. Unsend + primary). */
 .krowe-task-sheet-footer-actions { display: inline-flex; align-items: center; gap: 10px; }
 
+/* ── Interactive "Sent → Unsend" approval pill (approval-pill.tsx) ──────
+   Builder-only. Reads "Sent" at rest; on hover/focus it cross-fades to an
+   "Unsend" affordance that withdraws the task from approval. Only opacity and
+   transform animate, per the design system. Used on task cards and in the
+   detail-sheet hero. */
+.krowe-approval-pill {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 74px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  background: var(--builder-soft);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform var(--duration-fast) var(--ease-out-smooth);
+}
+/* Hover/focus surface fades in beneath the label so no color property animates. */
+.krowe-approval-pill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-approval-pill > span {
+  grid-area: 1 / 1;               /* stack both labels in one cell — no width jump */
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-approval-pill > .sent   { color: var(--builder-text); opacity: 1; }
+.krowe-approval-pill > .unsend { color: var(--foreground);   opacity: 0; }
+.krowe-approval-pill:hover,
+.krowe-approval-pill:focus-visible { transform: translateY(-1px); }
+.krowe-approval-pill:hover > .sent,
+.krowe-approval-pill:focus-visible > .sent     { opacity: 0; }
+.krowe-approval-pill:hover > .unsend,
+.krowe-approval-pill:focus-visible > .unsend   { opacity: 1; }
+.krowe-approval-pill:hover::before,
+.krowe-approval-pill:focus-visible::before     { opacity: 1; }
+.krowe-approval-pill:active   { transform: translateY(0) scale(0.97); }
+.krowe-approval-pill:disabled { opacity: 0.6; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  .krowe-approval-pill,
+  .krowe-approval-pill:hover,
+  .krowe-approval-pill:focus-visible,
+  .krowe-approval-pill:active { transform: none; }
+}
+.krowe-task-hero-approval { margin-left: auto; display: inline-flex; }
+
 /* ── Build tab (task-build-prompt.tsx) ────────────────────────────── */
 .krowe-build-section { display: flex; flex-direction: column; gap: 14px; }
 

@@ -361,6 +361,13 @@ export function PrdWizard({
   // Cosmetic only — the server decides behavior from the (empty) notes each round.
   const [deepMode, setDeepMode] = useState(false);
 
+  // ⌘ on Mac, Ctrl elsewhere — the label for the "advance" shortcut shown on
+  // free-text questions. Read lazily; the questions phase is client-only, so it
+  // never lands in SSR markup and can't mismatch on hydration.
+  const [kbdLabel] = useState(() =>
+    typeof navigator !== "undefined" && !/mac/i.test(navigator.platform) ? "Ctrl ↵" : "⌘↵"
+  );
+
   // ── SOP transcripts: the project's already-uploaded discovery transcripts,
   // editable in place (upload / drag-drop / paste). They persist to the project
   // immediately and are pulled into PRD generation server-side at draft time.
@@ -1090,6 +1097,18 @@ export function PrdWizard({
           // question with a round still ahead just steps forward into it.
           const isFinalSubmit = isLast && forward.length === 0;
           const answered = isAnswered(q, state.selections, state.otherText);
+          // ⌘/Ctrl+Enter advances from inside a free-text answer — the question's
+          // own textarea or the "Something else" box — where plain Enter has to
+          // stay a newline. The global keydown handler bails on textareas, so this
+          // is what makes the shortcut reach them. Reads the freshest text off
+          // stateRef, the same way goToNext does.
+          const onAnswerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              const s = stateRef.current;
+              if (s.kind === "questions" && isAnswered(q, s.selections, s.otherText)) goToNext();
+            }
+          };
           // Optional questions (e.g. the catch-all gap-filler) can be skipped: the
           // Skip control shows until the builder starts typing an answer.
           const canSkip = !!q.skippable && !answered;
@@ -1244,6 +1263,7 @@ export function PrdWizard({
                                 : prev
                             )
                           }
+                          onKeyDown={onAnswerKeyDown}
                           placeholder="Describe it in your own words — a sentence or two is plenty…"
                         />
                       ) : (
@@ -1305,6 +1325,7 @@ export function PrdWizard({
                                 : prev
                             )
                           }
+                          onKeyDown={onAnswerKeyDown}
                           placeholder="Type the answer in your own words…"
                         />
                       )}
@@ -1322,10 +1343,17 @@ export function PrdWizard({
                           <span className="ed-kbd">1–{DATE_PRESETS.length + 1}</span>&nbsp;to pick
                         </>
                       ) : isText ? (
-                        <>type your answer, then&nbsp;Next</>
+                        <>
+                          type your answer, then&nbsp;<span className="ed-kbd">{kbdLabel}</span>
+                        </>
                       ) : (
                         <>
                           <span className="ed-kbd">1–{optList.length}</span>&nbsp;to pick
+                          {otherOn && (
+                            <>
+                              &nbsp;·&nbsp;<span className="ed-kbd">{kbdLabel}</span>&nbsp;to submit
+                            </>
+                          )}
                         </>
                       )}
                     </span>
