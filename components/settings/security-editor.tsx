@@ -7,10 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { SettingsSection } from "@/components/settings/settings-section";
 
-const inputClass =
-  "rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-400";
-const btnClass =
-  "rounded-md bg-neutral-900 px-4 py-2 text-sm text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40";
+const inputClass = "krowe-set-input mid";
+const btnClass = "krowe-set-btn-dark";
 
 interface SecurityEditorProps {
   currentEmail: string;
@@ -98,17 +96,17 @@ export function SecurityEditor({ currentEmail, isPasswordUser, isDevProfile }: S
   }
 
   return (
-    <div className="space-y-6">
+    <div className="krowe-set-stack">
       <SettingsSection title="Password" hint="Choose a strong password you don’t use elsewhere.">
         {isDevProfile ? (
-          <p className="text-sm text-neutral-500">
+          <p className="krowe-set-note">
             Password management isn’t available for the dev role. Sign in with a real account to change your password.
           </p>
         ) : (
-          <div className="space-y-3">
+          <div>
             {isPasswordUser && (
-              <div className="space-y-1.5">
-                <label htmlFor="current_pw" className="block text-xs font-medium text-neutral-700">
+              <div className="krowe-set-field">
+                <label htmlFor="current_pw" className="krowe-set-label">
                   Current password
                 </label>
                 <input
@@ -117,12 +115,12 @@ export function SecurityEditor({ currentEmail, isPasswordUser, isDevProfile }: S
                   value={currentPw}
                   onChange={(e) => setCurrentPw(e.target.value)}
                   autoComplete="current-password"
-                  className={inputClass + " w-full max-w-sm"}
+                  className={inputClass}
                 />
               </div>
             )}
-            <div className="space-y-1.5">
-              <label htmlFor="new_pw" className="block text-xs font-medium text-neutral-700">
+            <div className="krowe-set-field">
+              <label htmlFor="new_pw" className="krowe-set-label">
                 New password
               </label>
               <input
@@ -133,11 +131,11 @@ export function SecurityEditor({ currentEmail, isPasswordUser, isDevProfile }: S
                 placeholder="At least 8 characters"
                 autoComplete="new-password"
                 minLength={8}
-                className={inputClass + " w-full max-w-sm"}
+                className={inputClass}
               />
             </div>
-            <div className="space-y-1.5">
-              <label htmlFor="confirm_pw" className="block text-xs font-medium text-neutral-700">
+            <div className="krowe-set-field">
+              <label htmlFor="confirm_pw" className="krowe-set-label">
                 Confirm new password
               </label>
               <input
@@ -148,19 +146,19 @@ export function SecurityEditor({ currentEmail, isPasswordUser, isDevProfile }: S
                 placeholder="Re-enter your password"
                 autoComplete="new-password"
                 minLength={8}
-                className={inputClass + " w-full max-w-sm"}
+                className={inputClass}
               />
             </div>
-            <label className="flex items-center gap-2 text-xs text-neutral-600">
+            <label className="krowe-set-check-row" style={{ marginTop: "12px" }}>
               <input type="checkbox" checked={show} onChange={(e) => setShow(e.target.checked)} />
               Show passwords
             </label>
             {!isPasswordUser && (
-              <p className="text-xs text-neutral-500">
+              <p className="krowe-set-note" style={{ marginTop: "8px" }}>
                 You signed up with Google. Setting a password here lets you also sign in with email.
               </p>
             )}
-            <div className="pt-1">
+            <div style={{ marginTop: "16px" }}>
               <button type="button" onClick={changePassword} disabled={!canSubmit} className={btnClass}>
                 {pending ? "Updating…" : "Update password"}
               </button>
@@ -171,22 +169,21 @@ export function SecurityEditor({ currentEmail, isPasswordUser, isDevProfile }: S
 
       <SettingsSection title="Sessions" hint="Sign out everywhere if you’ve lost a device or shared your screen.">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-neutral-600">
+          <p className="krowe-set-note" style={{ fontSize: "13px" }}>
             This signs you out on all devices, including this one.
           </p>
           <button
             type="button"
             onClick={signOutEverywhere}
             disabled={isDevProfile}
-            className="inline-flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
+            className="krowe-set-btn-danger-outline"
           >
             <LogOut size={15} strokeWidth={1.9} />
             Sign out everywhere
           </button>
         </div>
         {isDevProfile && (
-          <p className="mt-2 text-xs text-neutral-500">Unavailable for the dev role.</p>
+          <p className="krowe-set-note" style={{ marginTop: "8px" }}>Unavailable for the dev role.</p>
         )}
       </SettingsSection>
 

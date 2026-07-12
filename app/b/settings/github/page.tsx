@@ -57,57 +57,54 @@ export default async function GitHubSettingsPage({
     : [[], null]
 
   return (
-    <div className="space-y-5">
+    <div className="krowe-set-stack">
       <SettingsHeader title="GitHub" sub="Connect your account and link repos to your clients." />
 
       {params.github === "connected" && (
-        <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
-          GitHub connected successfully.
-        </div>
+        <div className="krowe-set-banner success">GitHub connected successfully.</div>
       )}
 
       {params.error && (
-        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+        <div className="krowe-set-banner error">
           {GH_ERROR_MESSAGES[params.error] ?? "Something went wrong connecting GitHub. Please try again."}
         </div>
       )}
 
       <SettingsSection title="Connection" hint="Link your GitHub account to sync repos and stats.">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <ConnectGitHubButton connected={connected} username={connection?.github_username} />
-        </div>
+        <ConnectGitHubButton connected={connected} username={connection?.github_username} />
 
         {connected && githubProfile && (
-          <div className="mt-4 flex items-center gap-4 rounded-lg border border-neutral-200 bg-white p-4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={githubProfile.avatarUrl}
-              alt={`${githubProfile.login} avatar`}
-              width={56}
-              height={56}
-              className="h-14 w-14 shrink-0 rounded-xl border border-neutral-200 bg-neutral-50 object-contain p-2"
-            />
+          <div className="krowe-set-gh-profile">
+            <span className="krowe-set-gh-avatar">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={githubProfile.avatarUrl}
+                alt={`${githubProfile.login} avatar`}
+                width={54}
+                height={54}
+              />
+            </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-neutral-900">
+              <p className="krowe-set-gh-name truncate">
                 {githubProfile.name ?? githubProfile.login}
               </p>
               <a
                 href={githubProfile.htmlUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-sm text-neutral-500 underline-offset-2 hover:text-neutral-900 hover:underline"
+                className="krowe-set-gh-handle hover:underline"
               >
                 @{githubProfile.login}
               </a>
               {githubProfile.bio && (
-                <p className="mt-1 truncate text-sm text-neutral-400">{githubProfile.bio}</p>
+                <p className="krowe-set-gh-handle mt-1 truncate">{githubProfile.bio}</p>
               )}
-              <div className="mt-2 flex gap-4 text-xs text-neutral-400">
+              <div className="krowe-set-gh-stats">
                 <span>
-                  <span className="font-medium text-neutral-600">{githubProfile.publicRepos}</span> repos
+                  <b>{githubProfile.publicRepos}</b> repos
                 </span>
                 <span>
-                  <span className="font-medium text-neutral-600">{githubProfile.followers}</span> followers
+                  <b>{githubProfile.followers}</b> followers
                 </span>
               </div>
             </div>
@@ -115,7 +112,7 @@ export default async function GitHubSettingsPage({
         )}
 
         {!connected && (
-          <p className="mt-3 text-sm text-neutral-400">
+          <p className="krowe-set-note" style={{ marginTop: "10px" }}>
             Connect GitHub above to link repos to your clients.
           </p>
         )}
@@ -124,15 +121,17 @@ export default async function GitHubSettingsPage({
       {connected && (
         <SettingsSection title="Repositories" hint="Link a repo to each client to track commits against tasks.">
           {engagementList.length === 0 ? (
-            <p className="text-sm text-neutral-400">No clients yet. Repos can be linked once you have a client.</p>
+            <div className="krowe-set-empty" style={{ padding: "18px 16px" }}>
+              <p className="krowe-set-empty-title">No clients yet</p>
+              <p className="krowe-set-empty-body">
+                Repos can be linked once you have a client.
+              </p>
+            </div>
           ) : (
-            <div className="space-y-4">
+            <div>
               {engagementList.map((engagement) => (
-                <div
-                  key={engagement.id}
-                  className="rounded-lg border border-neutral-200 bg-white p-4 space-y-3"
-                >
-                  <p className="text-sm font-medium text-neutral-900">{engagement.title}</p>
+                <div key={engagement.id} className="krowe-set-repo-block">
+                  <p className="krowe-set-repo-name">{engagement.title}</p>
                   <RepoSelector
                     engagementId={engagement.id}
                     currentRepo={engagement.github_repo_full_name}

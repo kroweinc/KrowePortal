@@ -8,6 +8,8 @@ import {
   Bell,
   Receipt,
   Github,
+  NotebookPen,
+  Blocks,
   type LucideIcon,
 } from "lucide-react";
 
@@ -20,6 +22,8 @@ const ICONS: Record<string, LucideIcon> = {
   bell: Bell,
   receipt: Receipt,
   github: Github,
+  "notebook-pen": NotebookPen,
+  blocks: Blocks,
 };
 
 export interface SettingsNavItem {

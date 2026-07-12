@@ -21,7 +21,7 @@ import type OpenAI from "openai";
  *
  * IMPORTANT: strict mode requires the ROOT to be an object. Discriminated-union
  * results (questions | prd) emit a root `oneOf`, which is illegal — only pass
- * single-object schemas here (the `*FinalResult` / forceTask save paths).
+ * single-object schemas here (the `*FinalResult` / TaskOnlyResult save paths).
  */
 
 type ResponseFormat = NonNullable<

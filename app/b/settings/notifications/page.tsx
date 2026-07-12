@@ -5,7 +5,7 @@ export const metadata = { title: "Notifications · Settings" };
 
 export default function BuilderNotificationsPage() {
   return (
-    <div className="space-y-5">
+    <div className="krowe-set-stack">
       <SettingsHeader title="Notifications" sub="Choose which emails Krowe sends you." />
       <NotificationsComingSoon />
     </div>

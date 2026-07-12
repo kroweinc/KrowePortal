@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ExternalLink, Link2, Link2Off, RotateCw } from "lucide-react";
+import { Link2, Link2Off, RotateCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
@@ -72,14 +72,6 @@ export function ProfileShareStrip() {
     });
   }
 
-  function viewPublic() {
-    startTransition(async () => {
-      if (!(await ensurePublished())) return;
-      window.open(`${window.location.origin}/p/${token}`, "_blank", "noopener,noreferrer");
-      router.refresh();
-    });
-  }
-
   function togglePublished() {
     const next = !published;
     startTransition(async () => {
@@ -113,8 +105,9 @@ export function ProfileShareStrip() {
         return;
       }
       setToken(result.token);
-      // Regenerate also resets expiry (+365d) and clears revocation server-side.
-      setExpiresAt(new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString());
+      // Regenerate mints a never-expiring link (null) and clears revocation
+      // server-side; mirror that optimistically so no stale expiry hint flashes.
+      setExpiresAt(null);
       setRevokedAt(null);
       toast.success("New share link generated");
       router.refresh();
@@ -155,17 +148,21 @@ export function ProfileShareStrip() {
       {hint && (
         <span style={{ fontSize: "12px", color: "#737373" }}>{hint}</span>
       )}
-      <Button variant="outline" size="sm" onClick={copyLink} disabled={isPending}>
-        <Link2 className="h-3.5 w-3.5" /> Copy link
-      </Button>
-      <Button variant="outline" size="sm" onClick={viewPublic} disabled={isPending}>
-        <ExternalLink className="h-3.5 w-3.5" /> View public
-      </Button>
       <Button variant="outline" size="sm" onClick={togglePublished} disabled={isPending}>
         {published ? "Unpublish" : "Publish"}
       </Button>
       <Button variant="outline" size="sm" onClick={revoke} disabled={isPending}>
         <Link2Off className="h-3.5 w-3.5" /> Revoke
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={copyLink}
+        disabled={isPending}
+        title="Copy share link"
+        aria-label="Copy share link"
+      >
+        <Link2 className="h-3.5 w-3.5" />
       </Button>
       <Button
         variant="ghost"

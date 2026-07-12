@@ -75,11 +75,11 @@ export function FeedbackDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <button type="button" className="krowe-sidebar-link">
+        <button type="button" className="krowe-sidebar-link" title="Feedback">
           <span className="krowe-sidebar-ic">
             <MessageSquare size={17} strokeWidth={1.9} />
           </span>
-          Feedback
+          <span className="krowe-sidebar-label">Feedback</span>
         </button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">

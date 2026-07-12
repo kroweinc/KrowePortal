@@ -2,10 +2,13 @@
 
 import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react";
 import { DoneDeliverableDialog } from "@/components/done-deliverable-dialog";
+import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 import type { Task } from "@/lib/types";
 
+type PendingTask = Pick<Task, "id" | "title" | "engagement_id">;
+
 type RequestDoneOptions = {
-  task: Pick<Task, "id" | "title">;
+  task: PendingTask;
   onCommit?: () => void;
   onCancel?: () => void;
 };
@@ -14,8 +17,14 @@ type RequestDoneFn = (opts: RequestDoneOptions) => void;
 
 const DoneDeliverableContext = createContext<RequestDoneFn | null>(null);
 
-export function DoneDeliverableProvider({ children }: { children: ReactNode }) {
-  const [pendingTask, setPendingTask] = useState<Pick<Task, "id" | "title"> | null>(null);
+export function DoneDeliverableProvider({
+  children,
+  branchesByEngagement = {},
+}: {
+  children: ReactNode;
+  branchesByEngagement?: Record<string, PreloadedBranches>;
+}) {
+  const [pendingTask, setPendingTask] = useState<PendingTask | null>(null);
   const callbacksRef = useRef<{ onCommit?: () => void; onCancel?: () => void }>({});
   const committedRef = useRef(false);
 
@@ -52,6 +61,11 @@ export function DoneDeliverableProvider({ children }: { children: ReactNode }) {
         open={!!pendingTask}
         onOpenChange={handleOpenChange}
         task={pendingTask}
+        preloaded={
+          pendingTask?.engagement_id
+            ? branchesByEngagement[pendingTask.engagement_id]
+            : undefined
+        }
         onSaved={handleSaved}
       />
     </DoneDeliverableContext.Provider>

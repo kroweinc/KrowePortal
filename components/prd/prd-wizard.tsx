@@ -25,6 +25,7 @@ import {
 import { draftPrd } from "@/lib/actions/prds";
 import type { DraftPrdResult } from "@/lib/prd/draft-core";
 import { streamDraft } from "@/lib/ai/stream-client";
+import { PrdDocument } from "@/components/prd/prd-document";
 import {
   addSopTranscriptText,
   uploadSopTranscript,
@@ -33,7 +34,7 @@ import {
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
 import { SCOPE_STAGE_COUNT, SCOPE_OPENER, deepStageIndex, scopeStageAt } from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
-import type { ProjectSopTranscript } from "@/lib/types";
+import type { ProjectSopTranscript, PrdContent } from "@/lib/types";
 
 const OTHER = "__other__";
 
@@ -117,7 +118,10 @@ type RoundData = {
 
 type WizardState =
   | { kind: "intro" }
-  | { kind: "loading"; label: string }
+  // `sections` accumulates the PRD content keys the model has streamed so far (the
+  // final, streamed round only) — it drives WizLoading's real progress meter.
+  // `partial` is the PRD-so-far (completed sections) for the live document preview.
+  | { kind: "loading"; label: string; sections?: string[]; partial?: PrdContent }
   | {
       kind: "questions";
       items: Question[];
@@ -239,12 +243,73 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
   );
 }
 
+// While the final PRD streams, show it building for real: each section pops into
+// the stage the instant the model finishes writing it (fed by streamDraft's
+// onContent). Replaces the answer-facts DraftStage during the final round so the
+// ~30s wait is a document you watch assemble, not a bare progress bar. Reuses the
+// read-only PrdDocument renderer (it guards every section, so a partial is safe)
+// and the existing .ed-doc/.ed-fill styling — no new layout.
+function LivePrdStage({ content, docTitle, docMeta }: { content: PrdContent; docTitle: string; docMeta: string }) {
+  return (
+    <section className="ed-stage">
+      <div className="ed-stage-head">
+        <span className="ed-stage-eyebrow">
+          <Ember size={14} />
+          Drafting live
+        </span>
+      </div>
+      <div className="ed-stage-body">
+        <h2 className="ed-stage-h">Your PRD, taking shape.</h2>
+        <div className="ed-doc">
+          <div className="ed-doc-top">
+            <span className="ed-doc-title">{docTitle}</span>
+            <span className="ed-doc-meta">{docMeta}</span>
+          </div>
+          <div className="ed-fill">
+            <PrdDocument content={content} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // Expected generation durations (ms) driving the progress estimate. The bar eases
 // toward an asymptote, so finishing early just snaps to done — these are generous
 // upper-ish guesses, deliberately set so the estimate under-promises. Tune by
 // timing a few real runs once reasoning-effort tuning is live.
 const EXPECTED_FIRST_MS = 9000; // round 0: reading notes / preparing questions
 const EXPECTED_GENERATE_MS = 22000; // later rounds: may be the full PRD (the long one)
+
+// The PRD content keys the model streams (in document order), each mapped to the
+// section name shown as it's written. createPrdSectionScanner emits these keys as
+// they land, driving WizLoading's real progress meter. Trailing envelope keys that
+// aren't sections (e.g. contextSummary) are intentionally absent.
+const PRD_SECTION_LABELS: Record<string, string> = {
+  overview: "Overview",
+  goals: "Goals",
+  successMetrics: "Success metrics",
+  users: "Users & roles",
+  coreUserFlow: "Core user flow",
+  features: "Features",
+  requirements: "Requirements",
+  pagesScreens: "Pages & screens",
+  successCriteria: "Success criteria",
+  nonFunctionalRequirements: "Non-functional requirements",
+  scopeLater: "Out of scope",
+  futureExpansion: "Future expansion",
+  dataModel: "Data model",
+  integrations: "Integrations",
+  techStack: "Tech stack",
+  uxFlows: "UX flows",
+  assumptions: "Assumptions",
+  constraintsDetail: "Constraints",
+  risks: "Risks",
+  openQuestions: "Open questions",
+  milestoneList: "Timeline & milestones",
+  milestoneDueDate: "Deadline",
+};
+const PRD_SECTION_TOTAL = Object.keys(PRD_SECTION_LABELS).length;
 
 // m:ss for a duration in ms.
 function fmtClock(ms: number): string {
@@ -260,10 +325,14 @@ function WizLoading({
   label,
   expectedMs,
   onCancel,
+  sections,
 }: {
   label: string;
   expectedMs: number;
   onCancel?: () => void;
+  /** Content keys streamed so far (final PRD round). When present, the meter shows
+      real progress off the model's actual output instead of a time estimate. */
+  sections?: string[];
 }) {
   const [elapsed, setElapsed] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -275,8 +344,16 @@ function WizLoading({
     return () => clearInterval(t);
   }, []);
 
+  // Real streamed progress: bar fills as the model writes each section, capped just
+  // shy of 100% until the parent unmounts on `done` (same "snap to done" feel as the
+  // eased estimate). Falls back to the time estimate for question rounds / blocking.
+  const live = !!sections && sections.length > 0;
+  const seen = live ? Math.min(sections!.length, PRD_SECTION_TOTAL) : 0;
+  const currentLabel = live ? PRD_SECTION_LABELS[sections![sections!.length - 1]] ?? "Finishing up" : "";
+
   const ratio = elapsed / expectedMs;
-  const pct = Math.min(92, (1 - Math.exp(-1.6 * ratio)) * 92);
+  const estPct = Math.min(92, (1 - Math.exp(-1.6 * ratio)) * 92);
+  const pct = live ? Math.min(96, (seen / PRD_SECTION_TOTAL) * 100) : estPct;
   const over = elapsed >= expectedMs;
 
   return (
@@ -297,7 +374,13 @@ function WizLoading({
 
       <div className="prd-progress-meta">
         <span>{fmtClock(elapsed)} elapsed</span>
-        <span>{over ? "Taking a little longer than usual…" : `~${fmtClock(expectedMs - elapsed)} left`}</span>
+        {live ? (
+          <span>
+            Writing {currentLabel} · {String(seen).padStart(2, "0")}/{String(PRD_SECTION_TOTAL).padStart(2, "0")}
+          </span>
+        ) : (
+          <span>{over ? "Taking a little longer than usual…" : `~${fmtClock(expectedMs - elapsed)} left`}</span>
+        )}
       </div>
 
       {onCancel && (
@@ -360,6 +443,13 @@ export function PrdWizard({
   const restoreRef = useRef<{ state: WizardState; back: RoundData[]; forward: RoundData[] } | null>(null);
   // Cosmetic only — the server decides behavior from the (empty) notes each round.
   const [deepMode, setDeepMode] = useState(false);
+
+  // ⌘ on Mac, Ctrl elsewhere — the label for the "advance" shortcut shown on
+  // free-text questions. Read lazily; the questions phase is client-only, so it
+  // never lands in SSR markup and can't mismatch on hydration.
+  const [kbdLabel] = useState(() =>
+    typeof navigator !== "undefined" && !/mac/i.test(navigator.platform) ? "Ctrl ↵" : "⌘↵"
+  );
 
   // ── SOP transcripts: the project's already-uploaded discovery transcripts,
   // editable in place (upload / drag-drop / paste). They persist to the project
@@ -498,6 +588,17 @@ export function PrdWizard({
         try {
           const evt = await streamDraft("/api/ai/prd/stream", payload, {
             signal: controller.signal,
+            // Each section the model streams advances the real progress meter. Guard
+            // on the gen token so a cancelled round's late deltas can't update state.
+            onSection: (key) => {
+              if (myGen !== genId.current) return;
+              setState((s) => (s.kind === "loading" ? { ...s, sections: [...(s.sections ?? []), key] } : s));
+            },
+            // The PRD-so-far, for the live document preview. Same gen-token guard.
+            onContent: (partial) => {
+              if (myGen !== genId.current) return;
+              setState((s) => (s.kind === "loading" ? { ...s, partial } : s));
+            },
           });
           if (myGen !== genId.current) return;
           if (evt.type === "questions") handle({ kind: "questions", items: evt.items });
@@ -1049,34 +1150,57 @@ export function PrdWizard({
       )}
 
       {state.kind === "loading" &&
-        (back.length > 0 ? (
-          // Mid-interview: keep the editorial overlay up with the draft visible
-          // on the left while the next round (or the final PRD) generates.
-          <div className="ed">
-            <DraftStage
-              facts={roundToAnswers(back).map((a) => ({
-                key: a.questionId,
-                label: factLabel(a.question),
-                value: a.answer,
-                status: "done" as const,
-              }))}
-              docTitle={title.trim() || `${projectName} — PRD`}
-              docMeta={projectName.toUpperCase()}
-            />
-            <section className="ed-sheet">
-              <div className="ed-sheet-body">
-                <div className="ed-sheet-inner">
-                  <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} />
-                </div>
+        (() => {
+          const docTitle = title.trim() || `${projectName} — PRD`;
+          const docMeta = projectName.toUpperCase();
+          // Once the final PRD starts streaming its sections, show it building live.
+          const livePartial = state.partial && Object.keys(state.partial).length > 0 ? state.partial : null;
+
+          if (livePartial) {
+            // The document assembles on the left; the meter + Cancel ride along right.
+            return (
+              <div className="ed">
+                <LivePrdStage content={livePartial} docTitle={docTitle} docMeta={docMeta} />
+                <section className="ed-sheet">
+                  <div className="ed-sheet-body">
+                    <div className="ed-sheet-inner">
+                      <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} sections={state.sections} />
+                    </div>
+                  </div>
+                </section>
               </div>
-            </section>
-          </div>
-        ) : (
-          // First load (no answers yet): in-page progress meter.
-          <div className="prd-loading">
-            <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} />
-          </div>
-        ))}
+            );
+          }
+
+          return back.length > 0 ? (
+            // Mid-interview: keep the editorial overlay up with the draft visible
+            // on the left while the next round (or the final PRD) generates.
+            <div className="ed">
+              <DraftStage
+                facts={roundToAnswers(back).map((a) => ({
+                  key: a.questionId,
+                  label: factLabel(a.question),
+                  value: a.answer,
+                  status: "done" as const,
+                }))}
+                docTitle={docTitle}
+                docMeta={docMeta}
+              />
+              <section className="ed-sheet">
+                <div className="ed-sheet-body">
+                  <div className="ed-sheet-inner">
+                    <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} sections={state.sections} />
+                  </div>
+                </div>
+              </section>
+            </div>
+          ) : (
+            // First load (no answers yet): in-page progress meter.
+            <div className="prd-loading">
+              <WizLoading label={state.label} expectedMs={EXPECTED_FIRST_MS} onCancel={cancelLoading} sections={state.sections} />
+            </div>
+          );
+        })()}
 
       {state.kind === "questions" &&
         (() => {
@@ -1090,6 +1214,18 @@ export function PrdWizard({
           // question with a round still ahead just steps forward into it.
           const isFinalSubmit = isLast && forward.length === 0;
           const answered = isAnswered(q, state.selections, state.otherText);
+          // ⌘/Ctrl+Enter advances from inside a free-text answer — the question's
+          // own textarea or the "Something else" box — where plain Enter has to
+          // stay a newline. The global keydown handler bails on textareas, so this
+          // is what makes the shortcut reach them. Reads the freshest text off
+          // stateRef, the same way goToNext does.
+          const onAnswerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              const s = stateRef.current;
+              if (s.kind === "questions" && isAnswered(q, s.selections, s.otherText)) goToNext();
+            }
+          };
           // Optional questions (e.g. the catch-all gap-filler) can be skipped: the
           // Skip control shows until the builder starts typing an answer.
           const canSkip = !!q.skippable && !answered;
@@ -1244,6 +1380,7 @@ export function PrdWizard({
                                 : prev
                             )
                           }
+                          onKeyDown={onAnswerKeyDown}
                           placeholder="Describe it in your own words — a sentence or two is plenty…"
                         />
                       ) : (
@@ -1305,6 +1442,7 @@ export function PrdWizard({
                                 : prev
                             )
                           }
+                          onKeyDown={onAnswerKeyDown}
                           placeholder="Type the answer in your own words…"
                         />
                       )}
@@ -1322,10 +1460,17 @@ export function PrdWizard({
                           <span className="ed-kbd">1–{DATE_PRESETS.length + 1}</span>&nbsp;to pick
                         </>
                       ) : isText ? (
-                        <>type your answer, then&nbsp;Next</>
+                        <>
+                          type your answer, then&nbsp;<span className="ed-kbd">{kbdLabel}</span>
+                        </>
                       ) : (
                         <>
                           <span className="ed-kbd">1–{optList.length}</span>&nbsp;to pick
+                          {otherOn && (
+                            <>
+                              &nbsp;·&nbsp;<span className="ed-kbd">{kbdLabel}</span>&nbsp;to submit
+                            </>
+                          )}
                         </>
                       )}
                     </span>

@@ -1573,18 +1573,17 @@ export async function regenerateShareToken(): Promise<{
   if (!row) return { error: "Profile not found." };
 
   // supabase-js can't invoke the SQL column default on update, so mint the
-  // same 64-hex shape here. Also reset the expiry window (365 days for profiles,
-  // per migration 0062) and clear any prior revocation so a fresh link works
+  // same 64-hex token here. Reissued links never expire by default (null, per
+  // migration 0064) and we clear any prior revocation so a fresh link works
   // after the old one was revoked or expired.
   const token = randomBytes(32).toString("hex");
-  const expires = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
 
   const supabase = await getClient(profile.id);
   const { error } = await supabase
     .from("builder_profiles")
     .update({
       token,
-      token_expires_at: expires,
+      token_expires_at: null,
       token_revoked_at: null,
       updated_at: new Date().toISOString(),
     })

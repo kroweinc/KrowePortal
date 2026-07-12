@@ -492,15 +492,15 @@ export function PortalPreview() {
           </h3>
         </header>
         <div className="krowe-blueprint-canvas" style={{ flex: 1, padding: "16px 18px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, alignContent: "start" }}>
-          <Column label="Inbox" count={2} dot="var(--faint-foreground)">
+          <Column label="Backlog" count={2} dot="var(--faint-foreground)">
             <TaskCard title="Supabase RLS policies" meta="Setup · 2d" priority="med" />
             <TaskCard title="Quote PDF export" meta="Feature · 3d" priority="low" />
           </Column>
+          <Column label="To-Do" count={1} dot="var(--warning)">
+            <TaskCard title="Add user T&C agreement" meta="Legal · 1d" priority="med" />
+          </Column>
           <Column label="In Progress" count={1} dot="#3b82f6">
             <TaskCard title="Wire GitHub OAuth callback" meta="Integration · today" priority="high" />
-          </Column>
-          <Column label="Approval" count={1} dot="var(--warning)">
-            <TaskCard title="Add user T&C agreement" meta="Legal · 1d" priority="med" />
           </Column>
           <Column label="Done" count={1} dot="var(--success)">
             <TaskCard title="Login page redesign" meta="UI · yesterday" done />

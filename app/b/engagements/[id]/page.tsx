@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, BookOpen, Briefcase, FileText, Github, Library, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { ArrowLeft, AudioLines, BookOpen, Briefcase, FileText, Github, Library, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getMyPendingInvites } from "@/lib/actions/invitations";
@@ -21,6 +21,7 @@ import { ContextView } from "@/components/context/context-view";
 import { DetailHero } from "@/components/engagement/detail-hero";
 import { EngagementSection } from "@/components/engagement/engagement-section";
 import { EngagementTabs } from "@/components/engagement/engagement-tabs";
+import { ImportFromGranolaDialog } from "@/components/granola/import-from-granola-dialog";
 import type { EngagementStatusKind } from "@/components/engagement/engagement-status";
 import {
   EngagementDocuments,
@@ -212,6 +213,14 @@ export default async function BuilderEngagementPage({
                 hint="The PRD, quote, and contract from the project this client came from."
               >
                 <EngagementDocuments items={docItems} emptyLabel="No documents yet." />
+              </EngagementSection>
+
+              <EngagementSection
+                icon={<AudioLines size={19} strokeWidth={1.75} />}
+                title="Granola calls"
+                hint="Import a call to draft tasks from its action items — you review before anything is created."
+              >
+                <ImportFromGranolaDialog target={{ kind: "engagement", engagementId: engagement.id }} />
               </EngagementSection>
 
               <EngagementSection

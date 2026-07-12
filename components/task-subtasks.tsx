@@ -2,7 +2,7 @@
 
 import { Fragment, useRef, useState, useTransition, useEffect } from "react";
 import { toast } from "sonner";
-import { ListTodo, Plus, X, GripVertical } from "lucide-react";
+import { ListTodo, Plus, X, GripVertical, Sparkles, Loader2 } from "lucide-react";
 import {
   createSubtask,
   toggleSubtask,
@@ -10,7 +10,7 @@ import {
   deleteSubtask,
   reorderSubtasks,
 } from "@/lib/actions/subtasks";
-import { AiSubtaskGeneratorDialog } from "@/components/ai-subtask-generator-dialog";
+import { generateSubtasksForTask } from "@/lib/actions/ai-subtasks";
 import { usePlainEnglish } from "@/components/plain-english-context";
 import type { Subtask, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -28,6 +28,7 @@ export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) 
   const [newTitle, setNewTitle] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [generating, setGenerating] = useState(false);
   const [isPending, startTransition] = useTransition();
   const addInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +109,30 @@ export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) 
         );
       }
     });
+  }
+
+  async function handleGenerate() {
+    if (generating) return;
+    setGenerating(true);
+    try {
+      const result = await generateSubtasksForTask(taskId);
+      if (result.error) {
+        toast.error(result.error);
+      } else if (result.inserted.length > 0) {
+        setSubtasks((prev) => [...prev, ...result.inserted]);
+        toast.success(
+          `Added ${result.inserted.length} sub-task${result.inserted.length === 1 ? "" : "s"}`
+        );
+      } else {
+        toast.error(
+          "AI couldn't break this task down. Add more detail to the description and try again."
+        );
+      }
+    } catch {
+      toast.error("Sub-task generation failed. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   function handleToggle(subtask: Subtask) {
@@ -226,18 +251,25 @@ export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) 
           </div>
         </div>
         <div className="krowe-subs-actions">
-          <AiSubtaskGeneratorDialog
-            taskId={taskId}
-            onAccept={(newSubtasks) =>
-              setSubtasks((prev) => [...prev, ...newSubtasks])
-            }
-            triggerClassName="krowe-mini-btn ai"
-          />
+          <button
+            type="button"
+            className="krowe-mini-btn ai"
+            onClick={handleGenerate}
+            disabled={generating || isPending}
+            title="Generate sub-tasks with AI from this task and its repo"
+          >
+            {generating ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Sparkles className="h-3 w-3" />
+            )}
+            {generating ? "Generating…" : "Generate"}
+          </button>
           <button
             type="button"
             className="krowe-mini-btn"
             onClick={() => setAdding(true)}
-            disabled={isPending}
+            disabled={isPending || generating}
           >
             <Plus className="h-3 w-3" /> Add
           </button>

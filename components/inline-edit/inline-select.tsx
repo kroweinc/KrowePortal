@@ -12,6 +12,10 @@ const VARIANT_CLASSES: Record<string, string> = {
   in_progress: "bg-amber-50 text-amber-700",
   blocked: "bg-red-50 text-red-700",
   done: "bg-green-50 text-green-700",
+  // Task type override (feature/bug/change) mirrors the .krowe-chip-type colors.
+  feature: "bg-green-50 text-green-700",
+  bug: "bg-red-50 text-red-700",
+  change: "bg-blue-50 text-blue-700",
   secondary: "bg-neutral-100 text-neutral-700",
 };
 

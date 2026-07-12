@@ -5,16 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
-import { updateTask, updateTaskStatus } from "@/lib/actions/tasks";
+import { updateTask, updateTaskStatus, withdrawTaskApproval } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
+import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { DeleteTaskButton } from "@/components/delete-task-button";
 import type { Task, TaskStatus, TaskPriority } from "@/lib/types";
 import { useRouter } from "next/navigation";
 
 const STATUSES: { value: TaskStatus; label: string }[] = [
-  { value: "inbox", label: "Inbox" },
+  { value: "backlog", label: "Backlog" },
+  { value: "todo", label: "To-Do" },
   { value: "in_progress", label: "In Progress" },
-  { value: "blocked", label: "Approval" },
   { value: "done", label: "Done" },
 ];
 
@@ -33,6 +34,7 @@ interface BuilderTaskActionsProps {
 export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps) {
   const router = useRouter();
   const requestDone = useRequestDone();
+  const requestApproval = useRequestApproval();
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -79,6 +81,39 @@ export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps)
             </option>
           ))}
         </Select>
+        {task.status === "in_progress" && !task.approval_sent_at && (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full"
+            disabled={isPending}
+            onClick={() =>
+              requestApproval({
+                task,
+                onCommit: () => router.refresh(),
+              })
+            }
+          >
+            Send for approval
+          </Button>
+        )}
+        {task.approval_sent_at && !task.approval_approved_at && (
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 w-full"
+            disabled={isPending}
+            onClick={() =>
+              startTransition(async () => {
+                const result = await withdrawTaskApproval(task.id);
+                if ("error" in result) setError(result.error);
+                else router.refresh();
+              })
+            }
+          >
+            Unsend from approval
+          </Button>
+        )}
       </div>
 
       <form action={handleSave} className="space-y-4">

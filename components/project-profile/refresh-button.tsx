@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { refreshProjectProfile } from "@/lib/actions/refresh-project-profile";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 const REASON_MESSAGES: Record<string, string> = {
   not_authenticated: "You need to be signed in to refresh.",
@@ -16,9 +17,17 @@ const REASON_MESSAGES: Record<string, string> = {
 export function RefreshButton() {
   const [pending, startTransition] = useTransition();
   const [optimisticallySpinning, setOptimisticallySpinning] = useState(false);
+  const [confirm, confirmDialog] = useConfirm();
   const busy = pending || optimisticallySpinning;
 
-  const handleClick = () => {
+  const handleClick = async () => {
+    const ok = await confirm({
+      title: "Sync from GitHub?",
+      description:
+        "Pull the latest commits and repo state from GitHub and re-run the AI analysis to refresh this project profile.",
+      confirmText: "Sync now",
+    });
+    if (!ok) return;
     setOptimisticallySpinning(true);
     startTransition(async () => {
       try {
@@ -38,18 +47,21 @@ export function RefreshButton() {
   };
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy}
-      className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:border-neutral-300 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
-      aria-label={busy ? "Refreshing project profile" : "Refresh project profile"}
-    >
-      <RefreshCw
-        className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`}
-        aria-hidden
-      />
-      {busy ? "Refreshing…" : "Refresh"}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-700 hover:border-neutral-300 hover:text-neutral-900 disabled:cursor-not-allowed disabled:opacity-60"
+        aria-label={busy ? "Refreshing project profile" : "Refresh project profile"}
+      >
+        <RefreshCw
+          className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`}
+          aria-hidden
+        />
+        {busy ? "Refreshing…" : "Refresh"}
+      </button>
+      {confirmDialog}
+    </>
   );
 }

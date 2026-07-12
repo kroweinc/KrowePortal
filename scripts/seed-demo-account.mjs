@@ -13,7 +13,7 @@
  *   3. Sample data hung off the builder — themed as Krowe dogfooding Krowe:
  *        - 1 project ("Krowe Internal", Documents tab)
  *        - 1 live engagement linking builder ↔ operator
- *        - 7 tasks spread across inbox / in_progress / blocked / done
+ *        - 7 tasks spread across backlog / in_progress / done (one awaiting approval)
  *
  * Uses the service-role key (bypasses RLS). Reads creds from .env.local.
  *
@@ -182,13 +182,13 @@ const tasks = [
     title: "Investor data room needs a clean public link",
     description:
       "We're sending the deck and metrics over email attachments. Want one branded, access-controlled link we can hand to investors instead.",
-    source: "operator_request", status: "inbox", priority: "high", created_by: operatorId, sort_order: 0,
+    source: "operator_request", status: "backlog", priority: "high", created_by: operatorId, sort_order: 0,
   },
   {
     title: "Signup drop-off spikes at the skills step",
     description:
       "Analytics show ~40% of operators abandon on the skills-selection screen. Need to figure out whether it's length, copy, or load time.",
-    source: "operator_request", status: "inbox", priority: "medium", created_by: operatorId, sort_order: 1,
+    source: "operator_request", status: "backlog", priority: "medium", created_by: operatorId, sort_order: 1,
   },
   {
     title: "Build the operator analytics dashboard",
@@ -204,9 +204,11 @@ const tasks = [
     builder_estimate_hours: 4, sort_order: 1,
   },
   {
-    title: "Stripe billing — waiting on production keys",
-    description: "Blocked: subscription + metered billing is built against test keys; need the production Stripe account approved before go-live.",
-    source: "builder_added", status: "blocked", priority: "high", created_by: builderId, sort_order: 0,
+    // Sent for approval — showcases the approval pill + top-of-column pinning.
+    title: "Stripe billing — production keys wired up",
+    description: "Subscription + metered billing wired against the production Stripe account; needs operator sign-off before go-live.",
+    source: "builder_added", status: "in_progress", priority: "high", created_by: builderId,
+    approval_sent_at: nowIso, sort_order: 2,
   },
   {
     title: "Set up Supabase schema + RLS for the portal",

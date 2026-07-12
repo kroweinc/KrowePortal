@@ -9,6 +9,7 @@ const BUILDER_SETTINGS_NAV: SettingsNavItem[] = [
   { label: "Notifications", href: "/b/settings/notifications", icon: "bell" },
   { label: "Quote Defaults", href: "/b/settings/quotes", icon: "receipt" },
   { label: "GitHub", href: "/b/settings/github", icon: "github" },
+  { label: "Integrations", href: "/b/settings/granola", icon: "blocks" },
 ];
 
 export const metadata = { title: "Settings" };

@@ -2,108 +2,75 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { CalendarDays, Check, CornerUpLeft, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { ArrowRight, CalendarDays, Check, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
-import { updateTaskStatus, deleteTask } from "@/lib/actions/tasks";
+import { updateTaskStatus } from "@/lib/actions/tasks";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
+import { useTaskMenu } from "@/components/task-menu";
+import { ContextMenu } from "@/components/ui/context-menu";
 import { ApprovalPill } from "@/components/approval-pill";
 import { DeliveryChips } from "@/components/design-atoms";
-import { useContextMenu, ContextMenu, type MenuItem } from "@/components/ui/context-menu";
+import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
+import { SubmitterAvatar } from "@/components/submitter-avatar";
+import {
+  submitterName,
+  submitterInitials,
+  getTaskAdvance,
+  getActiveChangeRequest,
+  isAwaitingApproval,
+  relativeTime,
+} from "@/lib/utils";
 import type { Task, Role, TaskStatus } from "@/lib/types";
-
-const NEXT_STATUS: Record<TaskStatus, TaskStatus | null> = {
-  inbox: "in_progress", in_progress: "blocked", blocked: "done", done: null,
-};
-
-const ADVANCE_LABEL: Record<TaskStatus, string> = {
-  inbox: "In Progress", in_progress: "Approval", blocked: "Done", done: "",
-};
 
 interface TaskCardProps {
   task: Task;
   role: Role;
   engagementTitle?: string;
   onSelect?: (task: Task) => void;
+  // Optimistic plain-status mover supplied by the board so a move paints
+  // instantly. When absent (e.g. the staging board) the card calls the server
+  // action directly. Done/approval moves always go through their dialogs.
+  onStatusMove?: (taskId: string, status: TaskStatus) => void;
   onDragStart?: (task: Task) => void;
   onDragEnd?: () => void;
 }
 
-export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskCardProps) {
-  const router = useRouter();
+export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDragEnd }: TaskCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
-  const menu = useContextMenu();
-  const nextStatus = NEXT_STATUS[task.status];
-  const sourceLabel = task.source === "operator_request" ? "operator" : "builder";
-  const taskHref = `/${role === "operator" ? "o" : "b"}/tasks/${task.id}`;
+  const advance = getTaskAdvance(task);
+  const changeRequest = getActiveChangeRequest(task);
+  const taskMenu = useTaskMenu({
+    task,
+    role,
+    onOpen: onSelect ? () => onSelect(task) : undefined,
+    onStatusMove,
+    requestDone,
+    requestApproval,
+  });
 
   async function handleAdvance() {
-    if (!nextStatus) return;
-    if (nextStatus === "done") {
+    if (!advance) return;
+    if (advance.kind === "done") {
       requestDone({ task });
-    } else if (nextStatus === "blocked") {
+    } else if (advance.kind === "approval") {
       requestApproval({ task });
+    } else if (onStatusMove) {
+      onStatusMove(task.id, advance.status);
     } else {
-      await updateTaskStatus(task.id, nextStatus);
+      await updateTaskStatus(task.id, advance.status);
     }
   }
-
-  async function handleDelete() {
-    if (
-      !(await confirm({
-        title: `Delete “${task.title}”?`,
-        description: "This permanently removes the task. This can’t be undone.",
-        confirmText: "Delete task",
-        cancelText: "Cancel",
-        icon: Trash2,
-        tone: "danger",
-      }))
-    )
-      return;
-    deleteTask(task.id)
-      .then((res) => {
-        if (res && typeof res === "object" && "error" in res && res.error) {
-          toast.error(res.error as string);
-        }
-      })
-      .catch(() => toast.error("Couldn't delete the task. Please try again."));
-  }
-
-  const menuItems: MenuItem[] = [
-    {
-      label: "Open",
-      icon: <ExternalLink size={15} strokeWidth={1.9} />,
-      onSelect: () => (onSelect ? onSelect(task) : router.push(taskHref)),
-    },
-    ...(role === "builder" && nextStatus
-      ? [
-          {
-            label: `Move to ${ADVANCE_LABEL[task.status]}`,
-            icon: <ArrowRight size={15} strokeWidth={1.9} />,
-            onSelect: handleAdvance,
-          },
-        ]
-      : []),
-    {
-      label: "Delete",
-      icon: <Trash2 size={15} strokeWidth={1.9} />,
-      destructive: true,
-      separatorBefore: true,
-      onSelect: handleDelete,
-    },
-  ];
 
   return (
     <>
     <div
-      className={`krowe-card priority-${task.priority} status-${task.status} ${isDragging ? "dragging" : ""}`}
+      className={`krowe-card priority-${task.priority} status-${task.status} ${isAwaitingApproval(task) ? "approval-pending" : ""} ${isDragging ? "dragging" : ""}`}
       draggable
-      onContextMenu={menu.openAtEvent}
       onDragStart={(e) => {
         setIsDragging(true);
         e.dataTransfer.setData("taskId", task.id);
@@ -118,6 +85,7 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
         if ((e.target as HTMLElement).closest("button,a")) return;
         onSelect?.(task);
       }}
+      onContextMenu={taskMenu.menu.openAtEvent}
     >
       <div className="krowe-rail" />
 
@@ -151,6 +119,45 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
         <p className="krowe-card-desc">{task.description}</p>
       )}
 
+      {changeRequest && (
+        <div className="krowe-card-changes">
+          <div className="krowe-card-changes-head">
+            <span className="badge">
+              <RotateCcw width={13} height={13} strokeWidth={2.2} />
+            </span>
+            <span className="h">Changes requested</span>
+            <span className="t">{relativeTime(changeRequest.created_at)}</span>
+          </div>
+          <div className="krowe-card-changes-body">
+            {changeRequest.metadata?.note && (
+              <p className="krowe-card-changes-note">&ldquo;{changeRequest.metadata.note}&rdquo;</p>
+            )}
+            <div className="krowe-card-changes-foot">
+              <span className="av" aria-hidden="true">
+                {submitterInitials({
+                  display_name: changeRequest.actor?.display_name ?? null,
+                  role: "operator",
+                })}
+              </span>
+              <span className="who">{changeRequest.actor?.display_name ?? "Operator"}</span>
+              <span className="spacer" />
+              {role === "builder" && advance?.kind === "approval" && (
+                <button
+                  className="resolve"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestApproval({ task });
+                  }}
+                >
+                  <CornerUpLeft width={13} height={13} strokeWidth={2} />
+                  Resubmit
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <DeliveryChips task={task} />
 
       <div className="krowe-card-meta">
@@ -158,33 +165,47 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
           <span className={`krowe-prio-dot ${task.priority}`}>
             <span className="d" />
           </span>
-          <span className={`krowe-chip krowe-chip-source ${sourceLabel}`}>{sourceLabel}</span>
+          <TaskTypeBadge type={task.type} />
+          <TaskTags tags={task.tags} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <div className="krowe-card-actions">
-            {role === "builder" && nextStatus && (
-              <button
-                className="krowe-advance-btn"
-                onClick={(e) => { e.stopPropagation(); handleAdvance(); }}
-              >
-                <span style={{ fontFamily: "var(--font-mono)" }}>→</span>
-                {ADVANCE_LABEL[task.status]}
-              </button>
-            )}
-          </div>
+        <div className="krowe-card-actions">
+          {role === "builder" && advance && (
+            <button
+              className="krowe-advance-btn"
+              onClick={(e) => { e.stopPropagation(); handleAdvance(); }}
+            >
+              <span style={{ fontFamily: "var(--font-mono)" }}>→</span>
+              {advance.label}
+            </button>
+          )}
           <button
-            type="button"
-            className="ctx-kebab"
-            title="Task actions"
-            aria-label="Task actions"
-            onClick={(e) => {
+            className="krowe-iconbtn danger"
+            title="Delete task"
+            onClick={async (e) => {
               e.stopPropagation();
-              menu.openAtAnchor(e.currentTarget);
+              if (
+                !(await confirm({
+                  title: `Delete “${task.title}”?`,
+                  description: "This permanently removes the task. This can’t be undone.",
+                  confirmText: "Delete task",
+                  cancelText: "Cancel",
+                  icon: Trash2,
+                  tone: "danger",
+                }))
+              )
+                return;
+              import("@/lib/actions/tasks")
+                .then(({ deleteTask }) => deleteTask(task.id))
+                .then((res) => {
+                  if (res && typeof res === "object" && "error" in res && res.error) {
+                    toast.error(res.error as string);
+                  }
+                })
+                .catch(() => toast.error("Couldn't delete the task. Please try again."));
             }}
           >
-            <MoreHorizontal width={16} height={16} />
+            <Trash2 width={14} height={14} />
           </button>
-          <ContextMenu state={menu.state} items={menuItems} onClose={menu.close} />
         </div>
       </div>
 
@@ -198,8 +219,14 @@ export function TaskCard({ task, role, onSelect, onDragStart, onDragEnd }: TaskC
             timeZone: "UTC",
           })}
         </span>
+        <span className="krowe-card-submitter">
+          <SubmitterAvatar creator={task.creator} />
+          {submitterName(task.creator)}
+        </span>
       </div>
     </div>
+    <ContextMenu state={taskMenu.menu.state} items={taskMenu.items} onClose={taskMenu.menu.close} />
+    {taskMenu.dialogs}
     {confirmDialog}
     </>
   );

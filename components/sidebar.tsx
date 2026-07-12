@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FeedbackDialog } from "@/components/feedback-dialog";
@@ -13,8 +14,11 @@ import {
   Settings,
   FolderKanban,
   LogOut,
+  ChevronLeft,
   type LucideIcon,
 } from "lucide-react";
+
+const COLLAPSE_KEY = "krowe:sidebar-collapsed";
 
 // Tabs are defined in Server Component layouts, so the icon must travel as a
 // serializable string key (component refs can't cross the server→client seam).
@@ -46,6 +50,31 @@ interface SidebarProps {
 export function Sidebar({ tabs, basePath }: SidebarProps) {
   const pathname = usePathname();
 
+  // Collapsed state persists in localStorage so the icon-only rail survives
+  // reloads and page navigation. Hydrate after mount to avoid an SSR mismatch;
+  // the `ready` flag gates the width transition so the stored state paints
+  // instantly on first load rather than animating open.
+  const [collapsed, setCollapsed] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1");
+    } catch {
+      /* private mode / storage disabled — stay expanded */
+    }
+  }, []);
+  const toggleCollapsed = () =>
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+
   // Settings sits at the bottom of the sidebar (just above Sign out), so pull
   // it out of the main nav flow rather than rendering it inline with the rest.
   const settingsTab = tabs.find((tab) => tab.icon === "settings");
@@ -63,24 +92,37 @@ export function Sidebar({ tabs, basePath }: SidebarProps) {
         key={tab.href}
         href={tab.href}
         data-tour={tab.tour}
+        title={tab.label}
         className={`krowe-sidebar-link ${isActive ? "active" : ""}`}
       >
         <span className="krowe-sidebar-ic">
           <Icon size={17} strokeWidth={1.9} />
         </span>
-        {tab.label}
+        <span className="krowe-sidebar-label">{tab.label}</span>
       </Link>
     );
   };
 
   return (
-    <aside className="krowe-sidebar">
+    <aside
+      className={`krowe-sidebar ${collapsed ? "collapsed" : ""} ${mounted ? "ready" : ""}`}
+    >
       <div className="krowe-sidebar-brand">
         {/* Intrinsic dimensions (493×506) reserve the logo's space before load to
             avoid CLS; CSS (.krowe-sidebar-brand img) scales it to height:26px. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={assetUrl("/KroweIcon.png")} alt="Krowe" width={493} height={506} />
         <span className="krowe-sidebar-word">Krowe</span>
+        <button
+          type="button"
+          className="krowe-sidebar-toggle"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <ChevronLeft size={16} strokeWidth={2} />
+        </button>
       </div>
 
       <div className="krowe-sidebar-cap">Workspace</div>
@@ -94,11 +136,12 @@ export function Sidebar({ tabs, basePath }: SidebarProps) {
           <button
             type="submit"
             className="krowe-sidebar-link krowe-sidebar-signout"
+            title="Sign out"
           >
             <span className="krowe-sidebar-ic">
               <LogOut size={17} strokeWidth={1.9} />
             </span>
-            Sign out
+            <span className="krowe-sidebar-label">Sign out</span>
           </button>
         </form>
       </div>

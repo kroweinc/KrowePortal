@@ -7,10 +7,8 @@ import { updateProfile } from "@/lib/actions/profile";
 import { SettingsSection } from "@/components/settings/settings-section";
 import type { Role } from "@/lib/types";
 
-const inputClass =
-  "rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-400 disabled:cursor-not-allowed disabled:bg-neutral-50 disabled:text-neutral-400";
-const btnClass =
-  "rounded-md bg-neutral-900 px-4 py-2 text-sm text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40";
+const inputClass = "krowe-set-input";
+const btnClass = "krowe-set-btn-dark";
 
 interface AccountEditorProps {
   initialName: string;
@@ -79,52 +77,50 @@ export function AccountEditor({ initialName, currentEmail, role, memberSince, is
   }
 
   return (
-    <div className="space-y-6">
+    <div className="krowe-set-stack">
       <SettingsSection title="Profile" hint="How you show up across the portal.">
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="display_name" className="block text-xs font-medium text-neutral-700">
-              Display name
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                id="display_name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                maxLength={80}
-                placeholder="Your name"
-                className={inputClass + " flex-1"}
-              />
-              <button type="button" onClick={saveName} disabled={!canSaveName} className={btnClass}>
-                {namePending ? "Saving…" : "Save"}
-              </button>
-            </div>
+        <div className="krowe-set-field">
+          <label htmlFor="display_name" className="krowe-set-label">
+            Display name
+          </label>
+          <div className="krowe-set-field-row">
+            <input
+              id="display_name"
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              placeholder="Your name"
+              className={inputClass}
+            />
+            <button type="button" onClick={saveName} disabled={!canSaveName} className={btnClass}>
+              {namePending ? "Saving…" : "Save"}
+            </button>
           </div>
-          <dl className="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3 text-sm">
-            <div>
-              <dt className="text-xs text-neutral-500">Role</dt>
-              <dd className="capitalize text-neutral-900">{role}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-neutral-500">Member since</dt>
-              <dd className="text-neutral-900">{formatDate(memberSince)}</dd>
-            </div>
-          </dl>
         </div>
+        <dl className="krowe-set-meta-grid">
+          <div>
+            <dt className="krowe-set-meta-k">Role</dt>
+            <dd className="krowe-set-meta-v capitalize">{role}</dd>
+          </div>
+          <div>
+            <dt className="krowe-set-meta-k">Member since</dt>
+            <dd className="krowe-set-meta-v">{formatDate(memberSince)}</dd>
+          </div>
+        </dl>
       </SettingsSection>
 
       <SettingsSection title="Email" hint="The address you sign in with and where account emails are sent.">
         {isDevProfile ? (
-          <p className="text-sm text-neutral-500">
+          <p className="krowe-set-note">
             Email management isn’t available for the dev role. Sign in with a real account to change your email.
           </p>
         ) : (
-          <div className="space-y-2">
-            <label htmlFor="email" className="block text-xs font-medium text-neutral-700">
+          <div className="krowe-set-field">
+            <label htmlFor="email" className="krowe-set-label">
               Email address
             </label>
-            <div className="flex items-center gap-2">
+            <div className="krowe-set-field-row">
               <input
                 id="email"
                 type="email"
@@ -132,19 +128,19 @@ export function AccountEditor({ initialName, currentEmail, role, memberSince, is
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
-                className={inputClass + " flex-1"}
+                className={inputClass}
               />
               <button type="button" onClick={changeEmail} disabled={!canChangeEmail} className={btnClass}>
                 {emailPending ? "Sending…" : "Change"}
               </button>
             </div>
             {pendingEmail ? (
-              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                Pending: check <span className="font-medium">{pendingEmail}</span> and click the confirmation link to
+              <p className="krowe-set-banner warn" style={{ fontSize: "12.5px", padding: "10px 14px" }}>
+                Pending: check <span style={{ fontWeight: 600 }}>{pendingEmail}</span> and click the confirmation link to
                 finish. Your sign-in email stays the same until you confirm.
               </p>
             ) : (
-              <p className="text-xs text-neutral-500">
+              <p className="krowe-set-note">
                 We’ll email a confirmation link to the new address. Nothing changes until you click it.
               </p>
             )}
