@@ -858,6 +858,40 @@ export async function reorderTask(taskId: string, sortOrder: number) {
   return { success: true };
 }
 
+// Pin (or unpin) a task to the top of the board. Available to both roles — the
+// operator pins from /o, the pin also lifts the task on the builder's /b. Member
+// gate mirrors reorderTask; operators pass it for their own engagement's tasks.
+export async function setTaskPinned(taskId: string, pinned: boolean) {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (!(await isTaskMember(taskId, profile.id)))
+    return { error: "You don't have access to this task." };
+
+  const now = new Date().toISOString();
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("tasks")
+    .update({ pinned_at: pinned ? now : null, updated_at: now })
+    .eq("id", taskId);
+
+  if (error) return { error: error.message };
+
+  // Deferred like updateTaskStatus — the pin repaints from the returned row, the
+  // audit trail doesn't need to block the response.
+  after(() =>
+    writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: pinned ? "task.pinned" : "task.unpinned",
+      field: "pinned_at",
+    })
+  );
+
+  revalidatePath("/o");
+  revalidatePath("/b");
+  return { success: true };
+}
+
 // ── Apply an AI task regeneration ────────────────────────────────────────────
 // Persists the rewrite the builder approved in the sidebar (see
 // regenerateTask in lib/actions/ai-tasks.ts): the revised task fields plus the

@@ -321,8 +321,9 @@ export function StagingBoard({
     // A real branch queued for the next push can be shipped in one click.
     const canShip =
       mode === "branch" && section === "staged" && g.branch !== null && g.tasks.length > 0;
+    const isEmpty = g.tasks.length === 0;
     return (
-      <div key={g.key} className="krowe-stage-group">
+      <div key={g.key} className={`krowe-stage-group${isEmpty ? " is-empty" : ""}`}>
         <div className="krowe-stage-group-head">
           {mode === "branch" ? (
             <GitBranch width={14} height={14} strokeWidth={2} />
@@ -403,11 +404,44 @@ export function StagingBoard({
     );
   }
 
+  // Live branch names for the engagements currently in scope, so branch mode can
+  // surface repo branches that have no queued work yet. Default branches are
+  // excluded — main isn't a staging branch, it's where work is pushed to.
+  const scopedEngagementIds =
+    engagementFilter === null
+      ? engagements.map((e) => e.id)
+      : engagementFilter === "personal"
+        ? []
+        : [engagementFilter];
+  const liveBranchNames: string[] = [];
+  const excludeFromEmpty = new Set<string>();
+  for (const eid of scopedEngagementIds) {
+    const pb = branchesByEngagement[eid];
+    if (!pb) continue;
+    if (pb.defaultBranch) excludeFromEmpty.add(pb.defaultBranch);
+    for (const b of pb.branches) liveBranchNames.push(b.name);
+  }
+  // A branch already shown under Shipped shouldn't reappear as an empty row.
+  for (const t of visibleTasks) {
+    if (t.pushed_to_main && t.branch_name) excludeFromEmpty.add(t.branch_name);
+  }
+
   // Branch mode splits by pushed_to_main (queued vs shipped); staging mode shows
   // one list of groups (the group is the organizing unit, not the push state).
-  const stagedGroups = groupTasksByBranch(visibleTasks.filter((t) => !t.pushed_to_main));
+  const stagedGroups = groupTasksByBranch(
+    visibleTasks.filter((t) => !t.pushed_to_main),
+    liveBranchNames,
+    excludeFromEmpty
+  );
   const shippedGroups = groupTasksByBranch(visibleTasks.filter((t) => t.pushed_to_main));
   const groups = groupTasksByStagingGroup(visibleTasks, visibleGroupDefs);
+
+  // Flat, on-screen order of task ids for the sheet's prev/next stepping. Empty
+  // branch rows contribute nothing, so navigation walks only real tasks.
+  const orderedIds =
+    mode === "branch"
+      ? [...stagedGroups, ...shippedGroups].flatMap((g) => g.tasks.map((t) => t.id))
+      : groups.flatMap((g) => g.tasks.map((t) => t.id));
 
   return (
     <>
@@ -527,7 +561,7 @@ export function StagingBoard({
       )}
 
       {mode === "branch" ? (
-        visibleTasks.length === 0 ? (
+        stagedGroups.length === 0 && shippedGroups.length === 0 ? (
           <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
             Nothing here yet — finish a task and it lands in staging, ready to group by branch.
           </div>
@@ -569,6 +603,8 @@ export function StagingBoard({
         onOpenChange={(open) => !open && syncSelected(null)}
         branchesByEngagement={branchesByEngagement}
         stagingGroupsByEngagement={stagingGroupsByEngagement}
+        siblingIds={orderedIds}
+        onNavigate={syncSelected}
       />
     </>
   );

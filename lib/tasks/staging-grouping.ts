@@ -28,10 +28,19 @@ export function isDefaultBranch(
 
 /**
  * Bucket done tasks by branch, preserving the incoming (completed-desc) order
- * within a bucket. Named branches sort alphabetically; the "No branch" bucket
- * sinks to the bottom.
+ * within a bucket. Branches with queued work sort first (alphabetically), then
+ * any guaranteed-but-empty branches, then the "No branch" bucket last.
+ *
+ * `extraBranchNames` seeds empty buckets for live repo branches that carry no
+ * task yet, so the board reflects the whole repo — not just completed work.
+ * `excludeNames` drops names that shouldn't get an empty bucket (the repo
+ * default, or a branch already shown in another section).
  */
-export function groupTasksByBranch(list: Task[]): TaskBucket[] {
+export function groupTasksByBranch(
+  list: Task[],
+  extraBranchNames: Iterable<string> = [],
+  excludeNames: Iterable<string> = []
+): TaskBucket[] {
   const map = new Map<string, Task[]>();
   for (const t of list) {
     const key = t.branch_name && t.branch_name.trim() ? t.branch_name : NO_BUCKET;
@@ -39,6 +48,15 @@ export function groupTasksByBranch(list: Task[]): TaskBucket[] {
     if (bucket) bucket.push(t);
     else map.set(key, [t]);
   }
+
+  // Guarantee an empty bucket for each live branch we were told to surface,
+  // unless it's excluded or already has tasks.
+  const exclude = new Set(excludeNames);
+  for (const name of extraBranchNames) {
+    if (!name || !name.trim() || exclude.has(name) || map.has(name)) continue;
+    map.set(name, []);
+  }
+
   const buckets: TaskBucket[] = Array.from(map.entries()).map(([k, tasks]) => ({
     key: k,
     label: k === NO_BUCKET ? "No branch" : k,
@@ -49,6 +67,10 @@ export function groupTasksByBranch(list: Task[]): TaskBucket[] {
   buckets.sort((a, b) => {
     if (a.branch === null) return 1;
     if (b.branch === null) return -1;
+    // Branches with queued work rise above empty ones so real work stays on top.
+    const aHas = a.tasks.length > 0;
+    const bHas = b.tasks.length > 0;
+    if (aHas !== bHas) return aHas ? -1 : 1;
     return a.branch.localeCompare(b.branch);
   });
   return buckets;

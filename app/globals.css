@@ -654,6 +654,14 @@ button:focus-visible {
   background: color-mix(in srgb, var(--surface-subtle) 55%, white);
   padding: 14px 16px 16px;
 }
+/* A live repo branch with no queued work yet — present but visibly quieter, and
+   with no card grid below the head. */
+.krowe-stage-group.is-empty {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-subtle) 30%, white);
+  padding-bottom: 14px;
+}
+.krowe-stage-group.is-empty .krowe-stage-group-head { padding-bottom: 0; }
 .krowe-stage-group-head {
   display: flex; align-items: center; gap: 9px; padding-bottom: 12px;
   color: var(--muted-foreground);
@@ -1428,12 +1436,122 @@ button:focus-visible {
 }
 .krowe-opd-empty .emp-sub { font-size: 12.5px; margin-top: 4px; }
 
+/* Clickable stat tile — the "Shipped this week" readout opens Delivered. */
+.krowe-opd-stat.is-action {
+  width: 100%; display: block; text-align: left; font-family: inherit; cursor: pointer;
+}
+.krowe-opd-stat.is-action:focus-visible {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+/* ── Pinned section ── */
+.krowe-opd-pinned-wrap { margin-bottom: 16px; }
+.krowe-opd-pinned-wrap .krowe-opd-panel {
+  border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
+}
+.krowe-opd-sec-ico.pinned,
+.krowe-opd-stat-ico.pinned {
+  background: color-mix(in srgb, var(--primary) 12%, white); color: var(--primary);
+}
+.krowe-opd-row.is-pinned .krowe-rail { background: var(--primary); }
+.krowe-opd-pin-ico {
+  display: inline-flex; align-items: center; flex-shrink: 0; color: var(--primary);
+}
+.krowe-opd-pin-hint {
+  flex-shrink: 0; font-size: 11px; font-weight: 500;
+  color: var(--muted-foreground); white-space: nowrap;
+}
+.krowe-opd-unpin {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; background: none; cursor: pointer;
+  color: var(--faint-foreground);
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-opd-unpin:hover { color: var(--foreground); background: var(--surface-subtle); }
+.krowe-opd-unpin:disabled { opacity: 0.5; cursor: default; }
+.krowe-opd-unpin:focus-visible {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+/* ── Delivered rows (staged / shipped) ── */
+.krowe-opd-row.is-done .krowe-rail { background: var(--success); opacity: 0.55; }
+.krowe-opd-done-ico {
+  flex-shrink: 0; width: 18px; height: 18px; border-radius: var(--radius-full);
+  background: var(--success); color: white;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.krowe-opd-done-when {
+  flex-shrink: 0; font-family: var(--font-mono); font-size: 11px;
+  color: var(--muted-foreground); white-space: nowrap;
+}
+.krowe-opd-staged-chip {
+  flex-shrink: 0; font-size: 11px; font-weight: 500; padding: 3px 9px;
+  border-radius: var(--radius-full); border: 1px solid var(--border);
+  background: var(--surface-subtle); color: var(--muted-foreground); white-space: nowrap;
+}
+
+/* ── Delivered collapsible section ── */
+.krowe-opd-delivered {
+  margin-top: 16px; background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-1); overflow: hidden;
+}
+.krowe-opd-delivered-head {
+  width: 100%; display: flex; align-items: center; gap: 11px;
+  padding: 14px 16px; background: none; border: none; cursor: pointer;
+  font-family: inherit; text-align: left;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-opd-delivered-head:hover { background: var(--surface-subtle); }
+.krowe-opd-delivered-head:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--primary),
+              inset 0 0 0 5px color-mix(in srgb, var(--primary) 20%, transparent);
+}
+.krowe-opd-delivered-title {
+  font-size: 13.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--foreground);
+}
+.krowe-opd-delivered-counts {
+  font-size: 11.5px; color: var(--faint-foreground);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.krowe-opd-delivered-counts .sep { opacity: 0.6; }
+.krowe-opd-delivered-head .grow { flex: 1; }
+.krowe-opd-delivered-chev {
+  color: var(--muted-foreground); flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-opd-delivered.is-open .krowe-opd-delivered-chev { transform: rotate(180deg); }
+.krowe-opd-delivered-body {
+  padding: 4px 14px 16px; border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+}
+.krowe-opd-delivered-group { min-width: 0; }
+.krowe-opd-delivered-sub {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 12px 4px 8px; font-size: 12px; font-weight: 600; color: var(--foreground);
+}
+.krowe-opd-delivered-sub .c {
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-subtle); border: 1px solid var(--border); color: var(--muted-foreground);
+}
+.krowe-opd-delivered-sub .note { font-weight: 400; font-size: 11px; color: var(--faint-foreground); }
+
 @media (max-width: 860px) {
   .krowe-opd-grid { grid-template-columns: 1fr; min-height: 0; }
   .krowe-opd-panel { max-height: 560px; }
+  .krowe-opd-delivered-body { grid-template-columns: 1fr; gap: 8px; }
 }
 @media (max-width: 720px) {
   .krowe-opd-stats { grid-template-columns: repeat(2, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-opd-delivered-chev { transition: none; }
 }
 
 /* ── FAB ── */
@@ -1725,6 +1843,20 @@ button:focus-visible {
 }
 .krowe-task-iconbtn:hover { background: var(--surface-subtle); color: var(--foreground); }
 .krowe-task-iconbtn.danger:hover { color: var(--danger); background: var(--danger-soft); }
+.krowe-task-iconbtn:disabled { opacity: 0.35; cursor: default; }
+.krowe-task-iconbtn:disabled:hover { background: none; color: var(--muted-foreground); }
+
+/* Prev/next task stepper in the sheet topbar */
+.krowe-task-nav { display: inline-flex; align-items: center; gap: 1px; }
+.krowe-task-nav-pos {
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground);
+  min-width: 34px; text-align: center; letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.krowe-task-nav-pos .sep { color: var(--border-strong); margin: 0 2px; }
+.krowe-task-nav-div {
+  width: 1px; height: 18px; margin: 0 6px 0 4px; background: var(--border);
+}
 
 /* Tabs strip inside the sheet */
 .krowe-task-sheet-tabs {
@@ -3116,6 +3248,13 @@ button.krowe-desc-inline-text:hover {
   width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px;
   border-radius: 5px; background: var(--success); color: white;
   display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Pin marker — a client-flagged task lifted to the top of its column (0077). */
+.krowe-card-pin {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--primary) 12%, white); color: var(--primary);
 }
 
 /* Priority dot */

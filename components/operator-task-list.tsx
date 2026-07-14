@@ -1,16 +1,19 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronUp,
   Clock,
   Hammer,
   Inbox,
   Layers,
   ListChecks,
+  Pin,
+  PinOff,
   RotateCcw,
   Trash2,
 } from "lucide-react";
@@ -20,8 +23,9 @@ import { DeliveryChips } from "@/components/design-atoms";
 import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import { PlainEnglishProvider } from "@/components/plain-english-context";
 import { RequestChangesDialog } from "@/components/request-changes-dialog";
-import { deleteTask, approveTask } from "@/lib/actions/tasks";
-import { isAwaitingApproval, sortByPriority, relativeTime, PRIORITY_LABELS } from "@/lib/utils";
+import { deleteTask, approveTask, setTaskPinned } from "@/lib/actions/tasks";
+import { isAwaitingApproval, relativeTime, PRIORITY_LABELS } from "@/lib/utils";
+import { computeOperatorBuckets } from "@/lib/tasks/operator-buckets";
 import { formatHoursRange } from "@/lib/format-estimate";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useTaskMenu } from "@/components/task-menu";
@@ -41,15 +45,17 @@ function StatTile({
   num,
   label,
   hot,
+  onClick,
 }: {
   icon: React.ComponentType<{ width?: number; height?: number }>;
   cls: string;
   num: number;
   label: string;
   hot?: boolean;
+  onClick?: () => void;
 }) {
-  return (
-    <div className={`krowe-opd-stat ${hot ? "is-hot" : ""}`}>
+  const inner = (
+    <>
       <div className="krowe-opd-stat-top">
         <span className="krowe-opd-stat-num">{num}</span>
         <span className={`krowe-opd-stat-ico ${cls}`}>
@@ -57,8 +63,18 @@ function StatTile({
         </span>
       </div>
       <div className="krowe-opd-stat-lab">{label}</div>
-    </div>
+    </>
   );
+  // A tile with an action becomes a real button so it's keyboard-reachable and
+  // picks up the focus halo; the rest stay plain readouts.
+  if (onClick) {
+    return (
+      <button type="button" className={`krowe-opd-stat is-action ${hot ? "is-hot" : ""}`} onClick={onClick}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={`krowe-opd-stat ${hot ? "is-hot" : ""}`}>{inner}</div>;
 }
 
 /* ── Panel shell ── */
@@ -338,6 +354,97 @@ function UpNextRow({
   );
 }
 
+/* ── Pinned row: a task the operator lifted to the top of the board ── */
+function PinnedRow({
+  task,
+  onSelect,
+  onDelete,
+}: {
+  task: Task;
+  onSelect: () => void;
+  onDelete: () => Promise<void>;
+}) {
+  const { menu, items } = useTaskMenu({ task, role: "operator", onOpen: onSelect, onDelete });
+  const [isPending, startTransition] = useTransition();
+
+  const hint = isAwaitingApproval(task)
+    ? "In review"
+    : task.status === "in_progress"
+      ? "In progress"
+      : "Up next";
+
+  function unpin(e: React.MouseEvent) {
+    e.stopPropagation();
+    startTransition(async () => {
+      const r = await setTaskPinned(task.id, false);
+      if (r && "error" in r && r.error) toast.error(r.error);
+      else toast.success("Unpinned");
+    });
+  }
+
+  return (
+    <div
+      className={`krowe-opd-row is-pinned priority-${task.priority}`}
+      onClick={onSelect}
+      onContextMenu={menu.openAtEvent}
+    >
+      <div className="krowe-rail" />
+      <span className="krowe-opd-pin-ico" aria-hidden="true">
+        <Pin width={13} height={13} strokeWidth={2.2} />
+      </span>
+      <span className="krowe-opd-row-title">{task.title}</span>
+      <span className={`krowe-chip krowe-chip-priority ${task.priority}`}>
+        {PRIORITY_LABELS[task.priority]}
+      </span>
+      <span className="krowe-opd-pin-hint">{hint}</span>
+      <button
+        className="krowe-opd-unpin"
+        title="Unpin from top"
+        aria-label="Unpin from top"
+        disabled={isPending}
+        onClick={unpin}
+      >
+        <PinOff width={14} height={14} />
+      </button>
+      <ContextMenu state={menu.state} items={items} onClose={menu.close} />
+    </div>
+  );
+}
+
+/* ── Delivered row: a completed task (staged or shipped this week) ── */
+function DoneRow({
+  task,
+  variant,
+  onSelect,
+  onDelete,
+}: {
+  task: Task;
+  variant: "staged" | "done";
+  onSelect: () => void;
+  onDelete: () => Promise<void>;
+}) {
+  const { menu, items } = useTaskMenu({ task, role: "operator", onOpen: onSelect, onDelete });
+  const groupName = task.staging_group?.name?.trim();
+
+  return (
+    <div className="krowe-opd-row is-done" onClick={onSelect} onContextMenu={menu.openAtEvent}>
+      <div className="krowe-rail" />
+      <span className="krowe-opd-done-ico" aria-hidden="true">
+        <Check width={12} height={12} strokeWidth={3} />
+      </span>
+      <span className="krowe-opd-row-title">{task.title}</span>
+      {variant === "staged" ? (
+        <span className="krowe-opd-staged-chip">{groupName || "Queued"}</span>
+      ) : (
+        <span className="krowe-opd-done-when">
+          {relativeTime(task.completed_at ?? task.updated_at)}
+        </span>
+      )}
+      <ContextMenu state={menu.state} items={items} onClose={menu.close} />
+    </div>
+  );
+}
+
 export function OperatorTaskList({ tasks, currentUserId, builderName }: OperatorTaskListProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -347,6 +454,8 @@ export function OperatorTaskList({ tasks, currentUserId, builderName }: Operator
   // Snapshotted once per mount — the "shipped this week" window doesn't need
   // to move while the page is open, and render purity requires a stable value.
   const [weekAgo] = useState(() => Date.now() - 7 * 86_400_000);
+  const [deliveredOpen, setDeliveredOpen] = useState(false);
+  const deliveredRef = useRef<HTMLElement>(null);
   const [confirm, confirmDialog] = useConfirm();
 
   const selectedTask = tasks.find((t) => t.id === selectedId) ?? null;
@@ -385,22 +494,20 @@ export function OperatorTaskList({ tasks, currentUserId, builderName }: Operator
     );
   }
 
-  const review = tasks
-    .filter(isAwaitingApproval)
-    .sort(
-      (a, b) => +new Date(b.approval_sent_at ?? 0) - +new Date(a.approval_sent_at ?? 0)
+  const { pinned, review, progress, upNext, staged, doneThisWeek } = computeOperatorBuckets(
+    tasks,
+    weekAgo
+  );
+
+  function openDelivered() {
+    setDeliveredOpen(true);
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    requestAnimationFrame(() =>
+      deliveredRef.current?.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" })
     );
-  const progress = sortByPriority(
-    tasks.filter((t) => t.status === "in_progress" && !isAwaitingApproval(t))
-  );
-  const upNext = sortByPriority(
-    tasks.filter(
-      (t) => (t.status === "backlog" || t.status === "todo") && !isAwaitingApproval(t)
-    )
-  );
-  const shipped = tasks.filter(
-    (t) => t.status === "done" && +new Date(t.completed_at ?? t.updated_at) >= weekAgo
-  ).length;
+  }
 
   return (
     <PlainEnglishProvider>
@@ -414,8 +521,37 @@ export function OperatorTaskList({ tasks, currentUserId, builderName }: Operator
         />
         <StatTile icon={Hammer} cls="progress" num={progress.length} label="In progress" />
         <StatTile icon={Layers} cls="next" num={upNext.length} label="Up next" />
-        <StatTile icon={CheckCircle2} cls="ship" num={shipped} label="Shipped this week" />
+        <StatTile
+          icon={CheckCircle2}
+          cls="ship"
+          num={doneThisWeek.length}
+          label="Shipped this week"
+          onClick={openDelivered}
+        />
       </div>
+
+      {pinned.length > 0 && (
+        <div className="krowe-opd-pinned-wrap">
+          <Panel
+            icon={Pin}
+            cls="pinned"
+            title="Pinned"
+            count={pinned.length}
+            note="Your top priorities — lifted above everything."
+          >
+            <div className="krowe-opd-rows">
+              {pinned.map((task) => (
+                <PinnedRow
+                  key={task.id}
+                  task={task}
+                  onSelect={() => syncSelected(task.id)}
+                  onDelete={makeDelete(task)}
+                />
+              ))}
+            </div>
+          </Panel>
+        </div>
+      )}
 
       <div className="krowe-opd-grid">
         <Panel
@@ -496,6 +632,77 @@ export function OperatorTaskList({ tasks, currentUserId, builderName }: Operator
           </Panel>
         </div>
       </div>
+
+      <section
+        ref={deliveredRef}
+        className={`krowe-opd-delivered ${deliveredOpen ? "is-open" : ""}`}
+      >
+        <button
+          type="button"
+          className="krowe-opd-delivered-head"
+          aria-expanded={deliveredOpen}
+          onClick={() => setDeliveredOpen((o) => !o)}
+        >
+          <span className="krowe-opd-sec-ico ship">
+            <CheckCircle2 width={16} height={16} />
+          </span>
+          <span className="krowe-opd-delivered-title">Delivered</span>
+          <span className="krowe-opd-delivered-counts">
+            {staged.length} staged<span className="sep">·</span>
+            {doneThisWeek.length} this week
+          </span>
+          <span className="grow" />
+          <ChevronDown className="krowe-opd-delivered-chev" width={18} height={18} />
+        </button>
+
+        {deliveredOpen && (
+          <div className="krowe-opd-delivered-body">
+            <div className="krowe-opd-delivered-group">
+              <div className="krowe-opd-delivered-sub">
+                Staged<span className="c">{staged.length}</span>
+                <span className="note">Finished — queued to go live.</span>
+              </div>
+              {staged.length === 0 ? (
+                <EmptyState title="Nothing staged" sub="Finished work waiting to ship lands here." />
+              ) : (
+                <div className="krowe-opd-rows">
+                  {staged.map((task) => (
+                    <DoneRow
+                      key={task.id}
+                      task={task}
+                      variant="staged"
+                      onSelect={() => syncSelected(task.id)}
+                      onDelete={makeDelete(task)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="krowe-opd-delivered-group">
+              <div className="krowe-opd-delivered-sub">
+                Done this week<span className="c">{doneThisWeek.length}</span>
+                <span className="note">Shipped in the last 7 days.</span>
+              </div>
+              {doneThisWeek.length === 0 ? (
+                <EmptyState title="Nothing shipped yet" sub="Work delivered this week shows up here." />
+              ) : (
+                <div className="krowe-opd-rows">
+                  {doneThisWeek.map((task) => (
+                    <DoneRow
+                      key={task.id}
+                      task={task}
+                      variant="done"
+                      onSelect={() => syncSelected(task.id)}
+                      onDelete={makeDelete(task)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
 
       <TaskDetailSheet
         task={selectedTask}
