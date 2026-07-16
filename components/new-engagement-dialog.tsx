@@ -74,7 +74,7 @@ export function NewEngagementDialog() {
         </DialogHeader>
 
         {!token ? (
-          <div className="space-y-4 pt-2">
+          <div className="space-y-4 p-6 pt-2">
             <p className="text-sm text-neutral-500">
               Start a new shared space for another business owner. You&apos;ll get an invite link
               to send them.
@@ -92,7 +92,7 @@ export function NewEngagementDialog() {
             </Button>
           </div>
         ) : (
-          <div className="space-y-4 pt-2">
+          <div className="space-y-4 p-6 pt-2">
             <p className="text-sm text-neutral-500">
               <span className="font-medium text-neutral-900">{title}</span> is ready. Share this
               link with the business owner — it expires in 7 days.

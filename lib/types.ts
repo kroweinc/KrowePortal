@@ -138,6 +138,11 @@ export interface Task {
   completed_at: string | null;
   approval_sent_at: string | null;
   approval_approved_at: string | null;
+  // When the task was pinned to the top of the board (migration 0077). Null =
+  // not pinned. Set from either board's context menu; doubles as the tiebreak so
+  // the most recently pinned task sits highest. Lifts the task above every other
+  // task on the operator's /o board and to the top of its column on /b.
+  pinned_at: string | null;
   milestone_id: string | null;
   // The feature branch a done task's work lives on (migration 0069). Picked in
   // the done dialog from the engagement repo's live branch list; nullable —

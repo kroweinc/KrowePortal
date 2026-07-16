@@ -217,14 +217,12 @@ export async function persistPrdDraft(
     : "";
   const sourceNotes = [notes?.trim(), transcript].filter(Boolean).join("\n\n---\n\n") || null;
 
-  // Run Free-Tier Fit (§15) inline so a freshly drafted PRD ships with its verdicts
-  // already present — the builder lands in the editor with the analysis filled in,
-  // never an empty section waiting on a button. withFreeTierAnalysis is fully
-  // self-contained (no billable stack ⇒ no-op; AI failure ⇒ returns content
-  // unchanged), so PRD creation never hinges on it. The streaming route awaits this
-  // before emitting "done", and the wizard's progress bar covers the extra seconds.
-  const finalContent = await withFreeTierAnalysis(content);
-
+  // Free-Tier Fit (§15) is computed lazily on the PRD page (FreeTierFitBody), NOT
+  // here — it was moved off the generation critical path so the wizard reaches the
+  // finished PRD without awaiting a second LLM call before "done" (~3s sooner). The
+  // section shows "No free-tier analysis yet." until the page-load compute fills it
+  // in; every consumer degrades gracefully when freeTierAnalysis is absent. The
+  // regenerate action (lib/actions/prds.ts) still runs it inline, on purpose.
   const supabase = await getClient(profile.id);
   const { data, error } = await supabase
     .from("prds")
@@ -233,7 +231,7 @@ export async function persistPrdDraft(
       created_by: profile.id,
       title,
       status: "draft",
-      content: finalContent,
+      content,
       source_notes: sourceNotes,
     })
     .select("id")

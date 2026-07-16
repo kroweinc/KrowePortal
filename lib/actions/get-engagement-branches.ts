@@ -6,6 +6,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import {
   getEngagementRepoForTask,
+  getEngagementRepoById,
   type EngagementRepo,
 } from "@/lib/github/engagement-repo";
 import { buildBranchGraph, type BranchNode } from "@/lib/github/branches";
@@ -268,6 +269,63 @@ export async function refreshEngagementBranches(
   revalidatePath("/b");
   revalidatePath("/b/staging");
   return getEngagementBranchesCached(taskId);
+}
+
+/**
+ * Warm and freshen the persisted branch cache for the current builder's
+ * engagement repos, in the background (safe to call from `after()`). Resolves
+ * each engagement's repo, dedupes by full name, and re-syncs from GitHub only
+ * when the cache is cold or stale — so a builder who reloads the board has a
+ * warm, current branch list waiting before they open any deliverable picker,
+ * and repeated navigation never re-crawls GitHub.
+ */
+export async function warmEngagementBranches(): Promise<void> {
+  const profile = await getCurrentProfile();
+  if (!profile) return;
+
+  const supabase = createAdminClient();
+  const { data: engagements } = await supabase
+    .from("engagements")
+    .select("id, github_repo_full_name")
+    .eq("builder_id", profile.id)
+    .not("started_at", "is", null);
+  if (!engagements || engagements.length === 0) return;
+
+  // Resolve each engagement to a usable (token, repo) pair, deduped by repo so a
+  // repo shared across engagements is synced once.
+  const repos = new Map<string, EngagementRepo>();
+  for (const e of engagements as {
+    id: string;
+    github_repo_full_name: string | null;
+  }[]) {
+    if (!e.github_repo_full_name || repos.has(e.github_repo_full_name)) continue;
+    const repo = await getEngagementRepoById(e.id, profile.id);
+    if (repo) repos.set(repo.fullName, repo);
+  }
+  if (repos.size === 0) return;
+
+  // Skip repos whose cache is already fresh — the guard that keeps repeated
+  // reloads from re-crawling GitHub.
+  const { data: rows } = await supabase
+    .from("repo_branches")
+    .select("repo_full_name, synced_at")
+    .in("repo_full_name", Array.from(repos.keys()));
+
+  const newest = new Map<string, string>();
+  for (const row of (rows ?? []) as {
+    repo_full_name: string;
+    synced_at: string;
+  }[]) {
+    const cur = newest.get(row.repo_full_name);
+    if (!cur || row.synced_at > cur) newest.set(row.repo_full_name, row.synced_at);
+  }
+
+  for (const [fullName, repo] of repos) {
+    const n = newest.get(fullName);
+    if (!n || isStale(n)) {
+      await syncRepoBranches(repo).catch(() => {});
+    }
+  }
 }
 
 /**

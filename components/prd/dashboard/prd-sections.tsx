@@ -5,7 +5,7 @@
    SECTIONS registry drives the rail TOC and the content order. Ported from the
    Claude Design prototype's prd-sections.jsx. */
 
-import { useState, useEffect, type ComponentType, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
 import type { PrdContent, PrdPriority, PrdStackItem, PrdIntegration, FreeTierAssumption, FreeTierAnalysis, PrdMilestone } from "@/lib/types";
 import type { StackLookup, IntegrationLookup } from "@/lib/ai/lookup-stack-item";
@@ -633,6 +633,22 @@ function FreeTierFitBody({ content, patch }: SectionBodyProps) {
       .catch(() => toast.error("Analysis failed."))
       .finally(() => setBusy(false));
   }
+
+  // Free-Tier Fit is now computed lazily on view (it was moved off the PRD
+  // generation critical path). Auto-run it once when a PRD first arrives with a
+  // billable stack but no analysis, so the section fills itself in without the
+  // builder clicking. The ref guarantees a single run per mount; the result
+  // persists via patch → the dashboard's debounced autosave, so later visits find
+  // it already present and never re-spend. Old PRDs already carry an analysis, so
+  // only freshly generated drafts trigger this.
+  const autoRan = useRef(false);
+  useEffect(() => {
+    if (autoRan.current || analysis || !hasItems || busy) return;
+    autoRan.current = true;
+    run();
+    // run() is called exactly once here; the ref + guard make deps irrelevant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis, hasItems, busy]);
 
   if (!editing && (!analysis || stale)) {
     return (

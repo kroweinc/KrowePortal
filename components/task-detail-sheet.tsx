@@ -6,13 +6,14 @@ import {
   AlignLeft,
   ArrowRight,
   Check,
+  ChevronDown,
+  ChevronUp,
   GitBranch,
   Info,
   Link2,
   Paperclip,
   RotateCcw,
   Sparkles,
-  Undo2,
   WandSparkles,
   X,
 } from "lucide-react";
@@ -36,7 +37,7 @@ import {
   InlineSelect,
   InlineEstimate,
 } from "@/components/inline-edit";
-import { approveTask, updateTask, updateTaskStatus, withdrawTaskApproval } from "@/lib/actions/tasks";
+import { approveTask, updateTask, updateTaskStatus } from "@/lib/actions/tasks";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
@@ -44,6 +45,7 @@ import { TaskSubtasks } from "@/components/task-subtasks";
 import { TaskRegenerate } from "@/components/task-regenerate";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
 import { PlainEnglishToggle } from "@/components/plain-english-toggle";
+import { ApprovalPill } from "@/components/approval-pill";
 import { TaskTags } from "@/components/task-type-badge";
 import {
   TASK_TYPE_OPTIONS,
@@ -91,6 +93,10 @@ interface TaskDetailSheetProps {
   // chips paint with no fetch. Staging groups likewise, for the group field.
   branchesByEngagement?: Record<string, PreloadedBranches>;
   stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
+  // On-screen order of the sibling tasks + a jump callback, so the sheet can
+  // step to the previous/next task (‹ › buttons and ↑/↓ keys) without closing.
+  siblingIds?: string[];
+  onNavigate?: (id: string) => void;
 }
 
 export function TaskDetailSheet({
@@ -101,6 +107,8 @@ export function TaskDetailSheet({
   onOpenChange,
   branchesByEngagement,
   stagingGroupsByEngagement,
+  siblingIds,
+  onNavigate,
 }: TaskDetailSheetProps) {
   return (
     <Sheet open={!!task} onOpenChange={onOpenChange}>
@@ -118,6 +126,8 @@ export function TaskDetailSheet({
             onOpenChange={onOpenChange}
             branchesByEngagement={branchesByEngagement}
             stagingGroupsByEngagement={stagingGroupsByEngagement}
+            siblingIds={siblingIds}
+            onNavigate={onNavigate}
           />
         )}
       </SheetContent>
@@ -133,6 +143,8 @@ interface TaskDetailBodyProps {
   onOpenChange: (open: boolean) => void;
   branchesByEngagement?: Record<string, PreloadedBranches>;
   stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
+  siblingIds?: string[];
+  onNavigate?: (id: string) => void;
 }
 
 function TaskDetailBody({
@@ -143,6 +155,8 @@ function TaskDetailBody({
   onOpenChange,
   branchesByEngagement,
   stagingGroupsByEngagement,
+  siblingIds,
+  onNavigate,
 }: TaskDetailBodyProps) {
   const router = useRouter();
   const requestDone = useRequestDone();
@@ -171,6 +185,41 @@ function TaskDetailBody({
   useEffect(() => {
     setTab("overview");
   }, [task.id]);
+
+  // Prev/next stepping through the sibling tasks the board is showing. The ids
+  // arrive in on-screen order; a missing/empty list simply disables the arrows.
+  const navIndex = siblingIds ? siblingIds.indexOf(task.id) : -1;
+  const prevId = navIndex > 0 ? siblingIds![navIndex - 1] : null;
+  const nextId =
+    navIndex >= 0 && siblingIds && navIndex < siblingIds.length - 1
+      ? siblingIds[navIndex + 1]
+      : null;
+  const total = siblingIds?.length ?? 0;
+
+  useEffect(() => {
+    if (!onNavigate) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      // Don't hijack arrows while the user is typing or a listbox is focused.
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.isContentEditable ||
+          el.closest('input, textarea, select, [role="listbox"], [contenteditable="true"]'))
+      ) {
+        return;
+      }
+      if ((e.key === "ArrowUp" || e.key === "[") && prevId) {
+        e.preventDefault();
+        onNavigate!(prevId);
+      } else if ((e.key === "ArrowDown" || e.key === "]") && nextId) {
+        e.preventDefault();
+        onNavigate!(nextId);
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onNavigate, prevId, nextId]);
 
   useEffect(() => {
     if (role !== "operator") return;
@@ -235,20 +284,6 @@ function TaskDetailBody({
     router.refresh();
   }
 
-  // Builder-only: pull a task back out of approval before the operator signs off.
-  const canUnsendApproval =
-    role !== "operator" && !!task.approval_sent_at && !task.approval_approved_at;
-
-  async function handleUnsend() {
-    const result = await withdrawTaskApproval(task.id);
-    if (result && "error" in result) {
-      setToast(result.error || "Couldn't unsend");
-      return;
-    }
-    setToast("Pulled back from approval");
-    router.refresh();
-  }
-
   async function handleCopyLink() {
     if (typeof window === "undefined") return;
     try {
@@ -292,6 +327,36 @@ function TaskDetailBody({
           )}
         </div>
         <div className="krowe-task-sheet-actions">
+          {onNavigate && total > 1 && (
+            <div className="krowe-task-nav" role="group" aria-label="Move between tasks">
+              <button
+                type="button"
+                className="krowe-task-iconbtn"
+                title="Previous task (↑)"
+                aria-label="Previous task"
+                disabled={!prevId}
+                onClick={() => prevId && onNavigate(prevId)}
+              >
+                <ChevronUp className="h-4 w-4" />
+              </button>
+              <span className="krowe-task-nav-pos" aria-hidden="true">
+                {navIndex >= 0 ? navIndex + 1 : "–"}
+                <span className="sep">/</span>
+                {total}
+              </span>
+              <button
+                type="button"
+                className="krowe-task-iconbtn"
+                title="Next task (↓)"
+                aria-label="Next task"
+                disabled={!nextId}
+                onClick={() => nextId && onNavigate(nextId)}
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
+              <span className="krowe-task-nav-div" aria-hidden="true" />
+            </div>
+          )}
           <button
             type="button"
             className="krowe-task-iconbtn"
@@ -356,6 +421,11 @@ function TaskDetailBody({
               <span className="d" aria-hidden />
               {task.priority} priority
             </span>
+            {(task.approval_sent_at || task.approval_approved_at) && (
+              <span className="krowe-task-hero-approval">
+                <ApprovalPill task={task} role={role} onUnsent={() => router.refresh()} />
+              </span>
+            )}
           </div>
 
           <h1 className="krowe-task-hero-title">
@@ -582,43 +652,29 @@ function TaskDetailBody({
                 Approve deliverable
               </button>
             )
-          : (advance || canUnsendApproval) && (
-              <div className="krowe-task-sheet-footer-actions">
-                {canUnsendApproval && (
-                  <button
-                    type="button"
-                    className="krowe-btn-pill ghost"
-                    onClick={handleUnsend}
-                  >
-                    <Undo2 className="h-3.5 w-3.5" />
-                    Unsend
-                  </button>
-                )}
-                {advance && (
-                  <button
-                    type="button"
-                    className="krowe-btn-pill primary"
-                    onClick={() => {
-                      if (advance.kind === "approval") {
-                        requestApproval({
-                          task,
-                          onCommit: () => {
-                            setToast("Sent for approval");
-                            router.refresh();
-                          },
-                        });
-                      } else {
-                        saveStatus(advance.kind === "done" ? "done" : advance.status);
-                      }
-                    }}
-                  >
-                    <ArrowRight className="h-3.5 w-3.5" />
-                    {advance.kind === "approval"
-                      ? "Send for approval"
-                      : `Move to ${advance.label}`}
-                  </button>
-                )}
-              </div>
+          : advance && (
+              <button
+                type="button"
+                className="krowe-btn-pill primary"
+                onClick={() => {
+                  if (advance.kind === "approval") {
+                    requestApproval({
+                      task,
+                      onCommit: () => {
+                        setToast("Sent for approval");
+                        router.refresh();
+                      },
+                    });
+                  } else {
+                    saveStatus(advance.kind === "done" ? "done" : advance.status);
+                  }
+                }}
+              >
+                <ArrowRight className="h-3.5 w-3.5" />
+                {advance.kind === "approval"
+                  ? "Send for approval"
+                  : `Move to ${advance.label}`}
+              </button>
             )}
       </footer>
 
