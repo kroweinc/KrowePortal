@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select } from "@/components/ui/select";
 import { updateTask, updateTaskStatus, withdrawTaskApproval } from "@/lib/actions/tasks";
+import { commitDoneDeliverable } from "@/lib/tasks/commit-done-deliverable";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { DeleteTaskButton } from "@/components/delete-task-button";
@@ -57,8 +58,11 @@ export function BuilderTaskActions({ task, onSuccess }: BuilderTaskActionsProps)
     if (status === "done" && task.status !== "done") {
       requestDone({
         task,
-        onCommit: () => router.refresh(),
-        onCancel: () => router.refresh(),
+        onSubmit: (payload) =>
+          startTransition(async () => {
+            await commitDoneDeliverable(task, payload);
+            router.refresh();
+          }),
       });
       return;
     }

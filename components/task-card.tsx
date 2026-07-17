@@ -56,7 +56,10 @@ export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDr
   async function handleAdvance() {
     if (!advance) return;
     if (advance.kind === "done") {
-      requestDone({ task });
+      // Prefer the board's optimistic mover so the card flips to Done instantly;
+      // fall back to the dialog directly where there's no board (staging board).
+      if (onStatusMove) onStatusMove(task.id, "done");
+      else requestDone({ task });
     } else if (advance.kind === "approval") {
       requestApproval({ task });
     } else if (onStatusMove) {

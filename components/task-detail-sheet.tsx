@@ -38,6 +38,7 @@ import {
   InlineEstimate,
 } from "@/components/inline-edit";
 import { approveTask, updateTask, updateTaskStatus } from "@/lib/actions/tasks";
+import { commitDoneDeliverable } from "@/lib/tasks/commit-done-deliverable";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
@@ -243,15 +244,22 @@ function TaskDetailBody({
   async function saveStatus(value: TaskStatus) {
     if (value === optimisticStatus) return;
     if (value === "done" && task.status !== "done") {
-      // Done goes through the deliverable dialog, so there's nothing to paint
-      // optimistically — the pipeline advances once the dialog commits.
+      // Done goes through the deliverable dialog to collect the branch/note, but
+      // once the user hits Save we paint the pipeline "done" optimistically and
+      // commit in the background — no waiting on the round-trip + refresh.
       return new Promise<void>((resolve) => {
         requestDone({
           task,
-          onCommit: () => {
-            setToast(`Moved to ${statusLabel(value)}`);
-            router.refresh();
-            resolve();
+          onSubmit: (payload) => {
+            startStatusTransition(async () => {
+              setOptimisticStatus("done");
+              const res = await commitDoneDeliverable(task, payload);
+              if (res.ok) {
+                setToast(`Moved to ${statusLabel("done")}`);
+                router.refresh();
+              }
+              resolve();
+            });
           },
           onCancel: resolve,
         });

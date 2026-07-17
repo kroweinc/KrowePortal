@@ -122,7 +122,10 @@ export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, req
           disabled: task.status === status,
           disabledReason: "Task is already here",
           onSelect: async () => {
-            if (status === "done") {
+            if (status === "done" && onStatusMove) {
+              // Board move → optimistic instant flip through the deliverable dialog.
+              onStatusMove(task.id, "done");
+            } else if (status === "done") {
               requestDone({ task });
             } else if (onStatusMove) {
               onStatusMove(task.id, status);

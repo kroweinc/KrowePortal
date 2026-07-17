@@ -9,6 +9,7 @@ import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { useTaskSort } from "@/components/task-sort-context";
 import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
+import { commitDoneDeliverable } from "@/lib/tasks/commit-done-deliverable";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import {
   isAwaitingApproval,
@@ -101,11 +102,32 @@ export function TaskBoard({
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }
 
+  // "Mark as done" from any board trigger (advance button, right-click menu,
+  // drag-to-Done): open the deliverable dialog, then commit inside the board's
+  // optimistic transition so the card jumps to Done the instant Save is clicked
+  // and holds until the server reconciles — no dialog "Saving…" wait.
+  function markDoneFlow(task: Task) {
+    if (task.status === "done") return;
+    requestDone({
+      task,
+      onSubmit: (payload) =>
+        startTransition(async () => {
+          dispatchOptimistic({ type: "status", taskId: task.id, status: "done" });
+          await commitDoneDeliverable(task, payload);
+        }),
+    });
+  }
+
   // Plain status move (card advance button + right-click menu), routed through
   // the same optimistic dispatch the drag-and-drop uses so the card jumps
   // columns instantly instead of waiting on the server round-trip + revalidate.
-  // Done/approval moves keep their dialog flows and don't come through here.
+  // Done routes through the deliverable dialog; approval keeps its own flow.
   function moveStatus(taskId: string, status: TaskStatus) {
+    if (status === "done") {
+      const task = optimisticTasks.find((t) => t.id === taskId);
+      if (task) markDoneFlow(task);
+      return;
+    }
     startTransition(async () => {
       dispatchOptimistic({ type: "status", taskId, status });
       const r = await updateTaskStatus(taskId, status);
@@ -124,15 +146,7 @@ export function TaskBoard({
     if (status === "done") {
       const droppedTask = optimisticTasks.find((t) => t.id === taskId);
       if (droppedTask && droppedTask.status !== "done") {
-        const priorStatus = droppedTask.status;
-        startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: "done" }); });
-        requestDone({
-          task: droppedTask,
-          onCommit: () => {},
-          onCancel: () => {
-            startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: priorStatus }); });
-          },
-        });
+        markDoneFlow(droppedTask);
         return;
       }
     }

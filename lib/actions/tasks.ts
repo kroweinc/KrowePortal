@@ -316,37 +316,43 @@ export async function markTaskDone(
 
   if (error) return { error: error.message };
 
-  if (before && before.status !== "done") {
-    await writeAuditEntry({
-      taskId,
-      actorId: profile.id,
-      action: "task.status_changed",
-      field: "status",
-      oldValue: before.status,
-      newValue: "done",
-    });
-  }
-  if (branchName) {
-    await writeAuditEntry({
-      taskId,
-      actorId: profile.id,
-      action: "task.branch_set",
-      field: "branch_name",
-      newValue: branchName,
-    });
-  }
-  await writeAuditEntry({
-    taskId,
-    actorId: profile.id,
-    action: "task.completed",
-    metadata: {
-      pushed_to_main: parsed.data.pushed_to_main,
-      completion_note: parsed.data.completion_note ?? null,
-    },
-  });
-
   revalidatePath("/b");
   revalidatePath("/o");
+
+  // The audit trail (1–3 rows) is non-blocking — defer it past the response so
+  // the status flip returns immediately and the client can settle the
+  // optimistic "done" paint without waiting on the log writes.
+  after(async () => {
+    if (before && before.status !== "done") {
+      await writeAuditEntry({
+        taskId,
+        actorId: profile.id,
+        action: "task.status_changed",
+        field: "status",
+        oldValue: before.status,
+        newValue: "done",
+      });
+    }
+    if (branchName) {
+      await writeAuditEntry({
+        taskId,
+        actorId: profile.id,
+        action: "task.branch_set",
+        field: "branch_name",
+        newValue: branchName,
+      });
+    }
+    await writeAuditEntry({
+      taskId,
+      actorId: profile.id,
+      action: "task.completed",
+      metadata: {
+        pushed_to_main: parsed.data.pushed_to_main,
+        completion_note: parsed.data.completion_note ?? null,
+      },
+    });
+  });
+
   return { success: true };
 }
 
