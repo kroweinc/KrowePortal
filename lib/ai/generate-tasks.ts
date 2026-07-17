@@ -32,6 +32,14 @@ async function callOpenAIOneShot(
     model: AI_MODEL,
     max_completion_tokens: maxTokens,
     response_format: responseFormat,
+    // Drafting one task is a lightweight structured generation — "none" drops the
+    // reasoning pass for a snappier draft (verified quality parity vs "low" on
+    // classification, assumptions, and follow-up), the single biggest latency
+    // lever on this common no-repo path. The stable cache key lets the large
+    // static system prefix be reused across regenerate/strengthen rounds and
+    // concurrent builders instead of relying on prefix-hash luck.
+    reasoning_effort: "none",
+    prompt_cache_key: "task-draft-v1",
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -63,6 +71,12 @@ async function callOpenAI(
     model: AI_MODEL,
     maxTokens,
     responseFormat: { type: "json_object" },
+    // The large repo-context system prefix is re-sent every tool round; a stable
+    // key keeps it cached across rounds (and across regenerate/strengthen) so
+    // each round's TTFT drops. Drafting a task never needs 30 file-reading rounds
+    // — cap the loop so a pathological exploration can't stall the "+" flow.
+    promptCacheKey: "task-draft-repo-v1",
+    maxRounds: 12,
   });
 
   console.log("[generateTask] tool loop", {
