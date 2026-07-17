@@ -9,7 +9,12 @@ import {
   getEngagementRepoById,
   type EngagementRepo,
 } from "@/lib/github/engagement-repo";
-import { buildBranchGraph, type BranchNode } from "@/lib/github/branches";
+import {
+  buildBranchGraph,
+  fetchBranchGraphLive,
+  isBranchListComplete,
+  type BranchNode,
+} from "@/lib/github/branches";
 
 export type EngagementBranch = { name: string; purpose: string | null };
 
@@ -21,7 +26,9 @@ export type PreloadedBranches = {
 };
 
 // The branch cache tracks the repo within this window; older rows trigger a
-// background re-sync. Matches the branch-graph unstable_cache TTL.
+// background re-sync. This is the only rate limit on syncRepoBranches' live
+// GitHub crawl, so it stands alone — don't couple it to the branch-graph
+// unstable_cache TTL, whose reads are deliberately not on this path.
 const REPO_BRANCHES_TTL_MS = 1800 * 1000;
 
 function isStale(syncedAtIso: string): boolean {
@@ -159,13 +166,20 @@ export async function getEngagementBranches(
 }
 
 /**
- * Refresh the persisted branch list for a repo from GitHub. Reuses the cached
- * branch graph (30-min TTL), upserts every live branch, and deletes rows for
- * branches that no longer exist — so the DB cache tracks the repo as branches
- * are pushed and deleted. Service-role only; safe to call from `after()`.
+ * Refresh the persisted branch list for a repo from GitHub. Upserts every live
+ * branch and deletes rows for branches that no longer exist — so the DB cache
+ * tracks the repo as branches are pushed and deleted. Service-role only; safe to
+ * call from `after()`.
+ *
+ * Reads the graph **live** rather than through buildBranchGraph's 30-min cache.
+ * This function is what synced_at freshness is judged by, so a cached read would
+ * re-persist an already-stale snapshot and stamp it fresh: a deleted branch
+ * would survive the sweep *and* suppress the next resync that would have caught
+ * it. Callers already rate-limit this via the synced_at staleness check, so the
+ * graph cache bought nothing here anyway.
  */
 export async function syncRepoBranches(repo: EngagementRepo): Promise<void> {
-  const graph = await buildBranchGraph(
+  const graph = await fetchBranchGraphLive(
     repo.token,
     repo.owner,
     repo.name,
@@ -176,21 +190,27 @@ export async function syncRepoBranches(repo: EngagementRepo): Promise<void> {
   const flat: string[] = [];
   flattenNames(graph.root, flat);
   const names = orderNames(flat, repo.defaultBranch);
-  if (names.length === 0) return;
 
   const supabase = createAdminClient();
   const now = new Date().toISOString();
-  const rows = names.map((branch_name) => ({
-    repo_full_name: repo.fullName,
-    branch_name,
-    is_default: branch_name === repo.defaultBranch,
-    synced_at: now,
-  }));
 
-  const { error } = await supabase
-    .from("repo_branches")
-    .upsert(rows, { onConflict: "repo_full_name,branch_name" });
-  if (error) return;
+  // No names means the repo genuinely has no branches — skip the upsert, but
+  // still sweep below so the cache empties out with it.
+  if (names.length > 0) {
+    const rows = names.map((branch_name) => ({
+      repo_full_name: repo.fullName,
+      branch_name,
+      is_default: branch_name === repo.defaultBranch,
+      synced_at: now,
+    }));
+
+    const { error } = await supabase
+      .from("repo_branches")
+      .upsert(rows, { onConflict: "repo_full_name,branch_name" });
+    if (error) return;
+  }
+
+  if (!isBranchListComplete(graph)) return;
 
   // Sweep branches that vanished from the repo: any row for this repo we didn't
   // just re-stamp keeps its older synced_at. Comparing against `now` avoids

@@ -4,6 +4,7 @@ import {
   groupTasksByBranch,
   groupTasksByStagingGroup,
 } from "@/lib/tasks/staging-grouping";
+import { isBranchListComplete, type BranchGraph } from "@/lib/github/branches";
 import type { Task, StagingGroup } from "@/lib/types";
 
 // Minimal Task factory — only the fields the grouping helpers read.
@@ -126,5 +127,52 @@ describe("groupTasksByStagingGroup", () => {
       defs
     );
     expect(allGrouped.some((b) => b.label === "No group")).toBe(false);
+  });
+});
+
+describe("isBranchListComplete", () => {
+  function graph(extra: Partial<BranchGraph> = {}): BranchGraph {
+    return {
+      root: {
+        name: "main",
+        tipSha: "",
+        tipShaFull: "",
+        latestCommit: null,
+        children: [],
+        parentName: null,
+        diverged: false,
+      },
+      truncated: false,
+      pairwise: false,
+      degraded: [],
+      ...extra,
+    };
+  }
+
+  it("is complete for a clean full listing", () => {
+    expect(isBranchListComplete(graph())).toBe(true);
+  });
+
+  it("is incomplete when the listing was truncated", () => {
+    expect(isBranchListComplete(graph({ truncated: true }))).toBe(false);
+  });
+
+  it("is incomplete when a listing page failed", () => {
+    expect(isBranchListComplete(graph({ degraded: ["branches:page-2"] }))).toBe(
+      false
+    );
+  });
+
+  // A repo with zero branches reports degraded:["branches"] — that's complete
+  // information (there is nothing to list), not a partial fetch.
+  it("is complete for a repo with no branches", () => {
+    expect(isBranchListComplete(graph({ degraded: ["branches"] }))).toBe(true);
+  });
+
+  // Tip-commit / merge-base failures don't shrink the branch name list.
+  it("is complete when only non-listing lookups degraded", () => {
+    expect(
+      isBranchListComplete(graph({ degraded: ["default-missing", "compare:a...b"] }))
+    ).toBe(true);
   });
 });

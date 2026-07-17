@@ -382,3 +382,27 @@ export const buildBranchGraph = unstable_cache(
   ["branch-graph"],
   { revalidate: REVALIDATE_SECONDS }
 );
+
+/**
+ * The branch graph straight from GitHub, bypassing the 30-min cache above.
+ * Callers that *write* a longer-lived cache of their own must use this: syncing
+ * from the cached graph would persist a snapshot that's already up to 30 min old
+ * and stamp it as fresh, so a deleted branch could outlive both caches.
+ */
+export { fetchBranchGraph as fetchBranchGraphLive };
+
+/**
+ * Whether the graph's branch list is the repo's *whole* branch list. False when
+ * we hit the page/HARD_CAP ceiling or a listing page failed — we then hold a
+ * subset, and branches missing from it may well still exist. Callers that delete
+ * "branches no longer on GitHub" must check this first, or a big repo (or one
+ * flaky page fetch) would silently wipe live branches from the cache.
+ *
+ * Only `branches:page-N` degradations shrink the list; `branches` (repo has none)
+ * and the tip/merge-base degradations leave it complete.
+ */
+export function isBranchListComplete(graph: BranchGraph): boolean {
+  return (
+    !graph.truncated && !graph.degraded.some((d) => d.startsWith("branches:page-"))
+  );
+}
