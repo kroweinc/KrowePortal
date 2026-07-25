@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   buildClassifyTaskSystemPrompt,
   buildEstimateTaskSystemPrompt,
+  buildExtractTasksSystemPrompt,
 } from "@/lib/ai/prompts";
 
 // Snapshots of the rendered system prompts. These make every prompt edit show up
@@ -19,5 +20,21 @@ test("classify task system prompt is unchanged", async () => {
 test("estimate task system prompt is unchanged", async () => {
   await expect(buildEstimateTaskSystemPrompt()).toMatchFileSnapshot(
     "./__snapshots__/estimate-task-system.md"
+  );
+});
+
+// Both identity branches, because the builder-identity line is the ONLY per-call
+// text in this prompt — everything above it must stay a byte-identical static
+// prefix for prompt_cache_key to be worth anything. A diff that shows per-builder
+// text moving ABOVE that last line is the regression to catch.
+test("extract tasks system prompt is unchanged", async () => {
+  await expect(buildExtractTasksSystemPrompt("Steven Ortega")).toMatchFileSnapshot(
+    "./__snapshots__/extract-tasks-system.md"
+  );
+});
+
+test("extract tasks system prompt is unchanged without a builder name", async () => {
+  await expect(buildExtractTasksSystemPrompt(null)).toMatchFileSnapshot(
+    "./__snapshots__/extract-tasks-system-no-builder.md"
   );
 });
