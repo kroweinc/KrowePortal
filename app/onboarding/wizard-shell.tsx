@@ -64,7 +64,8 @@ export function WzWordmark({ ember = false }: { ember?: boolean }) {
 
 type IconName =
   | "arrow" | "back" | "plus" | "copy" | "check" | "file" | "receipt"
-  | "pen" | "board" | "folder" | "link" | "megaphone" | "users" | "git" | "dot";
+  | "pen" | "board" | "folder" | "link" | "megaphone" | "users" | "git" | "dot"
+  | "spark" | "globe" | "code" | "clock";
 
 export function WzIcon({ name, size = 18, stroke = 1.75, style }: { name: IconName; size?: number; stroke?: number; style?: CSSProperties }) {
   const paths: Record<IconName, ReactNode> = {
@@ -83,6 +84,10 @@ export function WzIcon({ name, size = 18, stroke = 1.75, style }: { name: IconNa
     users: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></>,
     git: <><circle cx="12" cy="12" r="3" /><line x1="3" y1="12" x2="9" y2="12" /><line x1="15" y1="12" x2="21" y2="12" /></>,
     dot: <><circle cx="12" cy="12" r="4" /></>,
+    spark: <><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3Z" /><path d="M18.5 15.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" /></>,
+    globe: <><circle cx="12" cy="12" r="9" /><line x1="3" y1="12" x2="21" y2="12" /><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z" /></>,
+    code: <><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15.5 14" /></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={style}>

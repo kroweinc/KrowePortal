@@ -1,103 +1,155 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { RepoSelector } from "@/components/github/repo-selector";
+import { AvatarUpload } from "@/components/builder-profile/avatar-upload";
 import {
   advanceOnboarding,
-  createProspectProject,
   createClientEngagement,
-  finishOnboarding,
+  saveAgencyIdentity,
+  saveAgencyType,
+  saveAgencySize,
+  saveCharging,
 } from "@/lib/actions/onboarding";
-import { createTask } from "@/lib/actions/tasks";
-import type { GitHubRepo } from "@/lib/types";
+import {
+  AGENCY_TYPES,
+  AGENCY_SIZES,
+  PRICING_MODELS,
+  type AgencySize,
+  type AgencyType,
+  type PricingModel,
+} from "@/lib/types";
 import {
   EditorialShell,
   WzPrimary,
-  WzSecondary,
   WzGhostLink,
   WzLineField,
   WzPathCard,
   WzIcon,
-  GitHubGlyph,
   WzOpening,
   type WizardNav,
 } from "./wizard-shell";
-import {
-  PortalTeaserStage,
-  DossierStage,
-  EngagementStage,
-  BoardStage,
-} from "./wizard-stages";
+import { IdentityStage, AgencyStage, PricingStage, EngagementStage } from "./wizard-stages";
+import type { OnboardingBuilderProfile } from "./wizard";
 
-const SKIP = "Skip setup — I'll explore on my own";
-const PITCH_LABEL = "Pitching · new client";
-const CLIENT_LABEL = "Active client";
+const SKIP_CLIENT = "Skip — I'll add clients later";
 
-/* ---------------------------------- path --------------------------------- */
+const errStyle: CSSProperties = { margin: 0, fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--danger)" };
+const groupLabel: CSSProperties = {
+  fontFamily: "var(--font-sans)", fontSize: 11.5, fontWeight: 600,
+  letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted-foreground)",
+};
 
-export function PathStep({ nav }: { nav: WizardNav }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+/* -------------------------------- options -------------------------------- */
 
-  function choose(path: "no_clients" | "has_clients") {
-    startTransition(async () => {
-      await advanceOnboarding(path === "no_clients" ? "prospect" : "client", path);
-      router.refresh();
-    });
-  }
+const AGENCY_TYPE_OPTIONS: Record<AgencyType, { title: string; kicker: string; body: string; icon: "spark" | "globe" | "code" }> = {
+  ai: { title: "AI agency", kicker: "Agents & models", body: "You build with LLMs and agents — copilots, RAG, automations, pipelines.", icon: "spark" },
+  web: { title: "Web agency", kicker: "Sites & web apps", body: "You ship marketing sites and web apps — everything front-of-house.", icon: "globe" },
+  software: { title: "Software agency", kicker: "Products & platforms", body: "You build custom software — platforms, APIs, and full product builds.", icon: "code" },
+};
 
+const AGENCY_SIZE_OPTIONS: Record<AgencySize, { title: string; hint: string }> = {
+  solo: { title: "Just me", hint: "Solo builder" },
+  "2_5": { title: "2–5 people", hint: "Small studio" },
+  "6_15": { title: "6–15 people", hint: "Growing team" },
+  "16_plus": { title: "16+ people", hint: "Established agency" },
+};
+
+const PRICING_MODEL_OPTIONS: Record<PricingModel, { title: string; hint: string }> = {
+  hourly: { title: "Hourly", hint: "Bill by the hour" },
+  fixed_bid: { title: "Fixed-bid", hint: "Price per project" },
+  retainer: { title: "Retainer", hint: "Monthly recurring" },
+};
+
+/* ---------------------------- shared controls ---------------------------- */
+
+/* Large single-select row (agency size) — card convention, radius-lg, like
+   WzPathCard. Selecting saves + advances, so the check is mainly a resume cue. */
+function SelectRow({ title, hint, selected, onClick, disabled }: {
+  title: string; hint: string; selected: boolean; onClick: () => void; disabled?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
   return (
-    <EditorialShell
-      nav={nav}
-      title="How are you starting out?"
-      sub="This shapes your first steps — you can always do both later."
-      note="Most people start where the money is. You can switch tracks any time."
-      stageEyebrow="Welcome to Krowe"
-      stageHeadline="Everything for your clients, in one calm place."
-      stageSub="Pitches, clients, code, and the shared board — they all live here."
-      stage={<PortalTeaserStage />}
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: 14, width: "100%", textAlign: "left",
+        cursor: disabled ? "default" : "pointer", padding: "15px 18px",
+        background: selected ? "var(--primary-soft)" : "var(--background)",
+        border: `2px solid ${selected ? "var(--primary)" : hover ? "color-mix(in oklch, var(--primary) 45%, transparent)" : "var(--border)"}`,
+        borderRadius: "var(--radius-lg)",
+        boxShadow: hover && !selected ? "var(--shadow-2)" : "var(--shadow-1)",
+        transform: hover && !selected ? "translateY(-2px)" : "none",
+        opacity: disabled && !selected ? 0.6 : 1,
+        transition: "all var(--duration-fast) var(--ease-out-smooth)",
+      }}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <WzPathCard
-          glyph={<WzIcon name="megaphone" size={20} />}
-          kicker="No client yet"
-          title="I'm pitching new clients"
-          body="Start with a PRD, quote, and contract. When they sign, they become a live client."
-          onClick={() => choose("no_clients")}
-          disabled={isPending}
-        />
-        <WzPathCard
-          glyph={<WzIcon name="users" size={20} />}
-          kicker="Client in hand"
-          title="I already have a client"
-          body="Invite them, link your repo, and start the to-do list right away. Add documents later."
-          onClick={() => choose("has_clients")}
-          disabled={isPending}
-        />
-        <div style={{ marginTop: 4 }}>
-          <WzGhostLink onClick={nav.exit} disabled={isPending}>{SKIP}</WzGhostLink>
-        </div>
+      <span style={{
+        width: 20, height: 20, flexShrink: 0, borderRadius: "50%",
+        border: `2px solid ${selected ? "var(--primary)" : "var(--border)"}`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: selected ? "var(--primary)" : "transparent", color: "#fff",
+      }}>
+        {selected && <WzIcon name="check" size={12} stroke={3} />}
+      </span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 600, color: "var(--foreground)" }}>{title}</div>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--muted-foreground)" }}>{hint}</div>
       </div>
-    </EditorialShell>
+    </button>
   );
 }
 
-/* ----------------------------- prospect (P1) ------------------------------ */
+/* Compact single-select tile (pricing model) — controlled, no auto-advance. */
+function ModelPill({ title, hint, selected, onClick, disabled }: {
+  title: string; hint: string; selected: boolean; onClick: () => void; disabled?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        flex: 1, cursor: disabled ? "default" : "pointer", textAlign: "center", padding: "14px 10px",
+        background: selected ? "var(--primary-soft)" : "var(--background)",
+        border: `2px solid ${selected ? "var(--primary)" : hover ? "color-mix(in oklch, var(--primary) 45%, transparent)" : "var(--border)"}`,
+        borderRadius: "var(--radius-lg)",
+        boxShadow: hover && !selected ? "var(--shadow-2)" : "var(--shadow-1)",
+        transform: hover && !selected ? "translateY(-2px)" : "none",
+        transition: "all var(--duration-fast) var(--ease-out-smooth)",
+      }}
+    >
+      <div style={{ fontFamily: "var(--font-sans)", fontSize: 14.5, fontWeight: 600, color: selected ? "var(--primary)" : "var(--foreground)" }}>{title}</div>
+      <div style={{ fontFamily: "var(--font-sans)", fontSize: 11.5, color: "var(--muted-foreground)", marginTop: 3 }}>{hint}</div>
+    </button>
+  );
+}
 
-export function ProspectStep({ nav }: { nav: WizardNav }) {
+/* ------------------------------- identity -------------------------------- */
+
+export function IdentityStep({ nav, profile }: { nav: WizardNav; profile: OnboardingBuilderProfile }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [preview, setPreview] = useState({ projectName: "", contactName: "", contactEmail: "", website: "" });
+  const [form, setForm] = useState({
+    name: profile.displayName ?? "",
+    agency: profile.agencyName ?? "",
+    role: profile.agencyRole ?? "",
+  });
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
-      const res = await createProspectProject({
-        name: (formData.get("name") as string) ?? "",
-        prospectName: (formData.get("prospectName") as string) || undefined,
-        prospectEmail: (formData.get("prospectEmail") as string) || undefined,
-        websiteUrl: (formData.get("websiteUrl") as string) || undefined,
+      const res = await saveAgencyIdentity({
+        displayName: (formData.get("display_name") as string) || undefined,
+        agencyName: (formData.get("agency_name") as string) || undefined,
+        agencyRole: (formData.get("agency_role") as string) || undefined,
       });
       if ("error" in res) {
         setError(res.error);
@@ -110,109 +162,145 @@ export function ProspectStep({ nav }: { nav: WizardNav }) {
   return (
     <EditorialShell
       nav={nav}
-      progress={{ pathLabel: PITCH_LABEL, index: 2, total: 3 }}
-      title="Who are you pitching?"
-      sub="We'll set up a project to hold the PRD, quote, and contract."
-      note={'Be specific — "Acme Bakery website" beats "a new project".'}
-      stageEyebrow="The project"
-      stageHeadline="Your pitch, taking shape."
-      stageSub="This becomes the home for everything you send them."
-      stage={<DossierStage stage="pitch" {...preview} />}
+      progress={{ pathLabel: "Your account", index: 1, total: 5 }}
+      title="Let's set up your identity"
+      sub="This is how clients and teammates see you across the portal."
+      note="You can refine any of this later in Settings."
+      stageEyebrow="Your profile"
+      stageHeadline="You, front and center."
+      stageSub="Your name and agency show on every doc you send."
+      stage={<IdentityStage name={form.name} agency={form.agency} role={form.role} avatarUrl={profile.avatarUrl} />}
     >
       <form action={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        <AvatarUpload avatarUrl={profile.avatarUrl} displayName={form.name || profile.displayName || "You"} />
         <WzLineField
-          label="Business or project name" name="name" placeholder="Acme Bakery website"
-          required maxLength={200} autoFocus
-          onChange={(v) => setPreview((p) => ({ ...p, projectName: v }))}
+          label="Your name" name="display_name" defaultValue={profile.displayName ?? ""}
+          placeholder="Jane Smith" required maxLength={80}
+          onChange={(v) => setForm((f) => ({ ...f, name: v }))}
         />
         <WzLineField
-          label="Contact name" optional name="prospectName" placeholder="Jane Smith" maxLength={200}
-          onChange={(v) => setPreview((p) => ({ ...p, contactName: v }))}
+          label="Agency or company" name="agency_name" defaultValue={profile.agencyName ?? ""}
+          placeholder="Ember Studio" maxLength={120}
+          onChange={(v) => setForm((f) => ({ ...f, agency: v }))}
         />
         <WzLineField
-          label="Contact email" optional type="email" name="prospectEmail" placeholder="jane@acme.com" maxLength={320}
-          onChange={(v) => setPreview((p) => ({ ...p, contactEmail: v }))}
+          label="Your role" optional name="agency_role" defaultValue={profile.agencyRole ?? ""}
+          placeholder="Founder & lead engineer" maxLength={120}
+          onChange={(v) => setForm((f) => ({ ...f, role: v }))}
         />
-        <WzLineField
-          label="Website" optional name="websiteUrl" placeholder="acme.com" maxLength={2000}
-          onChange={(v) => setPreview((p) => ({ ...p, website: v }))}
-        />
-        {error && <p style={{ margin: 0, fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--danger)" }}>{error}</p>}
+        {error && <p style={errStyle}>{error}</p>}
         <div style={{ marginTop: 8 }}>
-          <WzPrimary type="submit" disabled={isPending}>{isPending ? "Creating…" : "Create project"}</WzPrimary>
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", marginTop: -6 }}>
-          <WzGhostLink onClick={nav.exit} disabled={isPending}>I&apos;ll set this up later</WzGhostLink>
+          <WzPrimary type="submit" disabled={isPending}>{isPending ? "Saving…" : "Continue"}</WzPrimary>
         </div>
       </form>
     </EditorialShell>
   );
 }
 
-/* ------------------------------ handoff (P1) ------------------------------ */
+/* ------------------------------ agency type ------------------------------ */
 
-export function HandoffStep({ nav, project }: { nav: WizardNav; project: { id: string; name: string } }) {
+export function AgencyTypeStep({ nav, selected }: { nav: WizardNav; selected: AgencyType | null }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [splash, setSplash] = useState<{ title: string; sub: string } | null>(null);
+  const [picked, setPicked] = useState<AgencyType | null>(selected);
 
-  function go(href: string, copy: { title: string; sub: string }) {
-    setSplash(copy);
+  function choose(type: AgencyType) {
+    setPicked(type);
     startTransition(async () => {
-      await finishOnboarding("completed");
-      router.push(href);
+      await saveAgencyType(type);
+      router.refresh();
     });
   }
-
-  if (splash) return <WzOpening title={splash.title} sub={splash.sub} />;
 
   return (
     <EditorialShell
       nav={nav}
-      progress={{ pathLabel: PITCH_LABEL, index: 3, total: 3 }}
-      title="You're all set."
-      sub={
-        <>
-          <strong style={{ color: "var(--foreground)", fontWeight: 600 }}>{project.name}</strong>{" "}
-          is ready. Your pipeline starts with the PRD — from there you&apos;ll quote it, get the
-          contract signed, and begin working with the client.
-        </>
-      }
-      note="The PRD is your anchor. Everything else quotes from it."
-      stageEyebrow="The pipeline"
-      stageHeadline="From brief to signed."
-      stageSub="Each step unlocks the next. No empty dashboards to fill."
-      stage={<DossierStage stage="allset" projectName={project.name} />}
+      progress={{ pathLabel: "Your agency", index: 2, total: 5 }}
+      title="What kind of agency do you run?"
+      sub="This tailors your workspace and the documents Krowe drafts for you."
+      note="Pick the closest fit — you can change it in Settings anytime."
+      stageEyebrow="Your agency"
+      stageHeadline="Built around how you build."
+      stageSub="Krowe shapes PRDs and quotes to your discipline."
+      stage={<AgencyStage typeLabel={picked ? AGENCY_TYPE_OPTIONS[picked].title : undefined} />}
     >
-      <div style={{ display: "flex", flexDirection: "column", gap: 11, maxWidth: 360 }}>
-        <WzPrimary
-          icon={<WzIcon name="pen" size={16} />}
-          disabled={isPending}
-          onClick={() => go(`/b/projects/${project.id}/prd/new`, { title: "Opening the PRD editor", sub: "Let’s draft the brief — a sentence or two per section is plenty." })}
-        >
-          Write the PRD
-        </WzPrimary>
-        <WzSecondary
-          icon={<WzIcon name="folder" size={16} />}
-          disabled={isPending}
-          onClick={() => go(`/b/projects/${project.id}`, { title: "Opening your project", sub: "Everything for this client lives here." })}
-        >
-          View the project
-        </WzSecondary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {AGENCY_TYPES.map((t) => {
+          const o = AGENCY_TYPE_OPTIONS[t];
+          return (
+            <WzPathCard
+              key={t}
+              glyph={<WzIcon name={o.icon} size={20} />}
+              kicker={o.kicker}
+              title={o.title}
+              body={o.body}
+              onClick={() => choose(t)}
+              disabled={isPending}
+            />
+          );
+        })}
       </div>
     </EditorialShell>
   );
 }
 
-/* ------------------------------- client (P2) ------------------------------ */
+/* ------------------------------ agency size ------------------------------ */
+
+export function AgencySizeStep({ nav, selected, priorType }: {
+  nav: WizardNav; selected: AgencySize | null; priorType: AgencyType | null;
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [picked, setPicked] = useState<AgencySize | null>(selected);
+
+  function choose(size: AgencySize) {
+    setPicked(size);
+    startTransition(async () => {
+      await saveAgencySize(size);
+      router.refresh();
+    });
+  }
+
+  return (
+    <EditorialShell
+      nav={nav}
+      progress={{ pathLabel: "Your agency", index: 3, total: 5 }}
+      title="How big is your team?"
+      sub="A rough headcount is plenty — it helps us right-size your defaults."
+      note="Solo today, growing tomorrow? Pick where you are right now."
+      stageEyebrow="Your agency"
+      stageHeadline="Sized to your shop."
+      stageSub="From solo to full studio, Krowe fits."
+      stage={
+        <AgencyStage
+          typeLabel={priorType ? AGENCY_TYPE_OPTIONS[priorType].title : undefined}
+          sizeLabel={picked ? AGENCY_SIZE_OPTIONS[picked].title : undefined}
+        />
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+        {AGENCY_SIZES.map((s) => {
+          const o = AGENCY_SIZE_OPTIONS[s];
+          return (
+            <SelectRow
+              key={s}
+              title={o.title}
+              hint={o.hint}
+              selected={picked === s}
+              onClick={() => choose(s)}
+              disabled={isPending}
+            />
+          );
+        })}
+      </div>
+    </EditorialShell>
+  );
+}
+
+/* -------------------------- client (optional) ---------------------------- */
 
 function InvitePanel({
-  nav,
-  inviteToken,
-  clientName,
-  onContinue,
-  onBack,
-  isPending,
+  nav, inviteToken, clientName, onContinue, onBack, isPending,
 }: {
   nav: WizardNav;
   inviteToken: string | null;
@@ -246,7 +334,7 @@ function InvitePanel({
     <EditorialShell
       nav={nav}
       onBack={onBack}
-      progress={{ pathLabel: CLIENT_LABEL, index: 2, total: 5 }}
+      progress={{ pathLabel: "Your first client", index: 4, total: 5 }}
       title="Send the invite"
       sub={
         <>
@@ -266,7 +354,7 @@ function InvitePanel({
         {inviteToken && (
           <div>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontFamily: "var(--font-sans)", fontSize: 11.5, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>Invite link</span>
+              <span style={groupLabel}>Invite link</span>
               <span style={{ fontFamily: "var(--font-sans)", fontSize: 12, color: "var(--muted-foreground)", fontStyle: "italic" }}>expires in 7 days</span>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
@@ -288,8 +376,7 @@ function InvitePanel({
 }
 
 export function ClientStep({
-  nav,
-  existing,
+  nav, existing,
 }: {
   nav: WizardNav;
   existing: { title: string; inviteToken: string | null } | null;
@@ -301,6 +388,13 @@ export function ClientStep({
     existing ? { clientName: existing.title, inviteToken: existing.inviteToken } : null
   );
   const [isPending, startTransition] = useTransition();
+
+  function toCharging() {
+    startTransition(async () => {
+      await advanceOnboarding("charging");
+      router.refresh();
+    });
+  }
 
   function handleSubmit(formData: FormData) {
     const clientName = ((formData.get("clientName") as string) ?? "").trim();
@@ -325,14 +419,7 @@ export function ClientStep({
         clientName={result.clientName}
         isPending={isPending}
         onBack={() => setResult(null)}
-        onContinue={() =>
-          startTransition(async () => {
-            // Idempotent — createClientEngagement already set step to "repo",
-            // but resume can land here with the DB still on "client".
-            await advanceOnboarding("repo");
-            router.refresh();
-          })
-        }
+        onContinue={toCharging}
       />
     );
   }
@@ -340,9 +427,9 @@ export function ClientStep({
   return (
     <EditorialShell
       nav={nav}
-      progress={{ pathLabel: CLIENT_LABEL, index: 1, total: 5 }}
-      title="Set up your client"
-      sub="We'll create your client and an invite link to share."
+      progress={{ pathLabel: "Your first client", index: 4, total: 5 }}
+      title="Do you have a client right now?"
+      sub="Add them to spin up a shared board and an invite link — or skip and add clients later."
       note="They'll see exactly what you put on the board — nothing else."
       stageEyebrow="The client"
       stageHeadline="Your shared workspace."
@@ -356,244 +443,92 @@ export function ClientStep({
           onChange={(v) => setNamePreview(v)}
         />
         <WzLineField label="Client email" optional type="email" name="clientEmail" placeholder="jane@acme.com" maxLength={320} />
-        {error && <p style={{ margin: 0, fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--danger)" }}>{error}</p>}
+        {error && <p style={errStyle}>{error}</p>}
         <div style={{ marginTop: 8 }}>
           <WzPrimary type="submit" disabled={isPending}>{isPending ? "Setting up…" : "Create client & invite link"}</WzPrimary>
         </div>
         <div style={{ display: "flex", justifyContent: "center", marginTop: -6 }}>
-          <WzGhostLink onClick={nav.exit} disabled={isPending}>{SKIP}</WzGhostLink>
+          <WzGhostLink type="button" onClick={toCharging} disabled={isPending}>{SKIP_CLIENT}</WzGhostLink>
         </div>
       </form>
     </EditorialShell>
   );
 }
 
-/* -------------------------------- repo (P2) ------------------------------- */
+/* -------------------------------- charging ------------------------------- */
 
-export function RepoStep({
-  nav,
-  connected,
-  repos,
-  engagement,
-  clientName,
-  oauthError,
-}: {
-  nav: WizardNav;
-  connected: boolean;
-  repos: GitHubRepo[];
-  engagement: { id: string; repoFullName: string | null } | null;
-  clientName?: string;
-  oauthError?: string;
+export function ChargingStep({ nav, selectedModel, hourlyRate }: {
+  nav: WizardNav; selectedModel: PricingModel | null; hourlyRate: number | null;
 }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-
-  function next() {
-    startTransition(async () => {
-      await advanceOnboarding("tasks");
-      router.refresh();
-    });
-  }
-
-  return (
-    <EditorialShell
-      nav={nav}
-      progress={{ pathLabel: CLIENT_LABEL, index: 3, total: 5 }}
-      title="Link your repository"
-      sub="Connect the code you'll be working in. Krowe ties commits to this client."
-      note="Linked once, your client watches progress without ever asking."
-      stageEyebrow="The codebase"
-      stageHeadline="Progress, straight from the source."
-      stageSub="Commits flow onto the board your client already sees."
-      stage={<BoardStage stage="repo" clientName={clientName} />}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 380 }}>
-        {oauthError && (
-          <p style={{ margin: 0, borderRadius: "var(--radius-md)", background: "var(--danger-soft)", padding: "9px 12px", fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--danger)" }}>
-            GitHub connection failed — you can try again or skip this for now.
-          </p>
-        )}
-        {!connected ? (
-          <WzPrimary
-            icon={<GitHubGlyph size={17} />}
-            onClick={() => {
-              window.location.href = "/api/github/connect?returnTo=/onboarding";
-            }}
-          >
-            Connect GitHub
-          </WzPrimary>
-        ) : (
-          <>
-            <RepoSelector
-              engagementId={engagement?.id}
-              currentRepo={engagement?.repoFullName}
-              initialRepos={repos}
-            />
-            <WzPrimary onClick={next} disabled={isPending}>Continue</WzPrimary>
-          </>
-        )}
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <WzGhostLink onClick={next} disabled={isPending}>Skip for now</WzGhostLink>
-        </div>
-      </div>
-    </EditorialShell>
-  );
-}
-
-/* ------------------------------- tasks (P2) ------------------------------- */
-
-export function TasksStep({ nav, engagementId, clientName }: { nav: WizardNav; engagementId: string | null; clientName?: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [tasks, setTasks] = useState<string[]>(["", "", ""]);
+  const [model, setModel] = useState<PricingModel | null>(selectedModel);
+  const [rate, setRate] = useState<string>(hourlyRate != null && hourlyRate > 0 ? String(hourlyRate) : "");
+  const [splash, setSplash] = useState(false);
 
-  function next() {
-    startTransition(async () => {
-      await advanceOnboarding("docs");
-      router.refresh();
-    });
-  }
-
-  function handleSubmit(formData: FormData) {
-    const titles = ["task1", "task2", "task3"]
-      .map((k) => ((formData.get(k) as string) ?? "").trim())
-      .filter(Boolean);
-    if (titles.length === 0) {
-      next();
+  function handleSubmit() {
+    if (!model) {
+      setError("Pick how you charge.");
       return;
     }
+    const parsedRate = Number.parseInt(rate, 10);
+    if (!Number.isFinite(parsedRate) || parsedRate < 0) {
+      setError("Enter your typical hourly rate.");
+      return;
+    }
+    setError(null);
+    setSplash(true);
     startTransition(async () => {
-      for (const title of titles) {
-        const fd = new FormData();
-        fd.set("title", title);
-        if (engagementId) fd.set("engagement_id", engagementId);
-        const res = await createTask(fd);
-        if (res && "error" in res && res.error) {
-          setError(res.error);
-          return;
-        }
+      const res = await saveCharging({ pricingModel: model, hourlyRate: parsedRate });
+      if ("error" in res) {
+        setError(res.error);
+        setSplash(false);
+        return;
       }
-      await advanceOnboarding("docs");
-      router.refresh();
+      router.push("/b");
     });
   }
 
-  const placeholders = ["Set up staging environment", "Design the landing page", "Migrate the database"];
+  if (splash) return <WzOpening title="You're all set" sub="Opening your workspace — let's get to work." />;
+
+  const rateNum = rate ? Number.parseInt(rate, 10) : null;
 
   return (
     <EditorialShell
       nav={nav}
-      progress={{ pathLabel: CLIENT_LABEL, index: 4, total: 5 }}
-      title="Start your to-do list"
-      sub="What are you working on first? These land on the shared task board."
-      note="Don't overthink it. Three things you'll do this week is plenty."
-      stageEyebrow="The board"
-      stageHeadline="Work, where you both can see it."
-      stageSub="Tasks you add here show up live in the To do column."
-      stage={<BoardStage stage="todos" clientName={clientName} tasks={tasks} />}
+      progress={{ pathLabel: "How you charge", index: 5, total: 5 }}
+      title="How do you charge?"
+      sub="We'll seed every new quote with this — you can adjust any quote before you send it."
+      note="Not sure yet? A rough number is fine; change it in Settings later."
+      stageEyebrow="How you charge"
+      stageHeadline="Quotes that start with your numbers."
+      stageSub="Set it once; every quote prefills."
+      stage={<PricingStage modelLabel={model ? PRICING_MODEL_OPTIONS[model].title : undefined} rate={Number.isFinite(rateNum) ? rateNum : null} />}
     >
-      <form action={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 380 }}>
-        {placeholders.map((ph, i) => (
-          <WzLineField
-            key={i}
-            label={`Task ${i + 1}${i > 0 ? " · optional" : ""}`}
-            name={`task${i + 1}`}
-            placeholder={`e.g. ${ph}`}
-            maxLength={300}
-            autoFocus={i === 0}
-            onChange={(v) => setTasks((t) => { const next = [...t]; next[i] = v; return next; })}
-          />
-        ))}
-        {error && <p style={{ margin: 0, fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--danger)" }}>{error}</p>}
-        <div style={{ marginTop: 8 }}>
-          <WzPrimary type="submit" icon={<WzIcon name="plus" size={16} />} disabled={isPending}>
-            {isPending ? "Adding…" : "Add tasks"}
-          </WzPrimary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+          <span style={groupLabel}>Pricing model</span>
+          <div style={{ display: "flex", gap: 10 }}>
+            {PRICING_MODELS.map((m) => (
+              <ModelPill
+                key={m}
+                title={PRICING_MODEL_OPTIONS[m].title}
+                hint={PRICING_MODEL_OPTIONS[m].hint}
+                selected={model === m}
+                onClick={() => setModel(m)}
+                disabled={isPending}
+              />
+            ))}
+          </div>
         </div>
-        <div style={{ display: "flex", justifyContent: "center", marginTop: -6 }}>
-          <WzGhostLink type="button" onClick={next} disabled={isPending}>Skip for now</WzGhostLink>
-        </div>
-      </form>
-    </EditorialShell>
-  );
-}
-
-/* -------------------------------- docs (P2) ------------------------------- */
-
-export function DocsStep({
-  nav,
-  projectId,
-  engagementId,
-  clientName,
-}: {
-  nav: WizardNav;
-  projectId: string | null;
-  engagementId: string | null;
-  clientName?: string;
-}) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [splash, setSplash] = useState<{ title: string; sub: string } | null>(null);
-
-  function go(href: string, copy: { title: string; sub: string }) {
-    setSplash(copy);
-    startTransition(async () => {
-      await finishOnboarding("completed");
-      router.push(href);
-    });
-  }
-
-  const boardHref = engagementId ? `/b?engagement=${engagementId}` : "/b";
-
-  if (splash) return <WzOpening title={splash.title} sub={splash.sub} />;
-
-  return (
-    <EditorialShell
-      nav={nav}
-      progress={{ pathLabel: CLIENT_LABEL, index: 5, total: 5 }}
-      title="One last thing"
-      sub="Documents are optional — add them now, or anytime later from Documents."
-      note="Skip these if you're already working with a client. Add them when they ask."
-      stageEyebrow="The documents"
-      stageHeadline="Paperwork, only when you need it."
-      stageSub="A PRD, quote, or contract — each one starts from what's already here."
-      stage={<BoardStage stage="docs" clientName={clientName} />}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 360 }}>
-        {projectId && (
-          <>
-            <WzSecondary
-              icon={<WzIcon name="file" size={16} />}
-              disabled={isPending}
-              onClick={() => go(`/b/projects/${projectId}/prd/new`, { title: "Opening the PRD editor", sub: "Let’s draft the brief — a sentence or two per section is plenty." })}
-            >
-              Write a PRD
-            </WzSecondary>
-            <WzSecondary
-              icon={<WzIcon name="receipt" size={16} />}
-              disabled={isPending}
-              onClick={() => go(`/b/projects/${projectId}/quotes/new`, { title: "Starting a quote", sub: "We’ll turn the PRD into line items you can adjust." })}
-            >
-              Create a quote
-            </WzSecondary>
-            <WzSecondary
-              icon={<WzIcon name="pen" size={16} />}
-              disabled={isPending}
-              onClick={() => go(`/b/projects/${projectId}/contract/new`, { title: "Drafting the contract", sub: "A simple agreement, ready for signature." })}
-            >
-              Draft a contract
-            </WzSecondary>
-          </>
-        )}
-        <div style={{ marginTop: 6 }}>
-          <WzPrimary
-            icon={<WzIcon name="board" size={16} />}
-            disabled={isPending}
-            onClick={() => go(boardHref, { title: "Opening your task board", sub: "Your tasks are on the shared board — let’s get to work." })}
-          >
-            Go to my task board
-          </WzPrimary>
+        <WzLineField
+          label="Typical hourly rate ($)" type="number" name="hourlyRate"
+          value={rate} placeholder="125" onChange={setRate}
+        />
+        {error && <p style={errStyle}>{error}</p>}
+        <div style={{ marginTop: 4 }}>
+          <WzPrimary onClick={handleSubmit} disabled={isPending}>{isPending ? "Finishing…" : "Finish setup"}</WzPrimary>
         </div>
       </div>
     </EditorialShell>

@@ -48,12 +48,13 @@ export type TaskTag = (typeof TASK_TAGS)[number];
 export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
 // First-time product-tour lifecycle (separate from the onboarding form wizard).
 export type TourStatus = "pending" | "completed" | "dismissed";
-export type OnboardingPath = "no_clients" | "has_clients";
-export type OnboardingStep = "path" | "prospect" | "handoff" | "client" | "repo" | "tasks" | "docs";
+// The onboarding wizard is an about-you intake: who you are, what kind of
+// agency you run, its size, an optional current client, and how you charge.
+export type OnboardingStep = "identity" | "agency_type" | "agency_size" | "client" | "charging";
 
 // Wizard-internal state — only the onboarding flow reads/writes this.
+// engagement_id/project_id are set when the optional client step creates one.
 export interface OnboardingState {
-  path?: OnboardingPath;
   step?: OnboardingStep;
   project_id?: string;
   engagement_id?: string;
@@ -907,6 +908,12 @@ export interface BuilderProfile {
   token_revoked_at: string | null; // set when the share link is revoked
   github_synced_at: string | null;
   tags: string[]; // achievement/identity badges, e.g. "Hackathon Winner"
+  // Agency identity + charging captured during onboarding (migration 0080).
+  agency_name: string | null;
+  agency_role: string | null; // the builder's role/title, e.g. "Founder"
+  agency_type: AgencyType | null;
+  agency_size: AgencySize | null;
+  pricing_model: PricingModel | null;
   // Quote defaults — the base pricing every new quote starts from (0058).
   default_hourly_rate: number; // blended rate line items price at (hours × rate)
   payment_terms_preset: PaymentTermsPreset; // seeds paymentMilestones on new quotes
@@ -915,6 +922,17 @@ export interface BuilderProfile {
   created_at: string;
   updated_at: string;
 }
+
+// Onboarding intake option sets. The DB check constraints in
+// 0080_agency_charging_onboarding.sql mirror these — keep them in sync.
+export const AGENCY_TYPES = ["ai", "web", "software"] as const;
+export type AgencyType = (typeof AGENCY_TYPES)[number];
+
+export const AGENCY_SIZES = ["solo", "2_5", "6_15", "16_plus"] as const;
+export type AgencySize = (typeof AGENCY_SIZES)[number];
+
+export const PRICING_MODELS = ["hourly", "fixed_bid", "retainer"] as const;
+export type PricingModel = (typeof PRICING_MODELS)[number];
 
 // Builder quote-default option sets. The DB check constraints in
 // 0058_quote_pricing_defaults.sql mirror these — keep them in sync.
