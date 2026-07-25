@@ -21,10 +21,16 @@ export interface GitHubRepo {
 export type Role = "operator" | "builder";
 export type TaskStatus = "backlog" | "todo" | "in_progress" | "done";
 export type TaskSource = "operator_request" | "builder_added";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
+// Const arrays, not bare unions, so the AI prompts can derive their value lists
+// from the same source the zod schemas enum over (see TASK_TAGS below and
+// lib/ai/prompts.ts) — adding a value becomes a compile error until every
+// gloss is written, instead of silently drifting the prompt text.
+export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 // Linear-style change type. Null on legacy/unclassified tasks (see migration
 // 0064); auto-set by the AI classifier on creation and overridable in the UI.
-export type TaskType = "feature" | "bug" | "change";
+export const TASK_TYPES = ["feature", "bug", "change"] as const;
+export type TaskType = (typeof TASK_TYPES)[number];
 
 // Fixed taxonomy of area labels the AI classifier may assign. A task gets
 // exactly ONE of these (stored as a single-element tasks.tags array) — the
@@ -78,6 +84,11 @@ export interface NotificationPreferences {
   notify_doc_signed: boolean;
   notify_change_order: boolean;
   notify_invite_accepted: boolean;
+  // Task-lifecycle toggles (migration 0078).
+  notify_task_approval_requested: boolean;
+  notify_task_approved: boolean;
+  notify_task_changes_requested: boolean;
+  notify_task_delivered: boolean;
   updated_at: string;
 }
 

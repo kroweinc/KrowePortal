@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { TASK_TAGS } from "@/lib/types";
+import { TASK_PRIORITIES, TASK_TAGS, TASK_TYPES } from "@/lib/types";
+
+// How clearly a call assigned an extracted action item. Extraction-local (it
+// never reaches the tasks table), so it lives here rather than in lib/types.ts —
+// but it's still a const array so lib/ai/prompts.ts can derive its gloss list
+// from the same source this schema enums over.
+export const DRAFT_CONFIDENCE = ["high", "medium", "low"] as const;
+export type DraftConfidence = (typeof DRAFT_CONFIDENCE)[number];
 
 // Exactly-one area tag, kept as an array for the tasks.tags text[] column.
 // OpenAI strict mode can't enforce maxItems (strict-schema.ts strips it from the
@@ -53,12 +60,12 @@ const Question = z
 export const TaskDraft = z.object({
   title: z.string().min(3).max(300),
   description: z.string().min(20).max(2000),
-  priority: z.enum(["low", "medium", "high", "urgent"]),
+  priority: z.enum(TASK_PRIORITIES),
   // Classification folded into the draft (same taxonomy as TaskClassifyResult) so
   // an AI-generated task carries its type/area on creation — no deferred classifier
   // round-trip and no fill-in delay. `type` defaults to "change" so a rare omission
   // degrades to the catch-all instead of failing the whole generation.
-  type: z.enum(["feature", "bug", "change"]).default("change"),
+  type: z.enum(TASK_TYPES).default("change"),
   tags: TagList,
   // Assumptions the AI made where the description was ambiguous. Surfaced
   // read-only on the prefilled draft form so the builder can catch a wrong call
@@ -170,7 +177,7 @@ export const ExtractedTaskDraft = TaskDraft.omit({ assumptions: true, followUp: 
   dependencies: DependencyList,
   // How clearly the call assigned this item. Ambiguous attribution must
   // surface as medium/low — never a silent guess.
-  confidence: z.enum(["high", "medium", "low"]).default("medium"),
+  confidence: z.enum(DRAFT_CONFIDENCE).default("medium"),
 });
 
 // Absent/"builder" owner = the builder's own work; anything else is another
@@ -230,7 +237,7 @@ export const TaskEstimateResult = z
 // array (capped at 1) so the tasks.tags text[] column and TaskTags renderer stay
 // unchanged. Persisted by classifyAndSaveTask onto tasks.type / tasks.tags.
 export const TaskClassifyResult = z.object({
-  type: z.enum(["feature", "bug", "change"]),
+  type: z.enum(TASK_TYPES),
   tags: TagList,
 });
 
