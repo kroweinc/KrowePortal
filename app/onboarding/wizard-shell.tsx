@@ -262,6 +262,31 @@ export function WzLineField({
   );
 }
 
+/* ------------------------------- checkbox -------------------------------- */
+
+/* Opt-in row for a step that's doing something extra (minting an invite link).
+   Real <input type="checkbox"> under the hood, so it's keyboard-reachable and
+   the <label> makes the whole row the hit target — .wz-check does the styling. */
+export function WzCheckField({ label, hint, checked, onChange, disabled }: {
+  label: string; hint?: string; checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean;
+}) {
+  return (
+    <label className="wz-check" style={disabled ? { opacity: 0.6, cursor: "default" } : undefined}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="box" aria-hidden="true"><WzIcon name="check" size={12} stroke={3} /></span>
+      <span className="wz-check-text">
+        {label}
+        {hint && <span className="wz-check-hint">{hint}</span>}
+      </span>
+    </label>
+  );
+}
+
 /* ------------------------------- path card ------------------------------- */
 
 export function WzPathCard({ glyph, kicker, title, body, onClick, disabled }: {

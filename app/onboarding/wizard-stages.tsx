@@ -164,26 +164,38 @@ export function PricingStage({ modelLabel, rate }: { modelLabel?: string; rate?:
   );
 }
 
-/* ---------- Optional client — engagement + invite ---------- */
-export function EngagementStage({ clientName, stage }: { clientName?: string; stage: "client" | "invite" }) {
+/* ---------- Optional client — engagement + invite ----------
+   "created" is the client made without an invite: the board exists and the
+   builder holds the only seat, so the seat reads unclaimed rather than sent. */
+export function EngagementStage({ clientName, stage }: {
+  clientName?: string; stage: "client" | "invite" | "created";
+}) {
   const name = (clientName || "").trim() || "Acme Bakery";
-  const invited = stage === "invite";
+  const { status, tone, seatState } = {
+    client: { status: "New", tone: "muted" as StatusTone, seatState: "Pending" },
+    invite: { status: "Invite sent", tone: "active" as StatusTone, seatState: "Invited" },
+    created: { status: "On the board", tone: "ready" as StatusTone, seatState: "Not invited" },
+  }[stage];
   return (
-    <StageWindow titlebar="Client" status={invited ? "Invite sent" : "New"} statusTone={invited ? "active" : "muted"}>
+    <StageWindow titlebar="Client" status={status} statusTone={tone}>
       <div style={{ fontFamily: "var(--font-serif)", fontSize: 24, lineHeight: 1.15, letterSpacing: "-0.01em", color: "var(--foreground)", marginBottom: 3 }}>{name}</div>
       <div style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--muted-foreground)", marginBottom: 16 }}>Shared workspace</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
         <Seat initials="YOU" name="You" role="Owner" />
-        <Seat initials={initialsOf(name)} name={name} role="Operator · client" state={invited ? "Invited" : "Pending"} />
+        <Seat initials={initialsOf(name)} name={name} role="Operator · client" state={seatState} />
       </div>
       <div style={divider} />
-      {invited ? (
+      {stage === "invite" ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 13px", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", background: "var(--surface-subtle)" }}>
           <WzIcon name="link" size={15} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} />
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>kroweportal.com/join/…</span>
         </div>
       ) : (
-        <div style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--muted-foreground)", fontStyle: "italic" }}>An invite link generates as soon as the client is created.</div>
+        <div style={{ fontFamily: "var(--font-sans)", fontSize: 12.5, color: "var(--muted-foreground)", fontStyle: "italic" }}>
+          {stage === "created"
+            ? "Invite them whenever you're ready — the board is yours until then."
+            : "An invite link generates as soon as the client is created."}
+        </div>
       )}
     </StageWindow>
   );

@@ -215,12 +215,19 @@ export type ClientEngagementResult =
 export async function createClientEngagement(input: {
   clientName: string;
   clientEmail?: string;
+  /** Mint a join link now. Off means the board is the builder's alone until
+      they invite the client later, from Clients. Defaults on. */
+  createInvite?: boolean;
 }): Promise<ClientEngagementResult> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only builders can create clients." };
 
   const admin = createAdminClient();
+  // Read off the raw input, not the parse below — the resume guard returns
+  // before it, and this is a plain boolean with a safe default either way.
+  const wantsInvite = input.createInvite !== false;
+
   // Resume guard: an engagement from a previous wizard attempt is reused.
   if (profile.onboarding?.engagement_id) {
     const { data: existing } = await admin
@@ -232,7 +239,7 @@ export async function createClientEngagement(input: {
     if (existing) {
       const engagement = existing as Engagement;
       let inviteToken: string | null = null;
-      if (!engagement.operator_id) {
+      if (wantsInvite && !engagement.operator_id) {
         const invite = await createInvitation(engagement.id);
         if ("token" in invite) inviteToken = invite.token;
       }
@@ -287,13 +294,20 @@ export async function createClientEngagement(input: {
   }
 
   let inviteToken: string | null = null;
-  const invite = await createInvitation(engagement.id as string);
-  if ("token" in invite) inviteToken = invite.token;
+  if (wantsInvite) {
+    const invite = await createInvitation(engagement.id as string);
+    if ("token" in invite) inviteToken = invite.token;
+  }
 
+  // Records the engagement but deliberately stays on the "client" step — the
+  // invite panel that renders next is still part of it, and page.tsx only looks
+  // up the invite token while the step is "client". Advancing here instead meant
+  // the revalidate below refetched a page already on "charging", so the first
+  // state change behind the invite panel (Back) skipped past the link. The
+  // panel's Continue is what moves the wizard on.
   await saveOnboardingProgress({
     engagement_id: engagement.id as string,
     project_id: project.id,
-    step: "charging",
   });
 
   revalidatePath("/b/engagements");

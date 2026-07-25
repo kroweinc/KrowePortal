@@ -23,7 +23,7 @@ import {
 import {
   EditorialShell,
   WzPrimary,
-  WzGhostLink,
+  WzCheckField,
   WzLineField,
   WzPathCard,
   WzIcon,
@@ -32,8 +32,6 @@ import {
 } from "./wizard-shell";
 import { IdentityStage, AgencyStage, PricingStage, EngagementStage } from "./wizard-stages";
 import type { OnboardingBuilderProfile } from "./wizard";
-
-const SKIP_CLIENT = "Skip — I'll add clients later";
 
 const errStyle: CSSProperties = { margin: 0, fontFamily: "var(--font-sans)", fontSize: 13, color: "var(--danger)" };
 const groupLabel: CSSProperties = {
@@ -413,11 +411,15 @@ export function AgencySizeStep({ nav, selected, priorType }: {
 
 /* -------------------------- client (optional) ---------------------------- */
 
-function InvitePanel({
-  nav, inviteToken, clientName, onContinue, onBack, isPending,
+/* The panel after the client exists. With an invite it's the link to send; with
+   the invite declined it's just the confirmation, since there's nothing to copy. */
+function ClientResultPanel({
+  nav, inviteToken, invited, clientName, onContinue, onBack, isPending,
 }: {
   nav: WizardNav;
   inviteToken: string | null;
+  /** Whether an invite was asked for — separates "declined" from "already joined". */
+  invited: boolean;
   clientName: string;
   onContinue: () => void;
   onBack: () => void;
@@ -449,20 +451,24 @@ function InvitePanel({
       nav={nav}
       onBack={onBack}
       progress={{ pathLabel: "Your first client", index: 4, total: 5 }}
-      title="Send the invite"
+      title={invited ? "Send the invite" : "Your client's board is ready"}
       sub={
         <>
           <strong style={{ color: "var(--foreground)", fontWeight: 600 }}>{clientName}</strong>{" "}
-          {inviteToken
-            ? "is set up. Send this link — they'll join as the operator on your shared board."
-            : "is set up. Your client has already joined."}
+          {!invited
+            ? "is set up. Invite them whenever you're ready — the link is one click from Clients."
+            : inviteToken
+              ? "is set up. Send this link — they'll join as the operator on your shared board."
+              : "is set up. Your client has already joined."}
         </>
       }
-      note="One link, and they're in. No passwords to chase."
-      stageEyebrow="The invite"
-      stageHeadline="One link, and they're in."
-      stageSub="The seat stays pending until they accept."
-      stage={<EngagementStage stage="invite" clientName={clientName} />}
+      note={invited
+        ? "One link, and they're in. No passwords to chase."
+        : "Nothing is shared until you invite them — the board is yours for now."}
+      stageEyebrow={invited ? "The invite" : "The client"}
+      stageHeadline={invited ? "One link, and they're in." : "Your shared workspace."}
+      stageSub={invited ? "The seat stays pending until they accept." : "Ready for them the moment you invite."}
+      stage={<EngagementStage stage={invited ? "invite" : "created"} clientName={clientName} />}
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 380 }}>
         {inviteToken && (
@@ -489,6 +495,27 @@ function InvitePanel({
   );
 }
 
+const CLIENT_PATH_OPTIONS = [
+  {
+    answer: "yes" as const,
+    kicker: "Right now",
+    title: "Yes, I have a client",
+    body: "Add them and we'll set up your shared board — with an invite link if you want one.",
+    icon: "users" as const,
+  },
+  {
+    answer: "no" as const,
+    kicker: "Not yet",
+    title: "No, not yet",
+    body: "Skip ahead — you can add clients any time from Clients.",
+    icon: "clock" as const,
+  },
+];
+
+/* The client step is a yes/no question first, then the add-client form behind a
+   "yes". Three views on one wizard step — question → form → invite — so the
+   builder is never asked to fill out a client they don't have yet. Back walks
+   the views in reverse before it hands off to the wizard's own Back. */
 export function ClientStep({
   nav, existing,
 }: {
@@ -498,9 +525,19 @@ export function ClientStep({
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [namePreview, setNamePreview] = useState(existing?.title ?? "");
-  const [result, setResult] = useState<{ clientName: string; inviteToken: string | null } | null>(
-    existing ? { clientName: existing.title, inviteToken: existing.inviteToken } : null
+  // Most builders adding a client here want them in, so the invite is opt-out.
+  const [invite, setInvite] = useState(true);
+  const [result, setResult] = useState<
+    { clientName: string; inviteToken: string | null; invited: boolean } | null
+  >(
+    existing
+      ? { clientName: existing.title, inviteToken: existing.inviteToken, invited: true }
+      : null
   );
+  // Resuming onto an engagement that already exists means the answer was yes —
+  // land behind the fork so Back off the invite panel returns to the form, not
+  // to a question they've already answered.
+  const [asked, setAsked] = useState(existing !== null);
   const [isPending, startTransition] = useTransition();
 
   function toCharging() {
@@ -516,20 +553,22 @@ export function ClientStep({
       const res = await createClientEngagement({
         clientName,
         clientEmail: (formData.get("clientEmail") as string) || undefined,
+        createInvite: invite,
       });
       if ("error" in res) {
         setError(res.error);
         return;
       }
-      setResult({ clientName, inviteToken: res.inviteToken });
+      setResult({ clientName, inviteToken: res.inviteToken, invited: invite });
     });
   }
 
   if (result) {
     return (
-      <InvitePanel
+      <ClientResultPanel
         nav={nav}
         inviteToken={result.inviteToken}
+        invited={result.invited}
         clientName={result.clientName}
         isPending={isPending}
         onBack={() => setResult(null)}
@@ -538,12 +577,43 @@ export function ClientStep({
     );
   }
 
+  if (!asked) {
+    return (
+      <EditorialShell
+        nav={nav}
+        progress={{ pathLabel: "Your first client", index: 4, total: 5 }}
+        title="Do you have a client right now?"
+        sub="If you do, we'll set up a shared board and an invite link for them."
+        note="They'll see exactly what you put on the board — nothing else."
+        stageEyebrow="The client"
+        stageHeadline="Your shared workspace."
+        stageSub="One place you and your client both work from."
+        stage={<EngagementStage stage="client" />}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {CLIENT_PATH_OPTIONS.map((o) => (
+            <WzPathCard
+              key={o.answer}
+              glyph={<WzIcon name={o.icon} size={20} />}
+              kicker={o.kicker}
+              title={o.title}
+              body={o.body}
+              onClick={() => (o.answer === "yes" ? setAsked(true) : toCharging())}
+              disabled={isPending}
+            />
+          ))}
+        </div>
+      </EditorialShell>
+    );
+  }
+
   return (
     <EditorialShell
       nav={nav}
+      onBack={() => setAsked(false)}
       progress={{ pathLabel: "Your first client", index: 4, total: 5 }}
-      title="Do you have a client right now?"
-      sub="Add them to spin up a shared board and an invite link — or skip and add clients later."
+      title="Who's the client?"
+      sub="Their name spins up the shared board. Invite them now or keep it to yourself for a while."
       note="They'll see exactly what you put on the board — nothing else."
       stageEyebrow="The client"
       stageHeadline="Your shared workspace."
@@ -557,12 +627,18 @@ export function ClientStep({
           onChange={(v) => setNamePreview(v)}
         />
         <WzLineField label="Client email" optional type="email" name="clientEmail" placeholder="jane@acme.com" maxLength={320} />
+        <WzCheckField
+          label="Create an invite link now"
+          hint="Uncheck to set the board up on your own — you can invite them any time from Clients."
+          checked={invite}
+          onChange={setInvite}
+          disabled={isPending}
+        />
         {error && <p style={errStyle}>{error}</p>}
         <div style={{ marginTop: 8 }}>
-          <WzPrimary type="submit" disabled={isPending}>{isPending ? "Setting up…" : "Create client & invite link"}</WzPrimary>
-        </div>
-        <div style={{ display: "flex", justifyContent: "center", marginTop: -6 }}>
-          <WzGhostLink type="button" onClick={toCharging} disabled={isPending}>{SKIP_CLIENT}</WzGhostLink>
+          <WzPrimary type="submit" disabled={isPending}>
+            {isPending ? "Setting up…" : invite ? "Create client & invite link" : "Create client"}
+          </WzPrimary>
         </div>
       </form>
     </EditorialShell>
