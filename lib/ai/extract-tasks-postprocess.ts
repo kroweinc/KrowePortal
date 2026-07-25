@@ -118,8 +118,11 @@ export function filterDraftsByOwner(
 // ── Source-bullet parsing ────────────────────────────────────────────────────
 
 export interface AssignedBullet {
-  /** Owner name exactly as written in the notes ("Steven"). */
-  owner: string;
+  /** Owner name exactly as written in the notes ("Steven"), or undefined for an
+      ownerless bullet under an action-items heading — those are action items
+      too, they just don't say whose. Undefined asserts NOTHING about ownership:
+      it must never overwrite the model's own attribution. */
+  owner: string | undefined;
   /** The bullet's first clause (before any ";" / ", then" split). */
   head: string;
   /** Every requirement clause: nested sub-bullets plus ";" / ", then" splits
@@ -143,6 +146,14 @@ const NOT_A_NAME = new Set([
 const BULLET_LINE = /^(\s*)(?:[-*•]|\d+[.)])\s+(.*)$/;
 // 1–2 capitalized words followed by ":" — "Steven:", "Chris Stanton:".
 const ASSIGNMENT = /^([A-Z][\w'.-]*(?: [A-Z][\w'.-]*)?)\s*:\s+(\S.*)$/;
+// A markdown heading, and the subset of headings that introduce action items.
+// Granola writes "## Action items"; other note styles use "Next steps" /
+// "Follow-ups" / "To-do". Only under one of these does an OWNERLESS bullet count
+// as an action item — elsewhere ("## Summary", "## Context") bullets are
+// narrative, and synthesizing tasks from them would spray junk into the review
+// list. A "Name:" bullet still counts anywhere, exactly as before.
+const HEADING_LINE = /^\s{0,3}#{1,6}\s+(.*?)\s*:?\s*$/;
+const ACTION_HEADING = /^(action items?|next steps?|follow[- ]?ups?|to-?dos?|todos?|tasks?)$/i;
 
 function splitClauses(text: string): string[] {
   return text
@@ -152,16 +163,24 @@ function splitClauses(text: string): string[] {
 }
 
 /**
- * Find every explicitly assigned action-item bullet ("- Name: do the thing")
- * in the meeting notes, with its nested sub-bullets as requirement clauses.
- * Lines that don't match the pattern are ignored — this is a best-effort
- * ground truth for the completeness pass, not a general parser.
+ * Find every action-item bullet in the meeting notes, with its nested
+ * sub-bullets as requirement clauses. Two shapes qualify:
+ *   - "- Name: do the thing" anywhere in the notes (explicitly assigned)
+ *   - "- do the thing" under an action-items heading (assigned, owner unstated)
+ * Everything else — narrative bullets under "## Summary"/"## Context", prose —
+ * is ignored. This is a best-effort ground truth for the completeness pass, not
+ * a general parser: a bullet that slips through becomes a synthesized draft in
+ * the reviewer's list, so under-matching is the safe direction.
  */
 export function parseAssignedBullets(notes: string | null | undefined): AssignedBullet[] {
   if (!notes) return [];
   const lines = notes.split(/\r?\n/);
   const bullets: AssignedBullet[] = [];
   let current: (AssignedBullet & { indent: number }) | null = null;
+  // Notes with no headings at all (pasted transcripts, plain lists) keep the
+  // pre-existing behavior: "Name:" bullets only, since there is no action
+  // section to scope an ownerless bullet to.
+  let inActionSection = false;
 
   const flush = () => {
     if (current) {
@@ -172,6 +191,12 @@ export function parseAssignedBullets(notes: string | null | undefined): Assigned
   };
 
   for (const line of lines) {
+    const heading = line.match(HEADING_LINE);
+    if (heading) {
+      flush();
+      inActionSection = ACTION_HEADING.test(heading[1].trim());
+      continue;
+    }
     const m = line.match(BULLET_LINE);
     if (!m) {
       // Blank or prose line ends the current bullet's sub-list.
@@ -190,9 +215,15 @@ export function parseAssignedBullets(notes: string | null | undefined): Assigned
     }
     flush();
     const assigned = text.match(ASSIGNMENT);
-    if (!assigned) continue;
-    const [, name, body] = assigned;
-    if (NOT_A_NAME.has(name.toLowerCase())) continue;
+    // "Note:" / "Logic:" / "Deadline:" — a header-ish label, not an owner and
+    // not an action item. Skipped everywhere, including inside an action
+    // section, exactly as before the ownerless case existed.
+    if (assigned && NOT_A_NAME.has(assigned[1].toLowerCase())) continue;
+    // An ownerless bullet is an action item only inside an action section.
+    if (!assigned && !inActionSection) continue;
+    const name = assigned ? assigned[1] : undefined;
+    const body = assigned ? assigned[2] : text.trim();
+    if (!body) continue;
     const clauses = splitClauses(body);
     current = {
       owner: name,
@@ -413,8 +444,13 @@ function sentenceCase(text: string): string {
 }
 
 /** Build a reviewable fallback draft verbatim from an assigned bullet the
-    model missed. Deliberately conservative: no inference beyond the bullet. */
-function synthesizeDraft(bullet: AssignedBullet, owner: string): ExtractedTaskDraft {
+    model missed. Deliberately conservative: no inference beyond the bullet.
+    An undefined owner stays undefined — isBuilderOwnedDraft treats that as the
+    builder's, which is the right default for an unnamed action item. */
+function synthesizeDraft(
+  bullet: AssignedBullet,
+  owner: string | undefined
+): ExtractedTaskDraft {
   const title = sentenceCase(bullet.head).replace(/[.,;:\s]+$/, "").slice(0, 300);
   return {
     title: title.length >= 3 ? title : `Follow up: ${bullet.raw.slice(0, 280)}`,
@@ -466,10 +502,11 @@ export function postProcessExtraction(
     };
   });
 
-  // 2. Ground truth: explicitly assigned bullets from the notes.
+  // 2. Ground truth: action-item bullets from the notes. Undefined owner = the
+  //    bullet is an action item that never said whose (see AssignedBullet).
   const bullets = parseAssignedBullets(options.notes);
-  const bulletOwners = bullets.map(
-    (b) => normalizeOwner(b.owner, options.builderAliases) ?? b.owner
+  const bulletOwners = bullets.map((b) =>
+    b.owner === undefined ? undefined : normalizeOwner(b.owner, options.builderAliases) ?? b.owner
   );
   const bulletTokens = bullets.map((b) => ({
     head: significantTokens(b.head),
@@ -488,6 +525,9 @@ export function postProcessExtraction(
     const bi = matchedBullet[i];
     if (bi === -1) return;
     const trueOwner = bulletOwners[bi];
+    // An ownerless bullet asserts nothing about who owns the work, so it must
+    // not overwrite the model's attribution — only an explicit "Name:" wins.
+    if (trueOwner === undefined) return;
     const current = item.owner ?? "builder"; // absent = treated as builder downstream
     if (current !== trueOwner) {
       repairs.push({
@@ -528,17 +568,19 @@ export function postProcessExtraction(
     }
   });
 
-  // 6. Completeness: every explicitly assigned bullet must be covered by a
-  //    task with the right owner. Uncovered bullets become verbatim fallback
-  //    drafts — an assigned action item is never silently dropped.
+  // 6. Completeness: every action-item bullet must be covered by a task with the
+  //    right owner. Uncovered bullets become verbatim fallback drafts — an
+  //    assigned action item is never silently dropped.
   bullets.forEach((bullet, bi) => {
     if (mergedBullet.includes(bi)) return;
     // Second chance on full text (incl. description) before synthesizing —
-    // step 3 matched on grounding fields only.
+    // step 3 matched on grounding fields only. An ownerless bullet accepts a
+    // covering task with ANY owner: it never claimed one, so a match on the
+    // work itself is enough.
     const fullMatch = merged.findIndex(
       (item, j) =>
         mergedBullet[j] === -1 &&
-        (item.owner ?? "builder") === bulletOwners[bi] &&
+        (bulletOwners[bi] === undefined || (item.owner ?? "builder") === bulletOwners[bi]) &&
         tokenCoverage(bulletTokens[bi].head, draftFullTokens(item)) >= BULLET_MATCH_THRESHOLD
     );
     if (fullMatch !== -1) {
@@ -547,7 +589,9 @@ export function postProcessExtraction(
     }
     repairs.push({
       kind: "missing_task_synthesized",
-      detail: `No extracted task covered the assigned item "${bullet.owner}: ${bullet.head}" — added from the notes verbatim`,
+      detail: `No extracted task covered the assigned item "${
+        bullet.owner ? `${bullet.owner}: ` : ""
+      }${bullet.head}" — added from the notes verbatim`,
       sourceText: bullet.raw,
     });
     merged.push(synthesizeDraft(bullet, bulletOwners[bi]));
