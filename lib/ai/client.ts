@@ -15,20 +15,30 @@ export const openai = new OpenAI({
 
 export const AI_MODEL = process.env.OPENAI_MODEL ?? "gpt-5.4-mini";
 
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high";
-const REASONING_EFFORTS = new Set<string>(["minimal", "low", "medium", "high"]);
+// The values gpt-5.4-mini actually accepts. "minimal" was a GPT-5.0 value and is
+// REJECTED by gpt-5.4-mini — it used to pass this validation and then 400 every
+// AI call in the app. "xhigh" is legal and used to be missing here, so setting it
+// fell through to null and silently ran at the model's default instead.
+export const REASONING_EFFORTS = ["none", "low", "medium", "high", "xhigh"] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
 
 /**
  * Reasoning effort applied to the JSON generations. gpt-5.x is a reasoning model
  * whose latency is dominated by an internal reasoning pass; bounding it to "low"
  * is the biggest speed lever for these structured-output calls, with only a
- * modest depth tradeoff. Override with OPENAI_REASONING_EFFORT (minimal | low |
- * medium | high), or set it to "default"/empty to omit the param entirely and
- * let the model decide. Bump to "medium" if PRD depth ever regresses.
+ * modest depth tradeoff. Override with OPENAI_REASONING_EFFORT (none | low |
+ * medium | high | xhigh), or set it to "default"/empty to omit the param entirely
+ * and let the model decide. Bump to "medium" if PRD depth ever regresses.
+ *
+ * Note: function tools + a reasoning pass 400 on chat.completions, so the
+ * tool-loop callers pass reasoning_effort: "none" explicitly rather than
+ * inheriting this.
  */
 export const AI_REASONING_EFFORT: ReasoningEffort | null = (() => {
   const raw = (process.env.OPENAI_REASONING_EFFORT ?? "low").trim().toLowerCase();
-  return REASONING_EFFORTS.has(raw) ? (raw as ReasoningEffort) : null;
+  return (REASONING_EFFORTS as readonly string[]).includes(raw)
+    ? (raw as ReasoningEffort)
+    : null;
 })();
 
 /**
