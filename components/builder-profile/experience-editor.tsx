@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, Pencil, Trash2 } from "lucide-react";
+import { Pencil, Plus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,10 +13,10 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useConfirm } from "@/components/ui/confirm-dialog";
-import { BrandLogo } from "@/components/prd/brand-logo";
 import { CompanySuggestInput } from "@/components/builder-profile/company-suggest-input";
 import { companyInitials } from "@/lib/company";
+import { CardActions, CardGrip, CardDropLane } from "./card-actions";
+import { useDragReorder } from "./use-drag-reorder";
 import {
   addExperience,
   updateExperience,
@@ -25,134 +25,91 @@ import {
 } from "@/lib/actions/builder-profile";
 import type { BuilderProfileExperience } from "@/lib/types";
 
+/** "Mar 2022 - Present". A blank end reads as still-current, but only once a
+    start exists — otherwise an entry with no dates would claim "Present". */
+function dateRange(entry: BuilderProfileExperience): string | null {
+  const start = entry.start_label?.trim();
+  const end = entry.end_label?.trim() || (start ? "Present" : "");
+  if (!start && !end) return null;
+  return [start, end].filter(Boolean).join(" \u2013 ");
+}
+
 export function ExperienceEditor({ entries }: { entries: BuilderProfileExperience[] }) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [confirm, confirmDialog] = useConfirm();
+  // Local mirror so a drag paints instantly; re-seeded on every server list.
+  const [order, setOrder] = useState(entries);
+  useEffect(() => setOrder(entries), [entries]);
 
-  function move(index: number, dir: -1 | 1) {
-    const next = [...entries];
-    const target = index + dir;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    startTransition(async () => {
-      const result = await reorderExperience(next.map((e) => e.id));
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      router.refresh();
-    });
-  }
+  const { dropIndex, rowProps, laneProps } = useDragReorder({
+    items: order,
+    onReorder: setOrder,
+    persist: reorderExperience,
+  });
 
-  async function remove(id: string) {
-    if (
-      !(await confirm({
-        title: "Delete this experience entry?",
-        description: "This can’t be undone.",
-        confirmText: "Delete",
-        cancelText: "Cancel",
-        icon: Trash2,
-        tone: "danger",
-      }))
-    )
-      return;
-    startTransition(async () => {
-      const result = await deleteExperience(id);
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      router.refresh();
-    });
+  if (order.length === 0) {
+    return (
+      <div className="ss-empty">
+        <p>No experience added yet.</p>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-3">
-      {entries.length === 0 ? (
-        <p className="rounded-md border border-dashed border-neutral-200 px-4 py-6 text-center text-sm text-neutral-400">
-          No experience added yet.
-        </p>
-      ) : (
-        <ul className="space-y-2">
-          {entries.map((entry, index) => (
-            <li
-              key={entry.id}
-              className="flex items-start gap-3 rounded-md border border-neutral-200 bg-white p-4"
-            >
-              {/* name is omitted on purpose: without a verified domain we want
-                  initials, not BrandLogo's dev-tool name guessing (a company
-                  called "Express" would get the Express.js logo). */}
-              <BrandLogo
-                domain={entry.company_domain}
-                fallback={companyInitials(entry.company)}
-                size={36}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-neutral-900">
-                  {entry.role} <span className="font-normal text-neutral-500">· {entry.company}</span>
-                </p>
-                <p className="mt-0.5 text-[11px] text-neutral-400">
-                  {entry.start_label ?? ""}
-                  {entry.start_label || entry.end_label ? " — " : ""}
-                  {entry.end_label ?? (entry.start_label ? "Present" : "")}
-                </p>
-                {entry.description && (
-                  <p className="mt-1 text-xs text-neutral-500">{entry.description}</p>
-                )}
+    <ul className="ss-items">
+      {order.map((entry, index) => {
+        const range = dateRange(entry);
+        return (
+          <Fragment key={entry.id}>
+            {dropIndex === index && <CardDropLane {...laneProps} />}
+            <li className={`ss-item${entry.is_hidden ? " hidden-item" : ""}`} {...rowProps(index)}>
+              <span className="ss-initials" aria-hidden>
+                {companyInitials(entry.company)}
+              </span>
+              <div className="body">
+                <div className="titlerow">
+                  <span className="nm">{entry.role}</span>
+                  <span className="ss-rule" aria-hidden />
+                  <span className="nm" style={{ fontWeight: 400 }}>
+                    {entry.company}
+                  </span>
+                </div>
+                {range && <div className="meta">{range}</div>}
+                {entry.description && <p className="desc">{entry.description}</p>}
               </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => move(index, -1)}
-                  disabled={isPending || index === 0}
-                  className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-30"
-                  aria-label="Move up"
-                >
-                  <ArrowUp className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => move(index, 1)}
-                  disabled={isPending || index === entries.length - 1}
-                  className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-30"
-                  aria-label="Move down"
-                >
-                  <ArrowDown className="h-3.5 w-3.5" />
-                </button>
+
+              <CardActions
+                kind="experience"
+                id={entry.id}
+                hidden={entry.is_hidden}
+                name={`${entry.role} at ${entry.company}`}
+                deleteLabel="Delete this experience entry"
+                onDelete={() => deleteExperience(entry.id)}
+              >
                 <ExperienceForm
                   entry={entry}
                   trigger={
                     <button
                       type="button"
-                      className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
+                      className="ss-cardact"
+                      title="Edit experience"
                       aria-label="Edit experience"
                     >
-                      <Pencil className="h-3.5 w-3.5" />
+                      <Pencil />
                     </button>
                   }
                 />
-                <button
-                  type="button"
-                  onClick={() => remove(entry.id)}
-                  disabled={isPending}
-                  className="rounded p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600"
-                  aria-label="Delete experience"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              </CardActions>
+              <CardGrip />
             </li>
-          ))}
-        </ul>
-      )}
-      <ExperienceForm />
-      {confirmDialog}
-    </div>
+          </Fragment>
+        );
+      })}
+      {dropIndex === order.length && <CardDropLane {...laneProps} />}
+    </ul>
   );
 }
 
-function ExperienceForm({
+export function ExperienceForm({
+
   entry,
   trigger,
 }: {
@@ -206,7 +163,11 @@ function ExperienceForm({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        {trigger ?? <Button variant="outline" size="sm">Add experience</Button>}
+        {trigger ?? (
+          <button type="button" className="ss-btn">
+            <Plus /> Add new experience
+          </button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

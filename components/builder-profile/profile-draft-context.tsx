@@ -34,6 +34,7 @@ import { githubProfileUrl } from "@/lib/project/business-context";
 import type { PublicBuilderProfile } from "@/lib/actions/builder-profile-public";
 import type {
   BuilderProfileCodingTool,
+  BuilderProfileEducation,
   BuilderProfileExperience,
   BuilderProfileProject,
 } from "@/lib/types";
@@ -44,10 +45,7 @@ export type ProfileTextField =
   | "bio"
   | "linkedinUrl"
   | "githubUrl"
-  | "portfolioUrl"
-  | "educationSchool"
-  | "educationMajor"
-  | "educationYear";
+  | "portfolioUrl";
 
 export interface ProfileDraft {
   // Autosaved text fields.
@@ -57,13 +55,11 @@ export interface ProfileDraft {
   linkedinUrl: string;
   githubUrl: string;
   portfolioUrl: string;
-  educationSchool: string;
-  educationMajor: string;
-  educationYear: string;
   tags: string[];
   // Collections + meta — re-seeded from the bundle (preview/strength only).
   projects: BuilderProfileProject[];
   experience: BuilderProfileExperience[];
+  education: BuilderProfileEducation[];
   codingTools: BuilderProfileCodingTool[];
   avatarUrl: string | null;
   hasResume: boolean;
@@ -105,9 +101,6 @@ const PLAIN_TEXT_MAP: Record<string, string> = {
   displayName: "display_name",
   headline: "headline",
   bio: "bio",
-  educationSchool: "education_school",
-  educationMajor: "education_major",
-  educationYear: "education_year",
 };
 const URL_MAP: Record<string, string> = {
   linkedinUrl: "linkedin_url",
@@ -137,12 +130,10 @@ function seedFromBundle(bundle: BuilderProfileBundle): ProfileDraft {
     linkedinUrl: p.linkedin_url ?? "",
     githubUrl: p.github_url ?? "",
     portfolioUrl: p.portfolio_url ?? "",
-    educationSchool: p.education_school ?? "",
-    educationMajor: p.education_major ?? "",
-    educationYear: p.education_year ?? "",
     tags: p.tags ?? [],
     projects: bundle.projects,
     experience: bundle.experience,
+    education: bundle.education,
     codingTools: bundle.codingTools,
     avatarUrl: bundle.avatarUrl,
     hasResume: !!p.resume_storage_path,
@@ -167,9 +158,6 @@ function snapshotOf(d: ProfileDraft): SavedSnapshot {
     linkedinUrl: d.linkedinUrl.trim(),
     githubUrl: d.githubUrl.trim(),
     portfolioUrl: d.portfolioUrl.trim(),
-    educationSchool: d.educationSchool.trim(),
-    educationMajor: d.educationMajor.trim(),
-    educationYear: d.educationYear.trim(),
     tags: [...d.tags],
   };
 }
@@ -322,14 +310,12 @@ export function ProfileDraftProvider({
       linkedinUrl: p.linkedin_url ?? "",
       githubUrl: p.github_url ?? "",
       portfolioUrl: p.portfolio_url ?? "",
-      educationSchool: p.education_school ?? "",
-      educationMajor: p.education_major ?? "",
-      educationYear: p.education_year ?? "",
     };
 
     const patch: Partial<ProfileDraft> = {
       projects: bundle.projects,
       experience: bundle.experience,
+      education: bundle.education,
       codingTools: bundle.codingTools,
       avatarUrl: bundle.avatarUrl,
       hasResume: !!p.resume_storage_path,
@@ -370,9 +356,12 @@ export function ProfileDraftProvider({
     return deriveProfileTags({
       headline: draft.headline || null,
       bio: draft.bio || null,
-      educationSchool: draft.educationSchool || null,
-      educationMajor: draft.educationMajor || null,
-      educationYear: draft.educationYear || null,
+      education: draft.education.map((e) => ({
+        school: e.school,
+        level: e.level,
+        field_of_study: e.field_of_study,
+        end_year: e.end_year,
+      })),
       experience: draft.experience.map((e) => ({
         role: e.role,
         company: e.company,
@@ -392,9 +381,7 @@ export function ProfileDraftProvider({
   }, [
     draft.headline,
     draft.bio,
-    draft.educationSchool,
-    draft.educationMajor,
-    draft.educationYear,
+    draft.education,
     draft.experience,
     draft.projects,
     draft.codingTools,
@@ -424,9 +411,6 @@ export function draftToPublicProfile(
     linkedinUrl: draft.linkedinUrl.trim() || null,
     githubUrl: draft.githubUrl.trim() || null,
     portfolioUrl: draft.portfolioUrl.trim() || null,
-    educationSchool: draft.educationSchool.trim() || null,
-    educationMajor: draft.educationMajor.trim() || null,
-    educationYear: draft.educationYear.trim() || null,
     tags,
     avatarUrl: draft.avatarUrl,
     hasResume: draft.hasResume,
@@ -436,11 +420,17 @@ export function draftToPublicProfile(
     // resolution is server-only (keeps `simple-icons` out of the client bundle),
     // and the draft is live client state with no server round-trip. The published
     // public page resolves the real brand logos server-side.
-    projects: draft.projects.map((project) => ({
-      ...project,
-      techBadges: project.tech.map((tech) => ({ tech, icon: null })),
-    })),
-    experience: draft.experience,
-    codingTools: draft.codingTools,
+    projects: draft.projects
+      .filter((project) => !project.is_hidden)
+      .map((project) => ({
+        ...project,
+        techBadges: project.tech.map((tech) => ({ tech, icon: null })),
+      })),
+    // Hidden items are filtered server-side for the real public page; the
+    // preview has to reproduce that itself or it would show the client
+    // something they'll never actually receive.
+    experience: draft.experience.filter((e) => !e.is_hidden),
+    education: draft.education.filter((e) => !e.is_hidden),
+    codingTools: draft.codingTools.filter((t) => !t.is_hidden),
   };
 }

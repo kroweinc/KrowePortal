@@ -10,6 +10,7 @@ import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { classifyAndSaveTask } from "@/lib/actions/classify-task";
 import { writeAuditEntry, writeAuditEntries, type AuditEntryInput } from "@/lib/actions/audit-log";
 import { isTaskMember } from "@/lib/actions/task-access";
+import { notifyTaskEvent } from "@/lib/email/task-notify";
 import { getMyEngagements } from "@/lib/actions/invitations";
 import { getEngagementRepoById } from "@/lib/github/engagement-repo";
 import { getMergedPrSha, isNewMerge } from "@/lib/github/merged-prs";
@@ -351,6 +352,17 @@ export async function markTaskDone(
         completion_note: parsed.data.completion_note ?? null,
       },
     });
+
+    // Email the operator that the task was delivered — only on an actual
+    // transition into done, so re-marking an already-done task doesn't re-notify.
+    if (before && before.status !== "done") {
+      await notifyTaskEvent({
+        taskId,
+        actor: profile,
+        event: "delivered",
+        note: parsed.data.completion_note ?? null,
+      });
+    }
   });
 
   return { success: true };
@@ -636,6 +648,12 @@ export async function markTaskForApproval(
     metadata: parsed.data.note ? { note: parsed.data.note } : null,
   });
 
+  // Email the operator that a task is ready for their review — deferred so the
+  // send never blocks the response.
+  after(() =>
+    notifyTaskEvent({ taskId, actor: profile, event: "approval_requested", note: parsed.data.note ?? null })
+  );
+
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -731,6 +749,9 @@ export async function approveTask(
     action: "task.approved",
   });
 
+  // Email the builder that their task was approved.
+  after(() => notifyTaskEvent({ taskId, actor: profile, event: "approved" }));
+
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -784,6 +805,12 @@ export async function requestTaskChanges(
     action: "task.changes_requested",
     metadata: parsed.data.note ? { note: parsed.data.note } : null,
   });
+
+  // Email the builder that changes were requested — include the operator's note.
+  after(() =>
+    notifyTaskEvent({ taskId, actor: profile, event: "changes_requested", note: parsed.data.note ?? null })
+  );
+
   if (before.status !== "in_progress") {
     await writeAuditEntry({
       taskId,
@@ -1136,4 +1163,59 @@ export async function deleteTask(taskId: string) {
   revalidatePath("/o");
   revalidatePath("/b");
   return { success: true };
+}
+
+const deleteTasksSchema = z.array(z.string().uuid()).min(1).max(200);
+
+/** Bulk-delete many tasks at once — powers multi-select delete on the build
+ *  board. Mirrors deleteTask's storage cleanup (the FK cascade drops
+ *  task_attachments rows but never the underlying storage objects) but does it
+ *  in a single set-based pass. Only tasks the builder may touch are removed:
+ *  engagement tasks they're a member of, or their own personal (no-engagement)
+ *  tasks — we filter membership explicitly because the admin client bypasses
+ *  RLS and the board's "All" filter can span engagements. */
+export async function deleteTasks(
+  taskIds: string[]
+): Promise<{ success: true; deletedIds: string[] } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsed = deleteTasksSchema.safeParse(taskIds);
+  if (!parsed.success) return { error: "Invalid input" };
+
+  const supabase = await getClient(profile.id);
+
+  const { data: rows } = await supabase
+    .from("tasks")
+    .select("id, engagement_id, created_by")
+    .in("id", parsed.data);
+  if (!rows || rows.length === 0) return { success: true, deletedIds: [] };
+
+  const myEngagementIds = new Set((await getMyEngagements()).map((e) => e.id));
+  const allowedIds = rows
+    .filter((t) =>
+      t.engagement_id ? myEngagementIds.has(t.engagement_id) : t.created_by === profile.id
+    )
+    .map((t) => t.id);
+  if (allowedIds.length === 0) return { error: "You don't have access to these tasks." };
+
+  // Gather attachment files before the row cascade so their storage objects
+  // don't leak — same reason deleteTask does it per-task.
+  const { data: files } = await supabase
+    .from("task_attachments")
+    .select("storage_path")
+    .in("task_id", allowedIds)
+    .not("storage_path", "is", null);
+
+  const { error } = await supabase.from("tasks").delete().in("id", allowedIds);
+  if (error) return { error: error.message };
+
+  const paths = (files ?? []).map((f) => f.storage_path as string).filter(Boolean);
+  if (paths.length) {
+    await createAdminClient().storage.from("task-attachments").remove(paths);
+  }
+
+  revalidatePath("/o");
+  revalidatePath("/b");
+  return { success: true, deletedIds: allowedIds };
 }

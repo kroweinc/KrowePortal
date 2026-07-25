@@ -3,8 +3,9 @@ import {
   isDefaultBranch,
   groupTasksByBranch,
   groupTasksByStagingGroup,
+  reconcileBranch,
 } from "@/lib/tasks/staging-grouping";
-import { isBranchListComplete, type BranchGraph } from "@/lib/github/branches";
+import { isListingComplete } from "@/lib/github/branches";
 import type { Task, StagingGroup } from "@/lib/types";
 
 // Minimal Task factory — only the fields the grouping helpers read.
@@ -130,49 +131,83 @@ describe("groupTasksByStagingGroup", () => {
   });
 });
 
-describe("isBranchListComplete", () => {
-  function graph(extra: Partial<BranchGraph> = {}): BranchGraph {
-    return {
-      root: {
-        name: "main",
-        tipSha: "",
-        tipShaFull: "",
-        latestCommit: null,
-        children: [],
-        parentName: null,
-        diverged: false,
-      },
-      truncated: false,
-      pairwise: false,
-      degraded: [],
-      ...extra,
-    };
-  }
-
+// Gates the cache sweep: only a listing known to be the repo's *whole* branch
+// list may be used to delete rows, or a truncated page would wipe live branches.
+describe("isListingComplete", () => {
   it("is complete for a clean full listing", () => {
-    expect(isBranchListComplete(graph())).toBe(true);
+    expect(isListingComplete(false, [])).toBe(true);
   });
 
   it("is incomplete when the listing was truncated", () => {
-    expect(isBranchListComplete(graph({ truncated: true }))).toBe(false);
+    expect(isListingComplete(true, [])).toBe(false);
   });
 
   it("is incomplete when a listing page failed", () => {
-    expect(isBranchListComplete(graph({ degraded: ["branches:page-2"] }))).toBe(
-      false
-    );
+    expect(isListingComplete(false, ["branches:page-2"])).toBe(false);
   });
 
   // A repo with zero branches reports degraded:["branches"] — that's complete
   // information (there is nothing to list), not a partial fetch.
   it("is complete for a repo with no branches", () => {
-    expect(isBranchListComplete(graph({ degraded: ["branches"] }))).toBe(true);
+    expect(isListingComplete(false, ["branches"])).toBe(true);
   });
 
   // Tip-commit / merge-base failures don't shrink the branch name list.
   it("is complete when only non-listing lookups degraded", () => {
+    expect(isListingComplete(false, ["default-missing", "compare:a...b"])).toBe(true);
+  });
+});
+
+// The branch pickers paint a server-preloaded list, then reconcile against a
+// freshly pulled one. These cases decide what a deliverable gets filed under
+// when a branch was deleted on GitHub in between.
+describe("reconcileBranch", () => {
+  const live = {
+    branches: [{ name: "main" }, { name: "email" }],
+    defaultBranch: "main",
+  };
+
+  it("takes the fresh default while the chips are untouched", () => {
+    expect(reconcileBranch({ picked: false, value: null }, live)).toEqual({
+      branch: "main",
+      dropped: null,
+    });
+    // Even if a stale render had pre-selected something else.
+    expect(reconcileBranch({ picked: false, value: "old-default" }, live)).toEqual({
+      branch: "main",
+      dropped: null,
+    });
+  });
+
+  it("keeps a deliberate pick that still exists", () => {
+    expect(reconcileBranch({ picked: true, value: "email" }, live)).toEqual({
+      branch: "email",
+      dropped: null,
+    });
+  });
+
+  it("keeps an explicit 'No branch'", () => {
+    expect(reconcileBranch({ picked: true, value: null }, live)).toEqual({
+      branch: null,
+      dropped: null,
+    });
+  });
+
+  // The bug this guards: a branch deleted on GitHub was still clickable from a
+  // stale snapshot, so the deliverable got filed under a branch that was gone.
+  it("drops a pick whose branch no longer exists, and reports it", () => {
+    expect(reconcileBranch({ picked: true, value: "deleted-branch" }, live)).toEqual({
+      branch: "main",
+      dropped: "deleted-branch",
+    });
+  });
+
+  it("falls back to no branch when the repo has no default", () => {
     expect(
-      isBranchListComplete(graph({ degraded: ["default-missing", "compare:a...b"] }))
-    ).toBe(true);
+      reconcileBranch(
+        { picked: true, value: "deleted-branch" },
+        { branches: [{ name: "email" }], defaultBranch: null }
+      )
+    ).toEqual({ branch: null, dropped: "deleted-branch" });
   });
 });

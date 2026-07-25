@@ -3,8 +3,10 @@
 import { cookies } from "next/headers";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
-import { notifyUser, inviteAcceptedEmail } from "@/lib/email/notify";
+import { notifyUser, inviteAcceptedEmail, inviteLinkEmail } from "@/lib/email/notify";
+import { sendEmail } from "@/lib/email/resend";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { Engagement } from "@/lib/types";
@@ -132,9 +134,33 @@ export async function createInvitation(
 
   if (error || !data) return { error: error?.message ?? "Failed to create invitation" };
 
+  const token = data.token as string;
+
+  // Email the join link to the prospect if the linked project carries an
+  // address. Cold email to a non-user, so it's sent directly (no preference
+  // row) — and only on first mint (the reuse branch above never re-sends), so a
+  // prospect receives exactly one invite email. Deferred + best-effort.
+  after(async () => {
+    if (!engagement.project_id) return;
+    const admin = createAdminClient();
+    const { data: project } = await admin
+      .from("projects")
+      .select("prospect_email")
+      .eq("id", engagement.project_id)
+      .maybeSingle();
+    const to = (project?.prospect_email as string | null)?.trim();
+    if (!to) return;
+    const { subject, html } = inviteLinkEmail({
+      builderName: profile.display_name?.trim() || "Your builder",
+      engagementTitle: engagement.title,
+      token,
+    });
+    await sendEmail({ to, subject, html });
+  });
+
   revalidatePath("/b");
   revalidatePath("/b/engagements");
-  return { token: data.token as string };
+  return { token };
 }
 
 // Fetches an engagement only if it belongs to this builder. Admin client + explicit

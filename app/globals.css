@@ -54,6 +54,7 @@
   --faint-foreground: oklch(64% 0.008 60);
   --border:           oklch(92% 0.005 60);
   --border-strong:    oklch(86% 0.006 60);
+  --border-soft:      #ebeae9;  /* quietest fill — neutral chips that sit on white */
 
   /* Role accents */
   --builder-text:   #1d4ed8;
@@ -68,6 +69,27 @@
   --warning-soft: color-mix(in srgb, var(--warning) 12%, white);
   --danger:       #b91c1c;
   --danger-soft:  color-mix(in srgb, var(--danger) 12%, white);
+
+  /* Success, brighter pair. --success-soft is a warm, muted wash that reads as
+     "quiet confirmation"; these two are the mint used when a success state has
+     to carry its own weight against white — a Verified pill, a recommendation
+     panel. Deliberately not derived from --success (a color-mix lands duller). */
+  --success-tint:    #d0fae5;
+  --success-surface: #f5fbf6;
+
+  /* Info — neutral-positive, for states that are neither success nor warning:
+     a tag the builder has already chosen, an advisory note. Distinct from
+     --builder-* above, which is the role accent and means "this is a builder". */
+  --info:      #1269a8;
+  --info-soft: #f0f9ff;
+
+  /* Contribution-heat ramp (repo activity strip) — quietest to busiest day.
+     Level 0 is --border; these are the four "has commits" steps, each a deeper
+     wash of --primary over the soft tint. */
+  --heat-1: #ffedd5;
+  --heat-2: color-mix(in srgb, var(--primary) 33%, var(--heat-1));
+  --heat-3: color-mix(in srgb, var(--primary) 66%, var(--heat-1));
+  --heat-4: var(--primary);
 
   /* Shadow tint — warm near-black w/ 8% orange */
   --shadow-tint: color-mix(in oklch, var(--primary) 8%, oklch(10% 0 0));
@@ -91,9 +113,15 @@
   --spacing-5xl: 64px;
   --spacing-6xl: 96px;
 
-  /* Shared header height — keeps the topbar divider and the sidebar
-     logo divider on the same horizontal line. */
-  --header-height: 64px;
+  /* Topbar height. The topbar is sticky, so this is also the offset any
+     scrolled-to anchor has to clear (see .ppsetup .ss-sec). */
+  --topbar-height: 60px;
+
+  /* Sidebar rail width. The topbar lives inside .krowe-main (right of the
+     rail), so it also drives how far the search pill shifts left to read as
+     centered against the whole window. Overridden at the 860px breakpoint
+     and by the collapsed rail. */
+  --sidebar-width: 260px;
 
   /* Radius */
   --radius-sm:   6px;
@@ -189,16 +217,25 @@ button:focus-visible {
   min-height: 100vh;
 }
 
-/* ── Topbar ── */
+/* ── Topbar ──
+   Pinned: the window is the scroll container (see .krowe-sidebar), so top:0
+   keeps the bar in place while the page scrolls under it. The blur is
+   load-bearing at 88% opacity — without it scrolled content reads straight
+   through. z-30 clears page-level sticky headers (z-20) and stays below
+   sheets, dialogs and menus (z-40+). */
 .krowe-topbar {
   display: flex; align-items: center; justify-content: space-between;
   gap: 18px;
-  height: 60px;
+  height: var(--topbar-height);
   padding: 0 28px;
+  position: sticky; top: 0; z-index: 30;
   background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+/* Left/right slots flex equally so the search pill sits dead center. */
+.krowe-topbar-left { flex: 1 1 0; min-width: 0; }
 .krowe-brand { display: flex; align-items: center; gap: 10px; }
 .krowe-brand-wordmark {
   font-family: var(--font-serif);
@@ -215,18 +252,18 @@ button:focus-visible {
   padding-left: 12px; margin-left: 4px;
 }
 
-/* Topbar search (left) */
+/* Topbar search — centered pill that opens the command palette */
 .krowe-tb-search {
   display: flex; align-items: center; gap: 8px;
-  height: 36px; padding: 0 13px; width: 320px; max-width: 42vw;
+  height: 36px; padding: 0 13px;
+  width: 440px; max-width: 42vw; flex-shrink: 1;
   border: 1px solid var(--border); border-radius: var(--radius-full);
-  background: var(--surface-subtle); color: var(--muted-foreground);
+  background: white; color: var(--muted-foreground);
   transition: border-color 160ms var(--ease-out-smooth),
-              background 160ms var(--ease-out-smooth),
               box-shadow 160ms var(--ease-out-smooth);
 }
+.krowe-tb-search:hover { border-color: var(--border-strong); }
 .krowe-tb-search:focus-within {
-  background: white;
   border-color: var(--border);
   box-shadow: none;
 }
@@ -243,7 +280,7 @@ button:focus-visible {
 .krowe-tb-search { cursor: pointer; }
 .krowe-tb-search-ph {
   flex: 1; min-width: 0; text-align: left;
-  font-size: 13.5px; color: var(--faint-foreground);
+  font-size: 13.5px; color: var(--muted-foreground);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .krowe-kbd {
@@ -337,9 +374,21 @@ button:focus-visible {
   to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
 
-.krowe-topbar-right { display: flex; align-items: center; gap: 4px; font-size: 13px; }
+/* The sidebar sits outside .krowe-topbar, so an equal basis on both slots
+   centers the pill in the content column — which reads right of the window's
+   true center. Giving the right slot a head start of one rail width shifts the
+   pill left by half a rail, landing it on the window's centerline. Doing it in
+   layout (not a transform) means it degrades on its own: when space runs short
+   the slot shrinks instead of the pill sliding under the rail. fit-content
+   stops the actions collapsing when the dev role switcher is on. */
+.krowe-topbar-right {
+  flex: 1 1 var(--sidebar-width); min-width: fit-content;
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 4px; font-size: 13px;
+}
 .krowe-view-switch {
   background: none; border: none; color: var(--primary);
+  white-space: nowrap;
   font-size: 13px; font-weight: 500; cursor: pointer; padding: 4px 8px;
   border-bottom: 1px dashed color-mix(in srgb, var(--primary) 50%, transparent);
   transition: opacity var(--duration-fast) var(--ease-out-smooth);
@@ -374,7 +423,7 @@ button:focus-visible {
 
 /* ── Sidebar ── */
 .krowe-sidebar {
-  width: 260px;
+  width: var(--sidebar-width);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -431,7 +480,7 @@ button:focus-visible {
 .krowe-sidebar-signout { cursor: pointer; }
 
 @media (max-width: 860px) {
-  .krowe-sidebar { width: 216px; }
+  :root { --sidebar-width: 216px; }
 }
 
 /* ── Collapsible sidebar (icon-only rail) ── */
@@ -457,7 +506,9 @@ button:focus-visible {
 
 /* Only animate width once mounted, so the persisted state paints instantly. */
 .krowe-sidebar.ready { transition: width var(--duration-normal) var(--ease-out-smooth); }
-.krowe-sidebar.collapsed { width: 64px; }
+/* Set on the shell, not the rail, so the topbar's centering offset shrinks
+   with it — the rail still reads its width from the same token. */
+.krowe-app:has(.krowe-sidebar.collapsed) { --sidebar-width: 64px; }
 .krowe-sidebar.collapsed .krowe-sidebar-word,
 .krowe-sidebar.collapsed .krowe-sidebar-cap,
 .krowe-sidebar.collapsed .krowe-sidebar-label { display: none; }
@@ -1028,6 +1079,99 @@ button:focus-visible {
   transition: background 140ms var(--ease-out-smooth);
 }
 .krowe-card-changes-foot .resolve:hover { background: color-mix(in srgb, var(--warning) 12%, transparent); }
+
+/* Commit-match safeguard — "a commit on main looks like it finished this".
+   Structurally the send-back callout's twin (same head/body/foot rhythm and
+   3px accent rail) but on the success family, so a card asking "did you finish
+   this?" never reads as the amber "changes requested". The title strikes
+   through to say the work looks done WITHOUT the card claiming it is. */
+.krowe-card.likely-done .krowe-card-title {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  color: var(--faint-foreground);
+}
+.krowe-card-shipped {
+  margin-top: 12px; position: relative;
+  background: var(--success-soft);
+  border: 1px solid color-mix(in srgb, var(--success) 18%, transparent);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.krowe-card-shipped::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--success);
+}
+.krowe-card-shipped-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px 8px 14px;
+}
+.krowe-card-shipped-head .badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--success) 16%, white);
+  color: var(--success); flex-shrink: 0;
+}
+.krowe-card-shipped-head .h {
+  font-size: 12px; font-weight: 600; letter-spacing: 0.005em;
+  color: var(--success); white-space: nowrap;
+}
+.krowe-card-shipped-head .t {
+  margin-left: auto; font-family: var(--font-mono); font-size: 10.5px;
+  color: color-mix(in srgb, var(--success) 62%, var(--muted-foreground));
+  white-space: nowrap;
+}
+.krowe-card-shipped-body { padding: 0 14px 11px 14px; }
+/* The commit is data, so it reads in mono — deliberately not the serif-italic
+   hero the send-back note uses, which is a person's words. */
+.krowe-card-shipped-commit {
+  display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  text-decoration: none; color: var(--foreground);
+  border-radius: var(--radius-sm);
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+a.krowe-card-shipped-commit:hover { opacity: 0.72; }
+.krowe-card-shipped-commit .sha {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  color: var(--success); flex-shrink: 0;
+}
+.krowe-card-shipped-commit .msg {
+  font-size: 12.5px; line-height: 1.45; color: var(--foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-card-shipped-reason {
+  margin-top: 6px; font-size: 11.5px; line-height: 1.45;
+  color: var(--muted-foreground);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.krowe-card-shipped-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  margin-top: 10px; padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--success) 14%, transparent);
+}
+.krowe-card-shipped-foot button {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px; cursor: pointer; white-space: nowrap;
+  font-family: var(--font-sans); font-size: 11.5px; font-weight: 500;
+  border-radius: var(--radius-full);
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-card-shipped-foot .deny {
+  border: 1px solid color-mix(in srgb, var(--success) 22%, transparent);
+  background: transparent; color: var(--muted-foreground);
+}
+.krowe-card-shipped-foot .deny:hover {
+  background: color-mix(in srgb, var(--success) 8%, transparent);
+  color: var(--foreground);
+}
+.krowe-card-shipped-foot .confirm {
+  border: 1px solid var(--success);
+  background: var(--success); color: white;
+}
+.krowe-card-shipped-foot .confirm:hover {
+  background: color-mix(in srgb, var(--success) 88%, black);
+  border-color: color-mix(in srgb, var(--success) 88%, black);
+}
 .krowe-card-meta {
   margin-top: 11px;
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -2455,6 +2599,294 @@ button.krowe-desc-inline-text:hover {
   color: color-mix(in srgb, var(--warning) 60%, var(--muted-foreground));
 }
 
+/* ── Comment thread (task-comments.tsx) ───────────────────────────────
+   Two surfaces off one component: the Comments tab (.krowe-cm — scrolling
+   thread + pinned composer) and the Overview preview (.krowe-cm-preview —
+   the newest row plus a way in). Rows are shared, so the preview reads as
+   a slice of the thread rather than a second design. Tokens only. */
+.krowe-cm {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.krowe-cm-scroll {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding-right: 4px;
+}
+.krowe-cm-scroll::-webkit-scrollbar { width: 8px; }
+.krowe-cm-scroll::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 999px;
+  border: 2px solid var(--background);
+}
+.krowe-cm-empty {
+  font-size: 13px; color: var(--muted-foreground); padding: 16px 0;
+}
+
+/* Empty thread */
+.krowe-cm-blank {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; padding: 40px 24px; text-align: center;
+}
+.krowe-cm-blank svg { color: var(--faint-foreground); margin-bottom: 2px; }
+.krowe-cm-blank .head {
+  font-family: var(--font-serif); font-style: italic;
+  font-size: 17px; color: var(--foreground);
+}
+.krowe-cm-blank .sub {
+  font-size: 12.5px; line-height: 1.55; color: var(--muted-foreground);
+  max-width: 34ch;
+}
+
+/* Rows */
+.krowe-cm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.krowe-cm-row {
+  display: flex; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cm-row:hover { background: var(--surface-subtle); }
+.krowe-cm-row.pending { opacity: 0.55; }
+.krowe-cm-row.compact:hover { background: none; }
+.krowe-cm-row.compact { padding: 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .krowe-cm-list > .krowe-cm-row:last-child,
+  .krowe-cm-list > .krowe-cm-change:last-child {
+    animation: krowe-cm-in 220ms var(--ease-out-smooth);
+  }
+}
+@keyframes krowe-cm-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.krowe-cm-avatar {
+  width: 26px; height: 26px; border-radius: var(--radius-full); flex-shrink: 0;
+  background: var(--builder-soft); color: var(--builder-text);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; margin-top: 1px;
+}
+.krowe-cm-avatar.operator { background: var(--operator-soft); color: var(--operator-text); }
+
+.krowe-cm-body { min-width: 0; flex: 1; }
+.krowe-cm-head {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 12.5px; line-height: 1.5;
+}
+.krowe-cm-head .who { font-weight: 600; color: var(--foreground); white-space: nowrap; }
+.krowe-cm-head .when {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--faint-foreground); white-space: nowrap;
+}
+.krowe-cm-head .edited {
+  font-size: 10.5px; color: var(--faint-foreground); font-style: italic;
+}
+.krowe-cm-text {
+  margin-top: 3px;
+  font-size: 13.5px; line-height: 1.6; color: var(--foreground);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.krowe-cm-removed {
+  margin-top: 3px;
+  font-family: var(--font-serif); font-style: italic;
+  font-size: 13px; color: var(--faint-foreground);
+}
+
+/* Author-only row actions — revealed on hover, always present for keyboard */
+.krowe-cm-rowactions {
+  display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
+  opacity: 0; transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cm-row:hover .krowe-cm-rowactions,
+.krowe-cm-rowactions:focus-within { opacity: 1; }
+.krowe-cm-rowactions button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: var(--radius-full);
+  background: none; border: 1px solid transparent;
+  color: var(--faint-foreground); cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cm-rowactions button:hover { background: var(--surface-sunken); color: var(--foreground); }
+.krowe-cm-rowactions button.danger:hover { color: var(--danger); }
+
+.krowe-cm-editbox { margin-top: 6px; display: flex; flex-direction: column; gap: 8px; }
+.krowe-cm-editbox textarea {
+  width: 100%; resize: vertical;
+  padding: 9px 11px; border-radius: var(--radius-md);
+  border: 1px solid var(--border); background: white; color: var(--foreground);
+  font-family: inherit; font-size: 13.5px; line-height: 1.55;
+}
+.krowe-cm-editactions { display: flex; align-items: center; gap: 8px; }
+.krowe-cm-ghost {
+  padding: 6px 12px; border-radius: var(--radius-full);
+  background: none; border: none; cursor: pointer;
+  font-size: 12.5px; font-weight: 500; color: var(--muted-foreground);
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cm-ghost:hover { color: var(--foreground); }
+
+/* Changes-requested card — the amber sibling of .krowe-changes-block, sized
+   to sit inside the thread rather than above it */
+.krowe-cm-change {
+  background: color-mix(in srgb, var(--warning) 5%, white);
+  border: 1px solid color-mix(in srgb, var(--warning) 22%, var(--border));
+  border-radius: var(--radius-md);
+  padding: 11px 13px; margin: 4px 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.krowe-cm-change-head {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  font-size: 12.5px; color: var(--warning);
+}
+.krowe-cm-change-head strong { font-weight: 650; }
+.krowe-cm-change-head .when {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: color-mix(in srgb, var(--warning) 65%, var(--muted-foreground));
+  margin-left: auto;
+}
+.krowe-cm-change-note {
+  font-size: 13px; line-height: 1.55;
+  color: color-mix(in srgb, var(--warning) 80%, var(--foreground));
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* Approval-loop system line — a rule, not a card */
+.krowe-cm-sys {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0;
+}
+.krowe-cm-sys .rule { flex: 1; height: 1px; background: var(--border); }
+.krowe-cm-sys .txt {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--muted-foreground); white-space: nowrap;
+}
+.krowe-cm-sys .txt strong { font-weight: 600; color: var(--foreground); }
+.krowe-cm-sys .txt svg { color: var(--faint-foreground); }
+.krowe-cm-sys.compact { padding: 0; }
+
+/* Composer */
+.krowe-cm-composer {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: white; padding: 10px 12px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth);
+}
+/* Focus is carried by a quiet border step, not the orange halo — the composer
+   is a container, and the ring read as an alarm on an idle text box. */
+.krowe-cm-composer:focus-within {
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+.krowe-cm-composer.flagged { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+.krowe-cm-composer.flagged:focus-within {
+  border-color: var(--warning);
+  box-shadow: none;
+}
+.krowe-cm-composer textarea {
+  width: 100%; resize: none; border: none; outline: none; background: none;
+  font-family: inherit; font-size: 13.5px; line-height: 1.6;
+  color: var(--foreground); min-height: 24px; max-height: 200px;
+}
+/* The borderless textarea would otherwise stack the global focus halo inside
+   the composer's own border. */
+.krowe-cm-composer textarea:focus-visible {
+  box-shadow: none; border-color: transparent;
+}
+.krowe-cm-composer textarea::placeholder { color: var(--faint-foreground); }
+.krowe-cm-composer-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.krowe-cm-hint {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--faint-foreground);
+}
+.krowe-cm-flag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white;
+  font-size: 11.5px; font-weight: 500; color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cm-flag:hover { border-color: var(--border-strong); color: var(--foreground); }
+.krowe-cm-flag.on {
+  background: color-mix(in srgb, var(--warning) 10%, white);
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  color: var(--warning);
+}
+.krowe-cm-flag-hint {
+  font-size: 11.5px; line-height: 1.5;
+  color: color-mix(in srgb, var(--warning) 65%, var(--muted-foreground));
+}
+/* Secondary variant, deliberately: the sheet footer's lifecycle action is the
+   view's single primary, and two orange pills would compete for it. */
+.krowe-cm-send {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px; border-radius: var(--radius-full);
+  background: var(--surface-subtle); color: var(--foreground);
+  border: 1px solid var(--border); cursor: pointer;
+  font-size: 12.5px; font-weight: 550;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cm-send:hover:not(:disabled) {
+  background: var(--surface-sunken); border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.krowe-cm-send:active:not(:disabled) { transform: translateY(0) scale(0.98); }
+.krowe-cm-send:disabled { opacity: 0.45; cursor: default; }
+/* With the change-request flag on, the send inherits the amber the composer
+   and the toggle already carry, so the two read as one action. */
+.krowe-cm-composer.flagged .krowe-cm-send {
+  background: color-mix(in srgb, var(--warning) 10%, white);
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  color: var(--warning);
+}
+.krowe-cm-composer.flagged .krowe-cm-send:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 16%, white);
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+}
+
+/* Overview preview — newest row + a way into the tab */
+.krowe-cm-preview {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.krowe-cm-preview.loading,
+.krowe-cm-preview-blank {
+  font-size: 13px; color: var(--faint-foreground);
+  font-family: var(--font-serif); font-style: italic;
+}
+.krowe-cm-open {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  width: 100%; padding: 8px 14px; border-radius: var(--radius-full);
+  background: white; border: 1px solid var(--border);
+  font-size: 12.5px; font-weight: 500; color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cm-open:hover {
+  color: var(--foreground); border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.krowe-cm-open:active { transform: translateY(0) scale(0.99); }
+
+/* Tab count badge — sized off .krowe-audit-filter .fc so the two read alike */
+.krowe-cm-count {
+  display: inline-block; margin-left: 6px;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--muted-foreground); opacity: 0.7;
+  vertical-align: middle;
+}
+.krowe-task-tab.active .krowe-cm-count { color: var(--primary); opacity: 1; }
+
 /* ── Regenerate section (task-regenerate.tsx) ─────────────────────────
    Rewrite a task + reconcile its subtasks from a change note, previewed
    before it's applied. Ember/sparkles motif; tokens only. */
@@ -3248,6 +3680,57 @@ button.krowe-desc-inline-text:hover {
   width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px;
   border-radius: 5px; background: var(--success); color: white;
   display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* ── Multi-select on task cards ── */
+/* Checkbox is hidden until the card is hovered, then pinned open once any card
+   in the board is selected (.selecting) — same reveal idiom as card actions. */
+.krowe-card-select {
+  width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; padding: 0;
+  border: 1.5px solid var(--border-strong); border-radius: 6px; background: white;
+  color: white; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth),
+    background var(--duration-fast) var(--ease-out-smooth),
+    border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-card:hover .krowe-card-select,
+.krowe-card.selecting .krowe-card-select { opacity: 1; }
+.krowe-card-select:hover { border-color: var(--primary); }
+.krowe-card-select.on { opacity: 1; background: var(--primary); border-color: var(--primary); }
+.krowe-card.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), var(--shadow-2);
+}
+
+/* ── Bulk-select action bar (multi-select delete) ── */
+.krowe-bulk-bar {
+  position: sticky; bottom: 18px; z-index: 20;
+  margin: 18px auto 4px; width: fit-content; max-width: 100%;
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 8px 7px 16px; border-radius: var(--radius-full);
+  background: var(--foreground); color: white; box-shadow: var(--shadow-3);
+  animation: fade-up-in var(--duration-normal) var(--ease-out-smooth) both;
+}
+.krowe-bulk-count { font-size: 13px; font-weight: 600; margin-right: 4px; }
+.krowe-bulk-sep { width: 1px; height: 18px; background: color-mix(in srgb, white 22%, transparent); }
+.krowe-bulk-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 500;
+  color: color-mix(in srgb, white 78%, transparent);
+  background: none; border: none; padding: 6px 11px; border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+    background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-bulk-btn:hover { color: white; background: color-mix(in srgb, white 12%, transparent); }
+.krowe-bulk-btn.danger { color: white; background: var(--danger); }
+.krowe-bulk-btn.danger:hover { background: color-mix(in srgb, var(--danger) 85%, black); }
+.krowe-bulk-btn.icon { padding: 6px; }
+.krowe-bulk-btn svg { flex-shrink: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .krowe-bulk-bar { animation: none; }
 }
 
 /* Pin marker — a client-flagged task lifted to the top of its column (0077). */
@@ -4054,81 +4537,542 @@ button.krowe-desc-inline-text:hover {
 @media (max-width: 720px) {
   .krowe-pipe-wrap { display: none; }
 }
-
 /* ──────────────────────────────────────────────────────────────────────────
-   Profile Setup — "Smart Scroll" redesign (direction C) + side live preview.
-   All scoped under .ppsetup so the prototype's generic class names
-   (.ss-*, .medallion, .strength, .saver, …) can't collide with the rest of
-   the app — same convention as .prdnew / .docov above. Tokens are shared, so
-   these are ported verbatim from the design bundle's krowe.css + Smart Scroll.
+   Profile Setup (/b/profile) — ported from the Figma "Profile — Business Card"
+   file (frames "Profile, Empty" 1:2 and "Profile, Filled" 215:485). One screen
+   in two data states, so every block below has to read at 0% and at 88%.
+
+   Everything stays scoped under .ppsetup so the design's generic class names
+   (.ss-*, .medallion, …) can't collide with the rest of the app — same
+   convention as .prdnew / .docov above. The .tool-* and .ctm-* blocks that
+   follow are intentionally unscoped: they render in a Radix portal.
+
+   Two deviations from the Figma, both deliberate:
+   • Buttons use --radius-full, not the frame's 24px. DESIGN.md: "Never use a
+     rectangular button." At these heights the two are visually identical.
+   • The active tab takes --foreground for its label as well as its underline.
+     The frame tints active and inactive identically, leaving the underline as
+     the only state signal — one cue is below the accessibility bar.
    ────────────────────────────────────────────────────────────────────────── */
-.ppsetup { flex: 1; min-width: 0; background:
-  radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb, var(--primary) 5%, transparent), transparent 70%),
-  var(--background); }
+.ppsetup { flex: 1; min-width: 0; background: var(--background); }
 
-/* sticky header: strength + autosave + chip nav. Window is the scroll
-   container (the builder topbar is not sticky), so top:0 is correct. */
-.ppsetup .ss-stick { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--background) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
-.ppsetup .ss-stick .inner { max-width: 880px; margin: 0 auto; padding: 14px 36px 0; }
-.ppsetup .ss-top { display: flex; align-items: center; gap: 16px; }
-.ppsetup .ss-top .strwrap { flex: 1; min-width: 0; }
-.ppsetup .ss-top .strwrap .lab { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
-.ppsetup .ss-top .strwrap .lab b { font-size: 13px; font-weight: 600; }
-.ppsetup .ss-top .strwrap .lab .pct { font-family: var(--font-mono); font-size: 12px; color: var(--primary); font-weight: 600; }
-.ppsetup .ss-top .strwrap .lab .s { font-size: 12px; color: var(--muted-foreground); }
+/* ── Page header: ring + completion meter + autosave + publish ──
+   Scrolls away with the page — the builder topbar is the one pinned surface
+   in the shell. So --topbar-height, not this block's height, is what a
+   scrolled-to section has to clear: it feeds .ss-sec's scroll-margin-top and
+   the scroll-spy rootMargin in profile-setup.tsx. Change one, change both. */
+.ppsetup { --ss-measure: 880px; }
+.ppsetup .ss-head {
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+}
+.ppsetup .ss-head .inner {
+  max-width: var(--ss-measure); margin: 0 auto;
+  padding: var(--spacing-xl) var(--spacing-2xl) 0;
+}
+.ppsetup .ss-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--spacing-2xl);
+}
 
-.ppsetup .ss-chips { display: flex; gap: 6px; padding: 12px 0; overflow-x: auto; }
-.ppsetup .ss-chips::-webkit-scrollbar { height: 0; }
-.ppsetup .ss-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 13px; border-radius: var(--radius-full); border: 1px solid var(--border); background: white; color: var(--muted-foreground); font-size: 12.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: all 140ms var(--ease-out-smooth); }
-.ppsetup .ss-chip .tk { width: 6px; height: 6px; border-radius: 999px; background: var(--border-strong); }
-.ppsetup .ss-chip .tk.ok { background: var(--success); }
-.ppsetup .ss-chip:hover { border-color: var(--border-strong); color: var(--foreground); }
-.ppsetup .ss-chip.on { background: var(--foreground); border-color: var(--foreground); color: var(--background); }
-.ppsetup .ss-chip.on .tk.ok { background: #fff; }
+/* completion ring */
+.ppsetup .pp-ring { position: relative; width: 56px; height: 56px; flex-shrink: 0; }
+.ppsetup .pp-ring svg { transform: rotate(-90deg); display: block; }
+.ppsetup .pp-ring .pct {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: var(--foreground);
+}
 
-.ppsetup .ss-page { max-width: 880px; margin: 0 auto; padding: 8px 36px 100px; }
-.ppsetup .ss-hero { padding: 24px 4px 18px; }
-.ppsetup .ss-hero h1 { font-family: var(--font-serif); font-size: 44px; line-height: 1; letter-spacing: -0.015em; margin: 0; display: flex; align-items: center; gap: 14px; color: var(--foreground); }
-.ppsetup .ss-hero .q { margin-top: 12px; font-family: var(--font-serif); font-style: italic; font-size: 17px; color: var(--faint-foreground); }
-
-.ppsetup .ss-share { display: flex; align-items: center; gap: 12px; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 11px 12px 11px 14px; margin-bottom: 26px; }
-.ppsetup .ss-share .live-dot { width: 7px; height: 7px; border-radius: 999px; flex-shrink: 0; background: var(--success); box-shadow: 0 0 0 3px var(--success-soft); }
-.ppsetup .ss-share .live-dot.off { background: var(--faint-foreground); box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint-foreground) 18%, transparent); }
-.ppsetup .ss-share .url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; color: var(--faint-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.ppsetup .ss-sec { scroll-margin-top: 124px; margin-bottom: 26px; }
-.ppsetup .ss-sec > .sh { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
-.ppsetup .ss-sec > .sh .medallion { width: 44px; height: 44px; border-radius: 13px; }
-.ppsetup .ss-sec > .sh .tt { flex: 1; min-width: 0; }
-.ppsetup .ss-sec > .sh .tt h2 { font-family: var(--font-serif); font-size: 27px; line-height: 1; letter-spacing: -0.01em; margin: 0; color: var(--foreground); }
-.ppsetup .ss-sec > .sh .tt p { margin: 5px 0 0; font-size: 12.5px; color: var(--faint-foreground); }
-.ppsetup .ss-sec > .sh .sh-actions { flex-shrink: 0; }
-.ppsetup .ss-card { background: white; border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-1); padding: 20px; }
-.ppsetup .ss-sec.accent .ss-card { background: color-mix(in srgb, var(--primary-soft) 30%, white); border-color: color-mix(in srgb, var(--primary) 16%, white); }
-
-/* medallion (section glyph) */
-.ppsetup .medallion { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-sunken); border: 1px solid var(--border); color: var(--muted-foreground); }
-.ppsetup .medallion svg { width: 19px; height: 19px; }
-.ppsetup .medallion.clay { background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 22%, white); color: var(--primary); }
-
-/* strength meter (ring + bar) */
-.ppsetup .strength { display: flex; align-items: center; gap: 16px; }
-.ppsetup .strength .pp-ring { position: relative; width: 56px; height: 56px; flex-shrink: 0; }
-.ppsetup .strength .pp-ring svg { transform: rotate(-90deg); }
-.ppsetup .strength .pp-ring .pct { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--foreground); }
-.ppsetup .strength-bar { height: 7px; border-radius: 999px; background: var(--surface-sunken); overflow: hidden; position: relative; }
-.ppsetup .strength-bar > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, var(--primary), var(--primary-accent)); transition: width 600ms var(--ease-out-smooth); }
+/* completion meter */
+.ppsetup .ss-meter {
+  flex: 1; min-width: 0; max-width: 434px;
+  display: flex; flex-direction: column; gap: var(--spacing-md);
+}
+.ppsetup .ss-status {
+  display: flex; align-items: center; gap: var(--spacing-md);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+.ppsetup .ss-status .dot {
+  width: 9px; height: 9px; border-radius: var(--radius-full); flex-shrink: 0;
+  background: var(--faint-foreground);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint-foreground) 18%, transparent);
+}
+.ppsetup .ss-status.live .dot {
+  background: var(--success); box-shadow: 0 0 0 3px var(--success-soft);
+}
+.ppsetup .ss-meter-lab {
+  display: flex; align-items: center; gap: var(--spacing-md);
+  font-size: 12px; letter-spacing: 0.02em; white-space: nowrap;
+}
+.ppsetup .ss-meter-lab b { font-weight: 600; color: var(--foreground); }
+.ppsetup .ss-meter-lab span { color: var(--muted-foreground); }
+.ppsetup .ss-rule {
+  width: 1px; height: 16px; flex-shrink: 0; background: var(--border);
+}
+.ppsetup .ss-bar {
+  height: 8px; border-radius: var(--radius-full);
+  background: var(--surface-sunken); overflow: hidden; position: relative;
+}
+.ppsetup .ss-bar > span {
+  position: absolute; inset: 0 auto 0 0; border-radius: var(--radius-full);
+  background: var(--primary);
+  transition: width var(--duration-slow) var(--ease-out-smooth);
+}
 
 /* autosave indicator */
-.ppsetup .saver { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; white-space: nowrap; color: var(--faint-foreground); transition: color 200ms var(--ease-out-smooth); }
-.ppsetup .saver svg { width: 13px; height: 13px; }
-.ppsetup .saver[data-state="saving"] { color: var(--muted-foreground); }
+.ppsetup .saver {
+  display: inline-flex; align-items: center; gap: var(--spacing-md);
+  flex-shrink: 0; font-size: 12px; font-weight: 500; white-space: nowrap;
+  letter-spacing: 0.02em; color: var(--muted-foreground);
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .saver svg { width: 16px; height: 16px; }
 .ppsetup .saver[data-state="saving"] svg { animation: pp-spin 0.9s linear infinite; }
 .ppsetup .saver[data-state="saved"] { color: var(--success); }
 @keyframes pp-spin { to { transform: rotate(360deg); } }
 
+.ppsetup .ss-headacts {
+  display: flex; align-items: center; gap: var(--spacing-lg); flex-shrink: 0;
+}
+
+/* ── Section tabs (scroll-spy) ── */
+.ppsetup .ss-tabs {
+  display: flex; gap: 0; margin-top: var(--spacing-2xl);
+  overflow-x: auto; scrollbar-width: none;
+}
+.ppsetup .ss-tabs::-webkit-scrollbar { height: 0; }
+.ppsetup .ss-tab {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--spacing-md); padding: var(--spacing-md) var(--spacing-lg);
+  border: 0; border-bottom: 2px solid transparent; background: none;
+  font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
+  color: var(--muted-foreground); white-space: nowrap; cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .ss-tab svg { width: 16px; height: 16px; }
+.ppsetup .ss-tab:hover { color: var(--foreground); }
+.ppsetup .ss-tab.on { color: var(--foreground); border-bottom-color: var(--foreground); }
+/* Completion tick — the "done" signal the old chip nav carried. */
+.ppsetup .ss-tab .tk {
+  width: 6px; height: 6px; border-radius: var(--radius-full);
+  background: var(--success); flex-shrink: 0;
+}
+
+/* ── Page body ── */
+.ppsetup .ss-page {
+  max-width: var(--ss-measure); margin: 0 auto;
+  padding: var(--spacing-4xl) var(--spacing-2xl) var(--spacing-6xl);
+  display: flex; flex-direction: column; gap: var(--spacing-4xl);
+}
+.ppsetup .ss-hero h1 {
+  font-family: var(--font-serif); font-size: 56px; line-height: 1.15;
+  letter-spacing: -1.12px; margin: 0; color: var(--foreground);
+}
+.ppsetup .ss-hero p {
+  margin: 0; font-size: 12px; letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+.ppsetup .req { color: var(--primary-accent); }
+
+/* ── Section ── */
+.ppsetup .ss-sec {
+  scroll-margin-top: calc(var(--topbar-height) + var(--spacing-xl));
+  display: flex; flex-direction: column; gap: var(--spacing-2xl);
+}
+.ppsetup .ss-sec > .sh {
+  display: flex; align-items: center; gap: var(--spacing-xl);
+}
+.ppsetup .ss-sec > .sh .tt { flex: 1; min-width: 0; }
+.ppsetup .ss-sec > .sh .tt h2 {
+  font-family: var(--font-serif); font-size: 28px; line-height: 1.15;
+  letter-spacing: -0.56px; margin: 0; color: var(--foreground);
+}
+.ppsetup .ss-sec > .sh .tt p {
+  margin: var(--spacing-sm) 0 0; font-size: 12px; letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+.ppsetup .ss-sec > .sh .sh-actions { flex-shrink: 0; }
+
+/* section glyph */
+.ppsetup .medallion {
+  width: 48px; height: 48px; border-radius: var(--radius-md); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+.ppsetup .medallion svg { width: 20px; height: 20px; }
+
+/* The card. Outer radius 24px with 24px padding, so per DESIGN.md's nesting
+   rule inner elements are free to use their own standard radii. */
+.ppsetup .ss-card {
+  background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-xl); box-shadow: var(--shadow-1);
+  padding: var(--spacing-2xl);
+  display: flex; flex-direction: column; gap: var(--spacing-2xl);
+}
+.ppsetup .ss-divider { height: 1px; background: var(--border); }
+
+/* ── Form fields ── */
+.ppsetup .ss-field { display: flex; flex-direction: column; gap: var(--spacing-md); }
+.ppsetup .ss-field > label,
+.ppsetup .ss-label {
+  font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+}
+.ppsetup .ss-hint {
+  font-size: 12px; letter-spacing: 0.02em; color: var(--faint-foreground);
+}
+.ppsetup .ss-count {
+  align-self: stretch; text-align: right; padding-right: var(--spacing-md);
+  margin-top: var(--spacing-xs);
+  font-size: 12px; letter-spacing: 0.02em; color: var(--faint-foreground);
+}
+.ppsetup .ss-count.over { color: var(--danger); }
+.ppsetup .ss-row {
+  display: flex; gap: var(--spacing-2xl); align-items: flex-start;
+}
+.ppsetup .ss-row > * { flex: 1; min-width: 0; }
+
+.ppsetup .ss-input,
+.ppsetup textarea.ss-input {
+  width: 100%; display: block;
+  background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-1);
+  padding: var(--spacing-md) var(--spacing-lg);
+  font: inherit; font-size: 14px; line-height: 1.6; color: var(--foreground);
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup textarea.ss-input { resize: vertical; min-height: 104px; }
+.ppsetup .ss-input::placeholder { color: var(--faint-foreground); }
+.ppsetup .ss-input:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+
+/* Prefixed link input: fixed origin + the part the builder types. */
+.ppsetup .ss-prefix {
+  display: flex; align-items: stretch; overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .ss-prefix:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+.ppsetup .ss-prefix .fix {
+  display: flex; align-items: center; flex-shrink: 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--surface-subtle); border-right: 1px solid var(--border);
+  font-size: 14px; line-height: 1.6; color: var(--foreground);
+  white-space: nowrap; user-select: none;
+}
+.ppsetup .ss-prefix input {
+  flex: 1; min-width: 0; border: 0; background: white;
+  padding: var(--spacing-md) var(--spacing-lg);
+  font: inherit; font-size: 14px; line-height: 1.6; color: var(--foreground);
+}
+.ppsetup .ss-prefix input:focus { outline: none; }
+.ppsetup .ss-prefix input::placeholder { color: var(--faint-foreground); }
+
+/* ── Chips ── */
+.ppsetup .ss-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 1px solid transparent; border-radius: var(--radius-full);
+  background: none; font-size: 12px; letter-spacing: 0.02em;
+  color: var(--muted-foreground); white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .ss-chip svg { width: 12px; height: 12px; flex-shrink: 0; }
+/* a tag the builder has chosen */
+.ppsetup .ss-chip.on { background: var(--info-soft); color: var(--info); }
+.ppsetup .ss-chip.on button {
+  display: inline-flex; border: 0; background: none; padding: 0;
+  color: inherit; opacity: 0.6; cursor: pointer;
+}
+.ppsetup .ss-chip.on button:hover { opacity: 1; }
+/* an offered tag: dashed until picked */
+.ppsetup button.ss-chip.suggest {
+  border-color: var(--border-strong); border-style: dashed; cursor: pointer;
+}
+.ppsetup button.ss-chip.suggest:hover {
+  border-color: var(--primary); color: var(--primary);
+  border-style: solid; background: var(--primary-softer);
+}
+/* an offered tag the resume backs up */
+.ppsetup button.ss-chip.fromresume {
+  background: var(--success-tint); color: var(--success); cursor: pointer;
+}
+.ppsetup button.ss-chip.fromresume:hover {
+  background: color-mix(in srgb, var(--success-tint) 70%, var(--success));
+  color: white;
+}
+/* neutral metadata (a project's stack) */
+.ppsetup .ss-chip.tech { background: var(--border-soft); }
+/* the GitHub verification mark */
+.ppsetup .ss-chip.verified {
+  background: var(--success-tint); color: var(--success); font-weight: 600;
+}
+.ppsetup .ss-chip.verified svg { width: 16px; height: 16px; }
+
+.ppsetup .ss-chiprow {
+  display: flex; flex-wrap: wrap; gap: var(--spacing-md); align-items: flex-start;
+}
+
+/* Resume-backed recommendations. Reads as an aside, not a form field. */
+.ppsetup .ss-recommend {
+  display: flex; flex-direction: column; gap: var(--spacing-lg);
+  padding: var(--spacing-2xl); border-radius: var(--radius-md);
+  background: var(--success-surface); border: 1px dashed var(--success-tint);
+}
+.ppsetup .ss-recommend > .lab {
+  font-size: 12px; font-weight: 500; color: var(--muted-foreground);
+}
+
+/* ── Empty states ── */
+.ppsetup .ss-empty {
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-2xl); border-radius: var(--radius-md);
+  border: 1px dashed var(--border-strong); background: white;
+  font-size: 14px; line-height: 1.6; color: var(--muted-foreground);
+}
+
+/* ── Item cards (project / experience / education) ── */
+.ppsetup .ss-items {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--spacing-lg);
+}
+.ppsetup .ss-item {
+  position: relative; display: flex; gap: var(--spacing-xl);
+  padding: var(--spacing-2xl); padding-right: 56px;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: white;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .ss-item:hover { border-color: var(--border-strong); }
+/* Withheld from the public page — dimmed, never removed from the editor. */
+.ppsetup .ss-item.hidden-item { opacity: 0.55; }
+.ppsetup .ss-item .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--spacing-md); }
+.ppsetup .ss-item .nm {
+  font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--foreground);
+}
+.ppsetup .ss-item .titlerow {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-lg);
+}
+.ppsetup .ss-item .meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-md);
+  font-size: 12px; letter-spacing: 0.02em; color: var(--muted-foreground);
+}
+.ppsetup .ss-item .desc {
+  font-size: 14px; line-height: 1.6; color: var(--muted-foreground);
+  margin: 0; overflow-wrap: anywhere;
+}
+.ppsetup .ss-item .livelink {
+  font-size: 12px; letter-spacing: 0.02em; color: var(--muted-foreground);
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.ppsetup .ss-item .livelink:hover { color: var(--primary); }
+
+/* initials tile — the S1 / R1 marker in the Figma cards */
+.ppsetup .ss-initials {
+  width: 48px; height: 48px; flex-shrink: 0; border-radius: var(--radius-md);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: var(--muted-foreground); text-transform: uppercase;
+}
+/* Education cards put the school's crest in the tile instead of the mark. The
+   row is draggable, so the image must not start a native image-drag of its own;
+   a logo that fails to load degrades to the bare mark, not a nested tile. */
+.ppsetup .ss-initials .brand-logo { pointer-events: none; }
+.ppsetup .ss-initials .brand-logo--fallback { background: none; border: 0; }
+
+/* card controls */
+.ppsetup .ss-cardacts {
+  position: absolute; top: var(--spacing-2xl); right: var(--spacing-2xl);
+  display: flex; align-items: center; gap: var(--spacing-md);
+}
+.ppsetup .ss-cardact {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; border: 0; background: none;
+  color: var(--muted-foreground); cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .ss-cardact svg { width: 16px; height: 16px; }
+.ppsetup .ss-cardact:hover { color: var(--foreground); }
+.ppsetup .ss-cardact.danger:hover { color: var(--danger); }
+.ppsetup .ss-cardact:disabled { opacity: 0.4; cursor: default; }
+/* Centred on the card, but floored below the action row: an education card
+   carries no description, and at that height a true 50% puts the grip flush
+   against the trash icon. */
+.ppsetup .ss-cardgrip {
+  position: absolute; right: var(--spacing-2xl);
+  top: max(calc(50% - 8px), calc(var(--spacing-2xl) + 16px + var(--spacing-lg)));
+  display: inline-flex; color: var(--faint-foreground);
+  cursor: grab; opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .ss-item:hover .ss-cardgrip { opacity: 1; }
+.ppsetup .ss-cardgrip:active { cursor: grabbing; }
+.ppsetup .ss-cardgrip svg { width: 16px; height: 16px; }
+.ppsetup .ss-droplane {
+  height: 2px; border-radius: var(--radius-full); background: var(--primary);
+  list-style: none;
+}
+
+/* ── GitHub connection strip (inside the Projects card) ── */
+.ppsetup .ss-ghrow {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: var(--spacing-lg);
+  font-size: 14px; color: var(--muted-foreground);
+}
+.ppsetup .ss-ghrow .who { display: flex; align-items: center; gap: var(--spacing-md); }
+.ppsetup .ss-ghrow .who b { color: var(--foreground); font-weight: 600; }
+.ppsetup .ss-ghrow .acts { display: flex; align-items: center; gap: var(--spacing-md); }
+
+/* ── Avatar + resume rows in Basics ── */
+.ppsetup .ss-mediarow {
+  display: flex; align-items: center; gap: var(--spacing-xl);
+}
+.ppsetup .ss-avatar {
+  width: 48px; height: 48px; flex-shrink: 0; border-radius: var(--radius-full);
+  object-fit: cover; border: 1px solid var(--border);
+  background: var(--surface-sunken);
+}
+.ppsetup span.ss-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted-foreground);
+}
+.ppsetup .ss-filerow {
+  display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: var(--spacing-lg);
+}
+.ppsetup .ss-filerow .acts { display: flex; align-items: center; gap: var(--spacing-md); }
+.ppsetup .ss-file {
+  display: inline-flex; align-items: center; gap: var(--spacing-md);
+  font-size: 14px; line-height: 1.6; color: var(--faint-foreground);
+  min-width: 0;
+}
+.ppsetup .ss-file svg { width: 16px; height: 16px; flex-shrink: 0; }
+.ppsetup .ss-file span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Buttons ── */
+.ppsetup .ss-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--spacing-md); flex-shrink: 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: white; font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
+  color: var(--foreground); white-space: nowrap; cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-instant) var(--ease-out-smooth);
+}
+.ppsetup .ss-btn svg { width: 16px; height: 16px; }
+.ppsetup .ss-btn:hover { border-color: var(--border-strong); background: var(--surface-subtle); }
+.ppsetup .ss-btn:active { transform: scale(0.97); }
+.ppsetup .ss-btn:focus-visible {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+.ppsetup .ss-btn:disabled { opacity: 0.4; cursor: default; transform: none; }
+.ppsetup .ss-btn.icon { padding: var(--spacing-md); }
+.ppsetup .ss-btn.primary {
+  background: var(--primary); border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.ppsetup .ss-btn.primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+.ppsetup .ss-btn.danger:hover {
+  color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+  background: var(--danger-soft);
+}
+
+/* ── Publish split button ── */
+.ppsetup .ss-pub { position: relative; }
+.ppsetup .ss-pubmenu {
+  position: absolute; top: calc(100% + var(--spacing-md)); right: 0; z-index: 40;
+  min-width: 280px; padding: var(--spacing-md);
+  background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-3);
+  display: flex; flex-direction: column; gap: var(--spacing-xs);
+  animation: pp-pop var(--duration-fast) var(--ease-out-smooth);
+}
+@keyframes pp-pop { from { opacity: 0; transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .ppsetup .ss-pubmenu { animation: none; }
+}
+.ppsetup .ss-pubhead {
+  padding: var(--spacing-md) var(--spacing-lg) var(--spacing-lg);
+  border-bottom: 1px solid var(--border); margin-bottom: var(--spacing-xs);
+  display: flex; flex-direction: column; gap: var(--spacing-sm);
+}
+.ppsetup .ss-puburl {
+  font-family: var(--font-mono); font-size: 11px; color: var(--faint-foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ppsetup .ss-pubhint { font-size: 11px; color: var(--faint-foreground); }
+.ppsetup .ss-pubitem {
+  display: flex; align-items: center; gap: var(--spacing-lg); width: 100%;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: 0; border-radius: var(--radius-md); background: none;
+  font-size: 13px; font-weight: 500; color: var(--foreground);
+  text-align: left; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.ppsetup .ss-pubitem svg { width: 15px; height: 15px; color: var(--muted-foreground); }
+.ppsetup .ss-pubitem:hover { background: var(--surface-subtle); }
+.ppsetup .ss-pubitem:disabled { opacity: 0.4; cursor: default; background: none; }
+.ppsetup .ss-pubitem.danger { color: var(--danger); }
+.ppsetup .ss-pubitem.danger svg { color: var(--danger); }
+.ppsetup .ss-pubitem.danger:hover { background: var(--danger-soft); }
+
+/* ── Narrow viewports: the header's four-up row can't hold its measure ── */
+@media (max-width: 900px) {
+  .ppsetup .ss-top { flex-wrap: wrap; gap: var(--spacing-lg); }
+  .ppsetup .ss-meter { max-width: none; order: 3; width: 100%; }
+  .ppsetup .ss-headacts { margin-left: auto; }
+  .ppsetup .ss-hero h1 { font-size: 40px; letter-spacing: -0.8px; }
+  .ppsetup .ss-row { flex-direction: column; gap: var(--spacing-xl); }
+  .ppsetup .ss-item { padding-right: var(--spacing-2xl); }
+  .ppsetup .ss-cardacts { position: static; margin-left: auto; align-self: flex-start; }
+  .ppsetup .ss-cardgrip { display: none; }
+}
+
 /* live-preview drawer caption */
 .ppsetup-preview-cap { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint-foreground); }
+
+/* ── Repo language split (language-bar.tsx) ──
+   Unscoped: the same component renders inside .ppsetup, on the public /p/[token]
+   page, and in the in-document builder drawer. */
+.krowe-langbar { display:flex; flex-direction: column; gap: var(--spacing-md); }
+.krowe-langbar .bar {
+  display: flex; height: 8px; width: 100%; overflow: hidden;
+  border-radius: var(--radius-full); background: var(--surface-sunken);
+}
+.krowe-langbar .bar > span { display: block; height: 100%; }
+.krowe-langbar .legend {
+  display: flex; flex-wrap: wrap; gap: var(--spacing-sm) var(--spacing-2xl);
+  font-size: 12px; letter-spacing: 0.02em; color: var(--muted-foreground);
+}
+.krowe-langbar .legend > span {
+  display: inline-flex; align-items: center; gap: var(--spacing-sm);
+}
+.krowe-langbar .legend i {
+  width: 8px; height: 8px; flex-shrink: 0; border-radius: var(--radius-full);
+}
 
 /* ── Live Preview drawer (right-side sheet) ──
    The profile editor's "Live preview" opens this drawer, styled after the Krowe
@@ -4195,18 +5139,26 @@ button.krowe-desc-inline-text:hover {
    picker modal renders in a Radix portal (outside .ppsetup), so these classes
    are intentionally unscoped. Brand logos come from <BrandLogo>, so the
    prototype's flat colored monogram tile (.g) is dropped here. */
-.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-@media (max-width: 540px) { .tool-grid { grid-template-columns: 1fr; } }
+.tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--spacing-2xl); }
+@media (max-width: 640px) { .tool-grid { grid-template-columns: 1fr; } }
 
 /* one tool in the section grid */
-.tool-tile { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px 12px; background: white; }
+.tool-tile { display: flex; align-items: center; gap: var(--spacing-md); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--spacing-md) var(--spacing-lg); background: white; }
+.tool-tile.hidden-item { opacity: 0.55; }
+/* Framed logo: a 40px plate holding the 28px brand mark, so tools with wildly
+   different logo silhouettes still line up on one optical grid. */
+.tool-tile .plate { width: 40px; height: 40px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: var(--radius-md); background: white; }
+.tool-tile .plate .brand-logo { border-radius: var(--radius-sm); overflow: hidden; }
 .tool-tile .info { flex: 1; min-width: 0; }
-.tool-tile .nm { font-size: 13px; font-weight: 600; line-height: 1.25; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-tile .ct { font-size: 10.5px; color: var(--faint-foreground); margin-top: 1px; }
-.tool-rm { width: 26px; height: 26px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); border: 1px solid var(--border); background: white; color: var(--muted-foreground); transition: all 150ms var(--ease-out-smooth); }
-.tool-rm:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); background: var(--danger-soft); }
-.tool-rm svg { width: 13px; height: 13px; }
-.tool-empty { border: 1px dashed var(--border-strong); border-radius: var(--radius-md); padding: 22px 16px; text-align: center; font-size: 13px; color: var(--faint-foreground); }
+.tool-tile .nm { font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-tile .ct { font-size: 12px; letter-spacing: 0.02em; color: var(--muted-foreground); }
+.tool-acts { display: flex; align-items: center; gap: var(--spacing-md); flex-shrink: 0; }
+.tool-rm { width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border: 0; background: none; color: var(--muted-foreground); cursor: pointer; transition: color 150ms var(--ease-out-smooth); }
+.tool-rm:hover { color: var(--danger); }
+.tool-rm.show:hover { color: var(--foreground); }
+.tool-rm:disabled { opacity: 0.4; cursor: default; }
+.tool-rm svg { width: 16px; height: 16px; }
+.tool-empty { border: 1px dashed var(--border-strong); border-radius: var(--radius-md); padding: var(--spacing-2xl); font-size: 14px; line-height: 1.6; color: var(--muted-foreground); background: white; }
 
 /* picker modal (mounted inside a Radix DialogContent shell) */
 .ctm-head, .ctm-cats, .ctm-foot { flex-shrink: 0; }
@@ -5387,3 +6339,291 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-set-empty-title { font-size: 13.5px; font-weight: 600; color: var(--foreground); }
 .krowe-set-empty-body { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.5; max-width: 360px; }
+
+/* ── Repo page (/b/github) — "Josh's Krowe Screens" repo frame ─────────────
+   Rides the standard .krowe-page shell so the canvas, gutters and card
+   treatment match every other builder route; .krowe-repo-* only adds the
+   section rhythm and this page's own content (heatmap, pie, commit slab). */
+
+.krowe-repo-inner {
+  max-width: 1320px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 26px;
+}
+/* The chip row ships its own margin, which would stack with the gap above. */
+.krowe-repo-inner > .krowe-filter-row { margin-bottom: 0; }
+
+/* ── Header bar (sits directly under the topbar, full-bleed) ── */
+.krowe-repo-topline {
+  display: flex; align-items: center; gap: 12px;
+  /* 28px matches .krowe-page's gutter so the title lines up with the cards. */
+  padding: 11px 28px;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.krowe-repo-topline-main {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; gap: 11px;
+}
+.krowe-repo-glyph {
+  flex-shrink: 0; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--foreground);
+}
+.krowe-repo-title {
+  margin: 0; min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 17px; font-weight: 600; line-height: 1.3; letter-spacing: -0.015em;
+  color: var(--foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-repo-topline-actions {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+}
+.krowe-repo-gh {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 8px 13px; border-radius: var(--radius-full);
+  background: #1f2328; color: white;
+  font-size: 13px; font-weight: 500; line-height: 1;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-repo-gh:hover { opacity: 0.86; }
+/* Secondary alongside the GitHub button — same pill, quieter weight. */
+.krowe-repo-settings {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 7px 13px; border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle); color: var(--foreground);
+  font-size: 13px; font-weight: 500; line-height: 1; white-space: nowrap;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-repo-settings:hover { border-color: var(--border-strong); }
+.krowe-repo-settings svg { color: var(--muted-foreground); }
+
+/* ── Section shell ── */
+.krowe-repo-section { display: flex; flex-direction: column; gap: 16px; }
+.krowe-repo-section-head {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--muted-foreground);
+}
+.krowe-repo-section-head svg { flex-shrink: 0; }
+/* Same eyebrow-plus-rule the board columns use, so sections read alike. */
+.krowe-repo-section-title {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.14em; line-height: 1.3;
+  color: var(--muted-foreground);
+}
+.krowe-repo-section-rule {
+  flex: 1; height: 1px;
+  background: linear-gradient(to right, var(--border), transparent);
+}
+
+/* Shared card surface for every panel on this page. */
+.krowe-repo-card {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
+/* ── Overview: Summary / Stakeholders / Function ── */
+.krowe-repo-overview {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+  align-items: start;
+}
+.krowe-repo-overview-card {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 16px;
+}
+.krowe-repo-card-head { display: flex; align-items: center; gap: 8px; }
+.krowe-repo-card-head svg { flex-shrink: 0; color: var(--foreground); }
+.krowe-repo-card-title {
+  margin: 0;
+  font-size: 13.5px; font-weight: 600; line-height: 1.38; letter-spacing: -0.005em;
+  color: var(--foreground);
+}
+.krowe-repo-bullets {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 12.5px; line-height: 1.5; color: var(--foreground);
+}
+.krowe-repo-bullets li { display: flex; gap: 8px; }
+.krowe-repo-bullets li::before {
+  content: "•"; flex-shrink: 0; color: var(--primary);
+}
+
+/* ── Toolkit ── */
+.krowe-repo-toolkit { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+/* max-content lets a column grow rather than clip when a repo's count runs to
+   three or four digits. */
+.krowe-repo-stats {
+  display: grid; grid-template-columns: repeat(2, minmax(150px, max-content)); gap: 8px;
+  flex-shrink: 0;
+}
+.krowe-repo-stat {
+  display: flex; align-items: center; gap: 8px;
+  height: 40px; padding: 0 12px;
+  overflow: hidden;
+}
+.krowe-repo-stat svg { flex-shrink: 0; color: var(--foreground); }
+.krowe-repo-stat-value {
+  font-size: 13.5px; font-weight: 600; color: var(--foreground); line-height: 1;
+}
+.krowe-repo-stat-label {
+  font-size: 11.5px; color: var(--muted-foreground);
+  letter-spacing: 0.005em; line-height: 1.4;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-repo-stat-pair { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+
+.krowe-repo-layers { display: flex; gap: 12px; flex-shrink: 0; }
+.krowe-repo-layer {
+  width: 124px; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.krowe-repo-layer-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.krowe-repo-layer-head span {
+  font-size: 12px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+.krowe-repo-layer-head svg { flex-shrink: 0; color: var(--muted-foreground); }
+.krowe-repo-layer-chips { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.krowe-repo-tech {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 20px; padding: 0 7px; max-width: 100%;
+  border-radius: var(--radius-sm);
+  font-size: 11px; font-weight: 500; line-height: 1;
+  /* --tech is the language/tool's own brand hue, set per chip. */
+  background: color-mix(in srgb, var(--tech) 10%, transparent);
+  color: var(--tech);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+
+.krowe-repo-langs {
+  flex: 1 1 280px; min-width: 240px;
+  display: flex; align-items: center; gap: 18px;
+  padding: 14px 16px;
+}
+.krowe-repo-pie { flex-shrink: 0; display: block; }
+.krowe-repo-legend {
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 12px; line-height: 1.5; color: var(--muted-foreground);
+}
+.krowe-repo-legend li { display: flex; align-items: center; gap: 8px; }
+.krowe-repo-legend .dot {
+  width: 7px; height: 7px; border-radius: var(--radius-full); flex-shrink: 0;
+}
+
+/* ── Updates: activity heatmap ── */
+.krowe-repo-activity { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+.krowe-repo-activity-title .muted { color: var(--muted-foreground); }
+.krowe-repo-activity-body {
+  display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+}
+.krowe-repo-heat { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; }
+.krowe-repo-heat-row { display: flex; align-items: center; gap: 4px; }
+.krowe-repo-heat-cell {
+  width: 14px; height: 14px; border-radius: var(--radius-sm); flex-shrink: 0;
+}
+/* Five-step ramp, empty → busiest, sampled from the design. */
+.krowe-repo-heat-cell[data-level="0"] { background: var(--border); }
+.krowe-repo-heat-cell[data-level="1"] { background: var(--heat-1); }
+.krowe-repo-heat-cell[data-level="2"] { background: var(--heat-2); }
+.krowe-repo-heat-cell[data-level="3"] { background: var(--heat-3); }
+.krowe-repo-heat-cell[data-level="4"] { background: var(--heat-4); }
+.krowe-repo-heat-day {
+  width: 14px; flex-shrink: 0; text-align: center;
+  font-size: 10.5px; font-weight: 500; color: var(--muted-foreground); line-height: 1;
+}
+.krowe-repo-heat-scale {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  font-size: 11px; font-weight: 500; color: var(--muted-foreground);
+}
+.krowe-repo-heat-scale .swatches { display: flex; gap: 4px; }
+
+/* ── Updates: commits grouped by day ── */
+.krowe-repo-updates { display: flex; flex-direction: column; gap: 16px; }
+.krowe-repo-daygroup { display: flex; flex-direction: column; gap: 10px; }
+.krowe-repo-dayheading {
+  margin: 0;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.12em; line-height: 1.3;
+  color: var(--muted-foreground);
+}
+/* Rows stack into one slab: shared borders collapse, only the ends round. */
+.krowe-repo-commits { display: flex; flex-direction: column; }
+.krowe-repo-commit {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-repo-commit + .krowe-repo-commit { border-top: none; }
+.krowe-repo-commits > .krowe-repo-commit:first-child {
+  border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg);
+}
+.krowe-repo-commits > .krowe-repo-commit:last-child {
+  border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg);
+}
+.krowe-repo-commit:hover { background: var(--surface-subtle); }
+.krowe-repo-commit-main {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.krowe-repo-commit-title {
+  margin: 0; font-size: 13px; font-weight: 500; color: var(--foreground);
+  line-height: 1.35;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-repo-commit-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.krowe-repo-avatars { display: flex; align-items: center; flex-shrink: 0; }
+.krowe-repo-avatars .av {
+  width: 18px; height: 18px; border-radius: var(--radius-full);
+  background: var(--border); color: var(--muted-foreground);
+  box-shadow: var(--shadow-1);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 600; line-height: 1;
+  overflow: hidden; flex-shrink: 0;
+}
+.krowe-repo-avatars .av + .av { margin-left: -5px; }
+.krowe-repo-commit-when {
+  font-size: 11px; font-weight: 500; color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.krowe-repo-commit-chips {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+}
+.krowe-repo-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: var(--radius-sm);
+  font-size: 11px; font-weight: 500; line-height: 1.4;
+  white-space: nowrap;
+}
+.krowe-repo-chip svg { flex-shrink: 0; }
+.krowe-repo-chip.ci-success { background: color-mix(in srgb, var(--success) 10%, transparent); color: var(--success); }
+.krowe-repo-chip.ci-failure { background: color-mix(in srgb, var(--danger) 10%, transparent); color: var(--danger); }
+.krowe-repo-chip.ci-pending { background: color-mix(in srgb, var(--warning) 10%, transparent); color: var(--warning); }
+.krowe-repo-chip.type { border: 1px solid var(--border); color: var(--foreground); }
+.krowe-repo-chip.role-builder { background: color-mix(in srgb, var(--builder-text) 10%, transparent); color: var(--builder-text); }
+.krowe-repo-chip.role-operator { background: color-mix(in srgb, var(--operator-text) 10%, transparent); color: var(--operator-text); }
+.krowe-repo-sha {
+  padding: 0 6px; flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 500; color: var(--foreground);
+}
+.krowe-repo-commit-out { flex-shrink: 0; color: var(--muted-foreground); display: inline-flex; }
+
+.krowe-repo-empty {
+  padding: 18px 16px; font-size: 12.5px; color: var(--muted-foreground);
+}
+
+@media (max-width: 1080px) {
+  .krowe-repo-overview { grid-template-columns: minmax(0, 1fr); }
+  .krowe-repo-layers { flex-wrap: wrap; }
+  .krowe-repo-commit-chips { display: none; }
+}

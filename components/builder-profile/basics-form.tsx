@@ -4,10 +4,18 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import {
+  joinProfileUrl,
+  splitProfileUrl,
+  LINK_PREFIXES,
+  LINK_PLACEHOLDERS,
+  type ProfileLinkKind,
+} from "@/lib/builder-profile/url-parts";
 import { importFromPortfolio } from "@/lib/actions/builder-profile";
-import { useProfileDraft } from "./profile-draft-context";
+import { useProfileDraft, type ProfileTextField } from "./profile-draft-context";
+
+const HEADLINE_MAX = 120;
+const BIO_MAX = 2000;
 
 // Basics editor — bound to the shared draft. No Save button: text fields
 // autosave (debounced) and URL fields flush on blur via the draft context.
@@ -38,7 +46,7 @@ export function BasicsForm() {
         parts.push(`${result.projectsImported} project${result.projectsImported === 1 ? "" : "s"} added`);
       }
       if (result.basicsUpdated) parts.push("headline & bio filled in");
-      if (result.educationUpdated) parts.push("education filled in");
+      if (result.educationUpdated) parts.push("education added");
       if (result.linksUpdated) parts.push("links filled in");
       if (result.skipped && parts.length === 0) parts.push("already up to date");
       toast.success(
@@ -50,104 +58,142 @@ export function BasicsForm() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="bp-display-name" className="block text-xs font-medium text-neutral-700">
-          Display name
+    <>
+      <div className="ss-field">
+        <label htmlFor="bp-display-name">
+          Name <span className="req">*</span>
         </label>
-        <Input
+        <input
           id="bp-display-name"
+          className="ss-input"
           value={draft.displayName}
           onChange={(e) => setField("displayName", e.target.value)}
           maxLength={80}
           placeholder={accountDisplayName}
         />
-        <p className="text-[11px] text-neutral-400">
-          Shown on your public profile. Leave blank to use your account name.
-        </p>
+        <p className="ss-hint">Leave blank to use your account name.</p>
       </div>
-      <div className="space-y-1.5">
-        <label htmlFor="bp-headline" className="block text-xs font-medium text-neutral-700">
-          Headline
-        </label>
-        <Input
+
+      <div className="ss-field">
+        <label htmlFor="bp-headline">Headline</label>
+        <input
           id="bp-headline"
+          className="ss-input"
           value={draft.headline}
           onChange={(e) => setField("headline", e.target.value)}
-          maxLength={120}
-          placeholder="e.g. Full-stack builder — Next.js, Supabase, AI products"
+          maxLength={HEADLINE_MAX}
+          placeholder="e.g., Full-stack builder — Next.js, Supabase, AI products"
         />
+        <Counter value={draft.headline.length} max={HEADLINE_MAX} />
       </div>
-      <div className="space-y-1.5">
-        <label htmlFor="bp-bio" className="block text-xs font-medium text-neutral-700">
-          About
-        </label>
+
+      <div className="ss-field">
+        <label htmlFor="bp-bio">About</label>
         <textarea
           id="bp-bio"
+          className="ss-input"
           value={draft.bio}
           onChange={(e) => setField("bio", e.target.value)}
-          maxLength={2000}
+          maxLength={BIO_MAX}
           rows={4}
-          placeholder="A short intro clients will read first."
-          className="w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm text-neutral-900 outline-none focus:border-neutral-400"
+          placeholder="A short intro clients will read first. A sentence or two is fine."
         />
-        <p className="text-[11px] italic text-neutral-400">
-          Don&apos;t overthink it. A sentence or two is fine.
-        </p>
+        <Counter value={draft.bio.length} max={BIO_MAX} />
       </div>
-      <div className="space-y-1.5">
-        <label htmlFor="bp-linkedin" className="block text-xs font-medium text-neutral-700">
-          LinkedIn URL
-        </label>
-        <Input
-          id="bp-linkedin"
-          value={draft.linkedinUrl}
-          onChange={(e) => setField("linkedinUrl", e.target.value)}
-          onBlur={commitUrls}
-          maxLength={500}
-          placeholder="https://linkedin.com/in/you"
-        />
-      </div>
-      <div className="space-y-1.5">
-        <label htmlFor="bp-github" className="block text-xs font-medium text-neutral-700">
-          GitHub
-        </label>
-        <Input
-          id="bp-github"
-          value={draft.githubUrl}
-          onChange={(e) => setField("githubUrl", e.target.value)}
-          onBlur={commitUrls}
-          maxLength={500}
-          placeholder="username or https://github.com/you"
-        />
-        <p className="text-[11px] text-neutral-400">
-          Just your username works — we&apos;ll fill in the rest.
-        </p>
-      </div>
-      <div className="space-y-1.5">
-        <label htmlFor="bp-portfolio" className="block text-xs font-medium text-neutral-700">
-          Portfolio URL
-        </label>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            id="bp-portfolio"
-            value={draft.portfolioUrl}
-            onChange={(e) => setField("portfolioUrl", e.target.value)}
-            onBlur={commitUrls}
-            maxLength={500}
-            placeholder="https://yoursite.com"
-            disabled={isImporting}
-            className="min-w-0 flex-1"
-          />
-          <Button variant="outline" size="sm" onClick={importFromSite} disabled={isImporting}>
-            <Sparkles className="h-3.5 w-3.5" />
-            {isImporting ? "Working…" : "Fill profile from it"}
-          </Button>
+
+      <LinkField
+        kind="linkedin"
+        id="bp-linkedin"
+        label="LinkedIn"
+        field="linkedinUrl"
+        value={draft.linkedinUrl}
+        setField={setField}
+        onBlur={commitUrls}
+      />
+
+      <LinkField
+        kind="github"
+        id="bp-github"
+        label="GitHub"
+        field="githubUrl"
+        value={draft.githubUrl}
+        setField={setField}
+        onBlur={commitUrls}
+      />
+
+      <div className="ss-field">
+        <label htmlFor="bp-portfolio">Portfolio</label>
+        <div className="ss-mediarow" style={{ gap: "var(--spacing-md)" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <LinkInput
+              kind="portfolio"
+              id="bp-portfolio"
+              field="portfolioUrl"
+              value={draft.portfolioUrl}
+              setField={setField}
+              onBlur={commitUrls}
+              disabled={isImporting}
+            />
+          </div>
+          <button type="button" className="ss-btn" onClick={importFromSite} disabled={isImporting}>
+            <Sparkles />
+            {isImporting ? "Working…" : "Autofill profile"}
+          </button>
         </div>
-        <p className="text-[11px] text-neutral-400">
-          Shown on your profile — we can also autofill your profile from it.
-        </p>
+        <p className="ss-hint">Shown on your profile — we can also fill this profile in from it.</p>
       </div>
+    </>
+  );
+}
+
+function Counter({ value, max }: { value: number; max: number }) {
+  return (
+    <p className={`ss-count${value > max ? " over" : ""}`}>
+      {value.toLocaleString()}/{max.toLocaleString()}
+    </p>
+  );
+}
+
+interface LinkInputProps {
+  kind: ProfileLinkKind;
+  id: string;
+  field: ProfileTextField;
+  value: string;
+  setField: (key: ProfileTextField, value: string) => void;
+  onBlur: () => void;
+  disabled?: boolean;
+}
+
+// The builder edits the handle; the draft still holds (and the server still
+// stores) the whole URL. splitProfileUrl round-trips anything that doesn't fit
+// the expected prefix, so an unusual link is shown as-is rather than mangled.
+function LinkInput({ kind, id, field, value, setField, onBlur, disabled }: LinkInputProps) {
+  return (
+    <div className="ss-prefix">
+      <span className="fix" aria-hidden>
+        {LINK_PREFIXES[kind]}
+      </span>
+      <input
+        id={id}
+        value={splitProfileUrl(kind, value)}
+        onChange={(e) => setField(field, joinProfileUrl(kind, e.target.value))}
+        onBlur={onBlur}
+        maxLength={500}
+        placeholder={LINK_PLACEHOLDERS[kind]}
+        disabled={disabled}
+        inputMode="url"
+        autoComplete="off"
+        spellCheck={false}
+      />
+    </div>
+  );
+}
+
+function LinkField({ label, ...props }: LinkInputProps & { label: string }) {
+  return (
+    <div className="ss-field">
+      <label htmlFor={props.id}>{label}</label>
+      <LinkInput {...props} />
     </div>
   );
 }

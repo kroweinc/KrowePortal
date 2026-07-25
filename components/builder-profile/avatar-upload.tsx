@@ -3,8 +3,7 @@
 import { useCallback, useEffect, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Camera, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ImageUp, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { uploadAvatar, deleteAvatar } from "@/lib/actions/builder-profile";
 
@@ -103,23 +102,17 @@ export function AvatarUpload({ avatarUrl, displayName }: AvatarUploadProps) {
   }
 
   return (
-    <div className="flex items-center gap-4">
+    <div className="ss-mediarow">
       {avatarUrl ? (
         // Signed URLs rotate per render, so next/image optimization would
         // never cache hit — a plain img keeps this simple.
         // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={avatarUrl}
-          alt={displayName}
-          className="h-12 w-12 shrink-0 rounded-full border border-neutral-200 object-cover"
-        />
+        <img src={avatarUrl} alt={displayName} className="ss-avatar" />
       ) : (
-        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-neutral-100 text-base font-semibold text-neutral-500">
-          {initials}
-        </span>
+        <span className="ss-avatar">{initials}</span>
       )}
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="ss-mediarow" style={{ gap: "var(--spacing-md)" }}>
           <input
             ref={inputRef}
             type="file"
@@ -127,22 +120,29 @@ export function AvatarUpload({ avatarUrl, displayName }: AvatarUploadProps) {
             onChange={handleFileChange}
             className="hidden"
           />
-          <Button
-            variant="outline"
-            size="sm"
+          <button
+            type="button"
+            className="ss-btn"
             onClick={() => inputRef.current?.click()}
             disabled={isPending}
           >
-            <Camera className="h-3.5 w-3.5" />
-            {isPending ? "Working…" : avatarUrl ? "Replace photo" : "Upload photo"}
-          </Button>
+            <ImageUp />
+            {isPending ? "Working\u2026" : avatarUrl ? "Upload new photo" : "Upload"}
+          </button>
           {avatarUrl && (
-            <Button variant="outline" size="sm" onClick={remove} disabled={isPending}>
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            <button
+              type="button"
+              className="ss-btn icon danger"
+              onClick={remove}
+              disabled={isPending}
+              title="Remove photo"
+              aria-label="Remove photo"
+            >
+              <Trash2 />
+            </button>
           )}
         </div>
-        <p className="mt-1.5 text-xs text-neutral-400">
+        <p className="ss-hint" style={{ marginTop: "var(--spacing-sm)" }}>
           Or copy an image and paste it here (Ctrl/Cmd+V).
         </p>
       </div>

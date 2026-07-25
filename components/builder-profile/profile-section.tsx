@@ -1,15 +1,14 @@
 import type { LucideIcon } from "lucide-react";
 
-// One Smart Scroll section: a medallion + serif title + hint header above a
-// white card holding the section's editor. `accent` gives the Tags section its
-// warm canvas; `clay` paints the medallion in the brand orange.
+// One section of the profile editor: glyph + serif title + hint, an optional
+// right-aligned header action ("Add new project"), and the card holding the
+// section's content. The id feeds both the tab nav's scrollIntoView and the
+// scroll-spy IntersectionObserver in profile-setup.tsx.
 export function ProfileSection({
   id,
   icon: Icon,
   title,
   hint,
-  clay = false,
-  accent = false,
   actions,
   children,
 }: {
@@ -17,15 +16,13 @@ export function ProfileSection({
   icon: LucideIcon;
   title: string;
   hint?: string;
-  clay?: boolean;
-  accent?: boolean;
   actions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section className={`ss-sec${accent ? " accent" : ""}`} id={`sec-${id}`}>
+    <section className="ss-sec" id={`sec-${id}`}>
       <div className="sh">
-        <span className={`medallion${clay ? " clay" : ""}`}>
+        <span className="medallion">
           <Icon />
         </span>
         <div className="tt">

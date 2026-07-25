@@ -11,6 +11,7 @@ import {
   GitBranch,
   Info,
   Link2,
+  MessageSquare,
   Paperclip,
   RotateCcw,
   Sparkles,
@@ -42,6 +43,12 @@ import { commitDoneDeliverable } from "@/lib/tasks/commit-done-deliverable";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { TaskAttachments } from "@/components/task-attachments";
+import {
+  TaskCommentsProvider,
+  TaskCommentThread,
+  TaskCommentPreview,
+  TaskCommentCount,
+} from "@/components/task-comments";
 import { TaskSubtasks } from "@/components/task-subtasks";
 import { TaskRegenerate } from "@/components/task-regenerate";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
@@ -171,7 +178,7 @@ function TaskDetailBody({
     : task.description ?? "";
 
   const [toast, setToast] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "build" | "audit">("overview");
+  const [tab, setTab] = useState<"overview" | "comments" | "build" | "audit">("overview");
   // Optimistic status drives the pipeline + hero pill so a move paints on click
   // instead of waiting on the server action and the router.refresh() that
   // follows it. Resets to task.status once the refresh brings the real value.
@@ -314,7 +321,12 @@ function TaskDetailBody({
     task.pushed_to_main || task.completion_note || deliverableAttachments.length > 0;
 
   return (
-    <>
+    <TaskCommentsProvider
+      task={task}
+      role={role}
+      currentUserId={currentUserId}
+      onChangesRequested={() => router.refresh()}
+    >
       {/* Hidden a11y title + description (visible title is the editorial h1 in the hero) */}
       <SheetTitle className="sr-only">{displayTitle || "Task detail"}</SheetTitle>
       <SheetDescription className="sr-only">
@@ -390,6 +402,14 @@ function TaskDetailBody({
         >
           Overview
         </button>
+        <button
+          type="button"
+          className={`krowe-task-tab ${tab === "comments" ? "active" : ""}`}
+          onClick={() => setTab("comments")}
+        >
+          Comments
+          <TaskCommentCount />
+        </button>
         {role !== "operator" && (
           <button
             type="button"
@@ -412,7 +432,9 @@ function TaskDetailBody({
 
       {/* ── Scrollable body ── */}
       <div className="krowe-task-sheet-body">
-        {tab === "audit" && role === "operator" ? (
+        {tab === "comments" ? (
+          <TaskCommentThread />
+        ) : tab === "audit" && role === "operator" ? (
           <TaskAuditLog taskId={task.id} />
         ) : tab === "build" && role !== "operator" ? (
           <TaskBuildPrompt task={task} />
@@ -637,6 +659,18 @@ function TaskDetailBody({
             <TaskSubtasks key={`subtasks-${task.id}`} taskId={task.id} task={task} />
           </div>
         </section>
+
+        {/* DISCUSSION — the newest message or approval event, and a way into the
+            full thread. Everything you can write lives in the Comments tab. */}
+        <section className="krowe-task-section">
+          <div className="krowe-task-section-h">
+            <span className="label">
+              <MessageSquare className="h-3 w-3" />
+              Discussion
+            </span>
+          </div>
+          <TaskCommentPreview onOpenThread={() => setTab("comments")} />
+        </section>
         </>
         )}
       </div>
@@ -687,7 +721,7 @@ function TaskDetailBody({
       </footer>
 
       {toast && <div className="krowe-toast">{toast}</div>}
-    </>
+    </TaskCommentsProvider>
   );
 }
 

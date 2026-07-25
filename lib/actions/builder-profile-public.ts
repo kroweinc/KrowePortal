@@ -6,6 +6,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { resolveTechBadges, type ResolvedTechBadge } from "@/lib/builder-profile/tech-icons";
 import type {
   BuilderProfileCodingTool,
+  BuilderProfileEducation,
   BuilderProfileExperience,
   BuilderProfileProject,
 } from "@/lib/types";
@@ -33,9 +34,6 @@ export interface PublicBuilderProfile {
   linkedinUrl: string | null;
   githubUrl: string | null;
   portfolioUrl: string | null;
-  educationSchool: string | null;
-  educationMajor: string | null;
-  educationYear: string | null;
   tags: string[];
   avatarUrl: string | null;
   hasResume: boolean;
@@ -43,6 +41,7 @@ export interface PublicBuilderProfile {
   githubSyncedAt: string | null;
   projects: PublicBuilderProfileProject[];
   experience: BuilderProfileExperience[];
+  education: BuilderProfileEducation[];
   codingTools: BuilderProfileCodingTool[];
 }
 
@@ -103,29 +102,45 @@ async function assemblePublicProfile(
   admin: ReturnType<typeof createAdminClient>,
   data: Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 ): Promise<PublicBuilderProfile> {
-  const [{ data: projects }, { data: experience }, { data: codingTools }, { data: connection }] =
-    await Promise.all([
-      admin
-        .from("builder_profile_projects")
-        .select("*")
-        .eq("builder_profile_id", data.id)
-        .order("display_order", { ascending: true }),
-      admin
-        .from("builder_profile_experience")
-        .select("*")
-        .eq("builder_profile_id", data.id)
-        .order("display_order", { ascending: true }),
-      admin
-        .from("builder_profile_coding_tools")
-        .select("*")
-        .eq("builder_profile_id", data.id)
-        .order("display_order", { ascending: true }),
-      admin
-        .from("github_connections")
-        .select("github_username")
-        .eq("user_id", data.user_id)
-        .maybeSingle(),
-    ]);
+  // is_hidden is filtered here, once, so /p/[token], the owner preview, and the
+  // in-document builder drawer can never disagree about what the client sees.
+  const [
+    { data: projects },
+    { data: experience },
+    { data: education },
+    { data: codingTools },
+    { data: connection },
+  ] = await Promise.all([
+    admin
+      .from("builder_profile_projects")
+      .select("*")
+      .eq("builder_profile_id", data.id)
+      .eq("is_hidden", false)
+      .order("display_order", { ascending: true }),
+    admin
+      .from("builder_profile_experience")
+      .select("*")
+      .eq("builder_profile_id", data.id)
+      .eq("is_hidden", false)
+      .order("display_order", { ascending: true }),
+    admin
+      .from("builder_profile_education")
+      .select("*")
+      .eq("builder_profile_id", data.id)
+      .eq("is_hidden", false)
+      .order("display_order", { ascending: true }),
+    admin
+      .from("builder_profile_coding_tools")
+      .select("*")
+      .eq("builder_profile_id", data.id)
+      .eq("is_hidden", false)
+      .order("display_order", { ascending: true }),
+    admin
+      .from("github_connections")
+      .select("github_username")
+      .eq("user_id", data.user_id)
+      .maybeSingle(),
+  ]);
 
   // Signed inline (not via an exported helper) so callers can never sign
   // arbitrary storage paths. 24h TTL outlives any cached render.
@@ -143,6 +158,7 @@ async function assemblePublicProfile(
     (projects ?? []) as BuilderProfileProject[]
   ).map((project) => ({ ...project, techBadges: resolveTechBadges(project.tech) }));
   const experienceList = (experience ?? []) as BuilderProfileExperience[];
+  const educationList = (education ?? []) as BuilderProfileEducation[];
   const codingToolList = (codingTools ?? []) as BuilderProfileCodingTool[];
 
   // Show only the badges the builder has added. Derived badges are surfaced as
@@ -160,9 +176,6 @@ async function assemblePublicProfile(
     linkedinUrl: data.linkedin_url ?? null,
     githubUrl: data.github_url ?? null,
     portfolioUrl: data.portfolio_url ?? null,
-    educationSchool: data.education_school ?? null,
-    educationMajor: data.education_major ?? null,
-    educationYear: data.education_year ?? null,
     tags,
     avatarUrl,
     hasResume: !!data.resume_storage_path,
@@ -170,6 +183,7 @@ async function assemblePublicProfile(
     githubSyncedAt: data.github_synced_at ?? null,
     projects: projectList,
     experience: experienceList,
+    education: educationList,
     codingTools: codingToolList,
   };
 }

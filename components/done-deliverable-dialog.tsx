@@ -19,7 +19,11 @@ import {
   type PreloadedBranches,
 } from "@/lib/actions/get-engagement-branches";
 import { BranchChipPicker } from "@/components/branch-chip-picker";
-import { isDefaultBranch } from "@/lib/tasks/staging-grouping";
+import {
+  isDefaultBranch,
+  reconcileBranch,
+  type PickedBranch,
+} from "@/lib/tasks/staging-grouping";
 import type { DonePayload } from "@/lib/tasks/commit-done-deliverable";
 import {
   MAX_ATTACHMENT_SIZE,
@@ -74,6 +78,9 @@ export function DoneDeliverableDialog({
   const [noRepoPushed, setNoRepoPushed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // What the builder has picked so far — the on-open revalidation must not
+  // stomp a branch they already chose.
+  const pickedRef = useRef<PickedBranch>({ picked: false, value: null });
 
   const branchIsDefault = isDefaultBranch(branch, defaultBranch);
   const pushedToMain =
@@ -91,44 +98,59 @@ export function DoneDeliverableDialog({
       setBranchState("idle");
       setNoRepoPushed(false);
       setRefreshing(false);
+      pickedRef.current = { picked: false, value: null };
     }
   }, [open]);
 
-  // Load the engagement repo's branches (from the persisted cache, so it paints
-  // instantly) so the deliverable can be filed under the branch it shipped on —
-  // the repo default is pre-selected, which counts as "pushed to main". Degrades
-  // to a hidden picker when the task has no linked repo.
+  // Load the engagement repo's branches so the deliverable can be filed under
+  // the branch it shipped on — the repo default is pre-selected, which counts as
+  // "pushed to main". Degrades to a hidden picker when the task has no repo.
   useEffect(() => {
     if (!open || !task) return;
 
     // Instant paint: when the server preheated this engagement's cached branch
     // list, hydrate straight from it — no fetch, no "Loading branches…" flash.
-    if (preloaded && preloaded.branches.length > 0) {
-      setBranches(preloaded.branches);
-      setDefaultBranch(preloaded.defaultBranch);
+    const snapshot = preloaded && preloaded.branches.length > 0 ? preloaded : null;
+    if (snapshot) {
+      setBranches(snapshot.branches);
+      setDefaultBranch(snapshot.defaultBranch);
       // Default to "main" so the common case is one click away.
-      setBranch(preloaded.defaultBranch);
+      setBranch(snapshot.defaultBranch);
       setBranchState("ready");
-      return;
+    } else {
+      setBranchState("loading");
     }
 
+    // ...then always reconcile against the repo. The preloaded list is a
+    // snapshot from whenever the page last rendered, so a branch deleted on
+    // GitHub since then would otherwise stay clickable for the life of the tab.
     let cancelled = false;
-    setBranchState("loading");
     getEngagementBranchesCached(task.id)
       .then((res) => {
         if (cancelled) return;
         if (!res.hasRepo || res.branches.length === 0) {
-          setBranchState("no_repo");
+          // Only downgrade to the no-repo toggle if we had nothing to show; a
+          // failed reconcile shouldn't tear down a list already on screen.
+          if (!snapshot) setBranchState("no_repo");
           return;
         }
         setBranches(res.branches);
         setDefaultBranch(res.defaultBranch);
-        // Default to "main" so the common case is one click away.
-        setBranch(res.defaultBranch);
+        const { branch: next, dropped } = reconcileBranch(pickedRef.current, res);
+        setBranch(next);
+        if (dropped) {
+          // Their pick was deleted on GitHub between the page render and now.
+          // Say so — silently moving the selection would file the deliverable
+          // somewhere they didn't choose.
+          pickedRef.current = { picked: true, value: next };
+          toast.info(
+            `Branch "${dropped}" no longer exists on GitHub — switched to ${next ?? "no branch"}.`
+          );
+        }
         setBranchState("ready");
       })
       .catch(() => {
-        if (!cancelled) setBranchState("no_repo");
+        if (!cancelled && !snapshot) setBranchState("no_repo");
       });
     return () => {
       cancelled = true;
@@ -136,6 +158,7 @@ export function DoneDeliverableDialog({
   }, [open, task, preloaded]);
 
   function selectBranch(next: string | null, pushed: boolean) {
+    pickedRef.current = { picked: true, value: next };
     setBranch(next);
     // Leaving the default branch clears the pushed-to-main extras.
     if (!pushed) {
@@ -152,6 +175,14 @@ export function DoneDeliverableDialog({
       if (res.hasRepo && res.branches.length > 0) {
         setBranches(res.branches);
         setDefaultBranch(res.defaultBranch);
+        const { branch: next, dropped } = reconcileBranch(pickedRef.current, res);
+        setBranch(next);
+        if (dropped) {
+          pickedRef.current = { picked: true, value: next };
+          toast.info(
+            `Branch "${dropped}" no longer exists on GitHub — switched to ${next ?? "no branch"}.`
+          );
+        }
       }
     } catch {
       // keep the current list on failure

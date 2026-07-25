@@ -89,6 +89,8 @@ export interface NotificationPreferences {
   notify_task_approved: boolean;
   notify_task_changes_requested: boolean;
   notify_task_delivered: boolean;
+  // Task comment thread (migration 0083).
+  notify_task_comment: boolean;
   updated_at: string;
 }
 
@@ -886,6 +888,24 @@ export interface TaskAttachment {
   uploader?: Pick<Profile, "id" | "display_name" | "role">;
 }
 
+// A message in a task's comment thread (migration 0082). Rendered in the detail
+// sheet's Comments tab, interleaved with the approval-loop events from
+// task_audit_log — this row is only what someone typed.
+//
+// updated_at is null until the first edit (it's the flag behind the "edited"
+// tag). deleted_at is a soft delete: the row survives so the thread keeps its
+// shape, and the API blanks `body` to null so the UI renders a placeholder.
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  author_id: string;
+  body: string | null;
+  created_at: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+  author?: Pick<Profile, "id" | "display_name" | "role"> | null;
+}
+
 // ============================================================
 // Builder Profile — shareable resume (see 0040_builder_profiles.sql)
 // ============================================================
@@ -906,9 +926,6 @@ export interface BuilderProfile {
   linkedin_url: string | null;
   github_url: string | null;
   portfolio_url: string | null;
-  education_school: string | null; // university or high school
-  education_major: string | null;
-  education_year: string | null; // freeform, e.g. "Class of 2027" or "2020 – 2024"
   resume_storage_path: string | null;
   resume_file_name: string | null;
   avatar_storage_path: string | null;
@@ -951,6 +968,7 @@ export interface BuilderProfileProject {
   languages: RepoLanguage[] | null;
   stars: number | null;
   github_pushed_at: string | null;
+  is_hidden: boolean;
   display_order: number;
   created_at: string;
   updated_at: string;
@@ -967,6 +985,43 @@ export interface BuilderProfileExperience {
   start_label: string | null;
   end_label: string | null;
   description: string | null;
+  is_hidden: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+// Degree levels offered by the education editor. Free text in the DB
+// (validated app-side, same call as CODING_TOOL_CATEGORIES) so the list can
+// grow without a migration — a builder can also type their own.
+export const EDUCATION_LEVELS = [
+  "High School",
+  "Associate's",
+  "Bachelor's",
+  "Master's",
+  "MBA",
+  "PhD",
+  "Bootcamp",
+  "Certificate",
+] as const;
+
+export const EDUCATION_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+export interface BuilderProfileEducation {
+  id: string;
+  builder_profile_id: string;
+  school: string;
+  level: string | null; // e.g. "Bachelor's"; free text, see EDUCATION_LEVELS
+  field_of_study: string | null;
+  start_month: string | null;
+  start_year: string | null;
+  end_month: string | null;
+  /** Blank end = still in progress; the UI reads it as "or expected". Legacy
+      0049 rows backfilled a freeform label here ("Class of 2027"). */
+  end_year: string | null;
+  is_hidden: boolean;
   display_order: number;
   created_at: string;
 }
@@ -1013,6 +1068,7 @@ export interface BuilderProfileCodingTool {
   name: string;
   category: CodingToolCategory | null;
   url: string | null;
+  is_hidden: boolean;
   display_order: number;
   created_at: string;
 }

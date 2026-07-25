@@ -26,6 +26,31 @@ export function isDefaultBranch(
   return branch !== null && defaultBranch !== null && branch === defaultBranch;
 }
 
+// What the builder has picked in a branch chip picker so far. `picked: false`
+// means the chips are still showing their pre-selected default, so a fresher
+// list may freely replace it.
+export type PickedBranch = { picked: boolean; value: string | null };
+
+/**
+ * Which branch stays selected when a freshly fetched branch list replaces the
+ * one on screen. Untouched chips just take the new default; a deliberate pick is
+ * kept — unless that branch no longer exists on the repo, in which case it's
+ * reported as `dropped` so the caller can say so rather than silently filing a
+ * deliverable under a branch that was deleted out from under it.
+ */
+export function reconcileBranch(
+  picked: PickedBranch,
+  next: { branches: { name: string }[]; defaultBranch: string | null }
+): { branch: string | null; dropped: string | null } {
+  if (!picked.picked) return { branch: next.defaultBranch, dropped: null };
+  // "No branch" is a real choice, not an absent one.
+  if (picked.value === null) return { branch: null, dropped: null };
+  if (next.branches.some((b) => b.name === picked.value)) {
+    return { branch: picked.value, dropped: null };
+  }
+  return { branch: next.defaultBranch, dropped: picked.value };
+}
+
 /**
  * Bucket done tasks by branch, preserving the incoming (completed-desc) order
  * within a bucket. Branches with queued work sort first (alphabetically), then

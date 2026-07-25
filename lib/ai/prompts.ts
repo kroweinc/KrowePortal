@@ -7,6 +7,10 @@ import {
   type TaskType,
 } from "@/lib/types";
 import { DRAFT_CONFIDENCE, type DraftConfidence } from "@/lib/ai/schemas";
+import type {
+  CommitMatchCandidate,
+  TaskMatchCandidate,
+} from "@/lib/tasks/commit-match-filter";
 
 // One-line gloss per area label, used only to steer the classifier. Typed as a
 // Record<TaskTag, …> so adding a tag to TASK_TAGS forces a description here.
@@ -373,6 +377,86 @@ export function buildClassifyTaskUserPrompt(input: {
   }
   parts.push("\nRespond with JSON only.");
   return parts.join("\n");
+}
+
+// ── Default-branch commits → already-shipped open tasks ─────────────────────
+
+// A commit body can be an essay (release notes, co-author trailers, revert
+// dumps). The subject plus the first few lines carries the signal; the rest is
+// noise that pushes the real tasks further from the model's attention.
+const COMMIT_MESSAGE_CAP = 400;
+const TASK_DESCRIPTION_CAP = 500;
+
+function truncate(text: string, cap: number): string {
+  const clean = text.trim();
+  return clean.length > cap ? `${clean.slice(0, cap)}…` : clean;
+}
+
+export function buildMatchCommitsSystemPrompt(): string {
+  return `You are a senior engineer reviewing a repository's default-branch commit history against a builder's open task list. You are looking for one thing: work that has already SHIPPED but whose task was never marked done.
+
+You have each commit's message and each open task's title, description, change type, and area label. You do NOT have the diff, the changed file paths, or the repo source — you are judging from message text alone, and that is a hard ceiling on how certain you can be.
+
+A match means this commit, on its own or as the obvious final piece, delivers what that specific task asked for. Anything weaker is not a match.
+
+These are matches:
+  • Task "Fix invoice PDF page breaks" ← commit "fix(invoices): correct PDF page breaks on multi-page bills" — same defect, same surface.
+  • Task "Add CSV export to the client list" ← commit "feat: export clients to CSV from the list toolbar" — same capability, same place.
+  • Task "Rename the Clients tab to Accounts" ← commit "rename Clients → Accounts across nav and breadcrumbs" — literally the described change.
+
+These are NOT matches:
+  • Task "Rebuild the auth flow" vs commit "fix(auth): typo in reset-password copy" — same subsystem, unrelated work. Sharing an area is not evidence.
+  • Task "Add CSV export" vs commit "refactor: extract useTable hook" — plausible groundwork. Preparatory work does not finish a task.
+  • Any task vs commit "wip", "stuff", "address feedback", "Merge pull request #42 from acme/dev" — an uninformative message is evidence for nothing.
+  • Any pair whose only overlap is a generic word both happen to use ("dashboard", "user", "form", "page", "fix").
+
+Rules:
+1. Work commit by commit. For each commit ask whether exactly ONE task is plainly delivered by it. If two tasks fit equally well, that means you are matching on area rather than on the work — report neither.
+2. Report each commit at most once, against at most one task.
+3. confidence is a decimal from 0 to 1: how sure you are that this commit finishes this task. Reserve 0.9 and above for a commit that names the same concrete thing the task names. Anything you would describe as "probably" or "could be" belongs below 0.8.
+4. reason is ONE sentence of at most 200 characters naming the specific overlap you relied on — the shared feature, defect, or noun. If you cannot name that overlap concretely, you do not have a match.
+5. Prefer reporting nothing. A wrong match tells a builder that unfinished work is finished; staying silent costs nothing, because the task is still sitting on their board either way.
+
+Off-schema behavior: report only commits from the input list and only tasks from the input list, copying their sha and id strings exactly. When no commit finishes any task — the common case — return an empty matches array. Never stretch to fill it.`;
+}
+
+export function buildMatchCommitsUserPrompt(input: {
+  repoFullName: string;
+  branch: string;
+  commits: CommitMatchCandidate[];
+  tasks: TaskMatchCandidate[];
+}): string {
+  const commitBlock = input.commits
+    .map((c) => {
+      const when = c.committedAt ? ` (committed ${c.committedAt})` : "";
+      return `sha: ${c.sha}${when}\n${truncate(c.message, COMMIT_MESSAGE_CAP)}`;
+    })
+    .join("\n\n");
+
+  const taskBlock = input.tasks
+    .map((t) => {
+      const parts = [`id: ${t.id}`, `title: ${t.title}`];
+      parts.push(`type: ${t.type ?? "(unclassified)"}`);
+      if (t.tags.length > 0) parts.push(`area: ${t.tags.join(", ")}`);
+      parts.push(
+        t.description?.trim()
+          ? `description: ${truncate(t.description, TASK_DESCRIPTION_CAP)}`
+          : "description: (none)"
+      );
+      return parts.join("\n");
+    })
+    .join("\n\n");
+
+  return [
+    `Repository: ${input.repoFullName}`,
+    `Branch: ${input.branch}`,
+    ``,
+    `=== Commits on this branch ===`,
+    commitBlock,
+    ``,
+    `=== Open tasks ===`,
+    taskBlock,
+  ].join("\n");
 }
 
 // ── Granola call → task drafts ───────────────────────────────────────────────

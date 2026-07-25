@@ -4,7 +4,6 @@ import { useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { FileText, Sparkles, Trash2, Upload } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { uploadResume, deleteResume, importFromResume } from "@/lib/actions/builder-profile";
 
@@ -85,43 +84,53 @@ export function ResumeUpload({ resumeFileName }: ResumeUploadProps) {
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      {resumeFileName ? (
-        <span className="inline-flex min-w-0 items-center gap-2 text-sm text-neutral-700">
-          <FileText className="h-4 w-4 shrink-0 text-neutral-400" />
-          <span className="truncate">{resumeFileName}</span>
-        </span>
-      ) : (
-        <span className="text-sm text-neutral-400">No resume uploaded.</span>
-      )}
-      <div className="flex items-center gap-2">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="application/pdf,.pdf"
-          onChange={handleFileChange}
-          className="hidden"
-        />
-        {resumeFileName && (
-          <Button variant="outline" size="sm" onClick={importExperience} disabled={isPending}>
-            <Sparkles className="h-3.5 w-3.5" />
-            {isPending ? "Working…" : "Fill profile from resume"}
-          </Button>
+    <div className="ss-field">
+      <span className="ss-label">Resume</span>
+      <div className="ss-filerow">
+        {resumeFileName ? (
+          <div className="ss-mediarow" style={{ gap: "var(--spacing-md)" }}>
+            <span className="ss-file">
+              <FileText />
+              <span>{resumeFileName}</span>
+            </span>
+            <button type="button" className="ss-btn" onClick={importExperience} disabled={isPending}>
+              <Sparkles />
+              {isPending ? "Working\u2026" : "Autofill profile"}
+            </button>
+          </div>
+        ) : (
+          <span className="ss-file">No resume uploaded.</span>
         )}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => inputRef.current?.click()}
-          disabled={isPending}
-        >
-          <Upload className="h-3.5 w-3.5" />
-          {isPending ? "Uploading…" : resumeFileName ? "Replace" : "Upload PDF"}
-        </Button>
-        {resumeFileName && (
-          <Button variant="outline" size="sm" onClick={remove} disabled={isPending}>
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
-        )}
+        <div className="acts">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="application/pdf,.pdf"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          <button
+            type="button"
+            className="ss-btn"
+            onClick={() => inputRef.current?.click()}
+            disabled={isPending}
+          >
+            <Upload />
+            {isPending ? "Uploading\u2026" : resumeFileName ? "Upload new resume" : "Upload"}
+          </button>
+          {resumeFileName && (
+            <button
+              type="button"
+              className="ss-btn icon danger"
+              onClick={remove}
+              disabled={isPending}
+              title="Remove resume"
+              aria-label="Remove resume"
+            >
+              <Trash2 />
+            </button>
+          )}
+        </div>
       </div>
       {confirmDialog}
     </div>

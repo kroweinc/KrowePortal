@@ -4,27 +4,27 @@ import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { getUserGithubConnection } from "@/lib/github/token";
 import { buildRepoContext } from "@/lib/github/repo-context";
-import { buildBranchGraph, type BranchGraph } from "@/lib/github/branches";
+import { buildBranchGraph } from "@/lib/github/branches";
+import {
+  fetchCommitChecks,
+  fetchRepoInsights,
+  type CommitCheck,
+} from "@/lib/github/repo-insights";
+import { getCommitTaskLinks, type CommitTaskLink } from "@/lib/actions/commit-task-links";
 import {
   getProjectProfile,
   type ProjectProfile,
 } from "@/lib/actions/generate-project-profile";
 import { getMyEngagements } from "@/lib/actions/invitations";
 import {
-  BranchesCard,
-  BranchesCardSkeleton,
-  CommitsCard,
-  CommitsCardSkeleton,
-  OverviewCard,
-  OverviewCardSkeleton,
-  ProjectHeader,
-  ReadmeCard,
-  StructureCard,
-  TechStackCard,
-  TechStackCardSkeleton,
-  type OverviewStats,
-} from "@/components/operator-project-profile";
-import { Icon } from "@/components/operator-project-profile/icon";
+  OverviewSection,
+  OverviewSectionSkeleton,
+  RepoTopline,
+  ToolkitSection,
+  ToolkitSectionSkeleton,
+  UpdatesSection,
+  type ToolkitStats,
+} from "@/components/repo-page";
 import {
   NotConnected,
   NoRepoSelected,
@@ -50,6 +50,9 @@ type RepoOption = {
 
 export const metadata = { title: "Repo" };
 
+/** Commits listed under Updates — also caps the per-commit check-run fan-out. */
+const UPDATES_LIMIT = 12;
+
 export default async function ProjectProfilePage({
   searchParams,
 }: {
@@ -67,8 +70,8 @@ export default async function ProjectProfilePage({
 
   if (!connection) {
     return (
-      <main className="krowe-page krowe-blueprint-canvas">
-        <div className="krowe-page-inner anim-fade-up" style={{ maxWidth: 1180 }}>
+      <main className="krowe-page">
+        <div className="krowe-repo-inner anim-fade-up">
           <NotConnected />
         </div>
       </main>
@@ -113,8 +116,8 @@ export default async function ProjectProfilePage({
 
   if (repoOptions.length === 0) {
     return (
-      <main className="krowe-page krowe-blueprint-canvas">
-        <div className="krowe-page-inner anim-fade-up" style={{ maxWidth: 1180 }}>
+      <main className="krowe-page">
+        <div className="krowe-repo-inner anim-fade-up">
           <NoRepoSelected />
         </div>
       </main>
@@ -132,19 +135,16 @@ export default async function ProjectProfilePage({
   if (!activeOption.repo) {
     const repos = await fetchGithubRepos(connection.token);
     return (
-      <main className="krowe-page krowe-blueprint-canvas">
-        <div
-          className="krowe-page-inner anim-fade-up"
-          style={{ maxWidth: 1180, display: "flex", flexDirection: "column", gap: 20 }}
-        >
+      <main className="krowe-page">
+        <div className="krowe-repo-inner anim-fade-up">
           <RepoChips options={repoOptions} activeKey={activeOption.key} />
-          <div className="rounded-lg border border-neutral-200 bg-white p-6" style={{ maxWidth: 560 }}>
-            <h2 className="text-sm font-semibold text-neutral-900">Link a repository</h2>
-            <p className="mt-1 text-sm text-neutral-500">
+          <div className="krowe-repo-card" style={{ maxWidth: 520, padding: "16px 18px" }}>
+            <h2 className="krowe-repo-card-title">Link a repository</h2>
+            <p style={{ marginTop: 6, fontSize: 12.5, color: "var(--muted-foreground)" }}>
               {activeOption.label} doesn&apos;t have a repo yet. Link one to power its
               project view, commits, and branches.
             </p>
-            <div className="mt-4">
+            <div style={{ marginTop: 14 }}>
               <RepoSelector engagementId={activeOption.key} initialRepos={repos} />
             </div>
           </div>
@@ -156,9 +156,10 @@ export default async function ProjectProfilePage({
   const activeRepo = activeOption;
   const { owner, name, defaultBranch, fullName } = activeOption.repo;
 
-  const [repoContext, branchGraph] = await Promise.all([
+  const [repoContext, branchGraph, insights] = await Promise.all([
     buildRepoContext(connection.token, owner, name, defaultBranch),
     buildBranchGraph(connection.token, owner, name, defaultBranch),
+    fetchRepoInsights(connection.token, owner, name, defaultBranch),
   ]);
 
   // Prefer the engagement that owns the active repo; fall back to a full-name
@@ -168,13 +169,12 @@ export default async function ProjectProfilePage({
     engagements.find((e) => e.github_repo_full_name === fullName) ??
     (engagements.length === 1 ? engagements[0] : null);
 
+  const repoUrl = `https://github.com/${owner}/${name}`;
+
   if (!repoContext) {
     return (
-      <main className="krowe-page krowe-blueprint-canvas">
-        <div
-          className="krowe-page-inner anim-fade-up"
-          style={{ maxWidth: 1180, display: "flex", flexDirection: "column", gap: 20 }}
-        >
+      <main className="krowe-page">
+        <div className="krowe-repo-inner anim-fade-up">
           <RepoChips options={repoOptions} activeKey={activeRepo.key} />
           <RepoFetchError repoFullName={fullName} />
         </div>
@@ -182,142 +182,106 @@ export default async function ProjectProfilePage({
     );
   }
 
-  const toolContext = {
+  const profilePromise: Promise<ProjectProfile | null> = getProjectProfile(repoContext, {
     token: connection.token,
     owner,
     repo: name,
     ref: defaultBranch,
+  });
+
+  // Prefer the two-week window for the Updates list so it groups across days;
+  // a repo that's been quiet longer than that falls back to RepoContext's
+  // last-8, which isn't time-bounded.
+  const timeline = (
+    insights.commits.length > 0 ? insights.commits : repoContext.recentCommits
+  ).slice(0, UPDATES_LIMIT);
+
+  const shas = timeline.map((c) => c.sha);
+  // CI verdicts and task links only decorate the commit rows, so neither is
+  // allowed to take the page down with it.
+  const [checksResult, linksResult] = await Promise.allSettled([
+    fetchCommitChecks(connection.token, owner, name, shas),
+    getCommitTaskLinks(profile.id, fullName, shas),
+  ]);
+  const checks: Map<string, CommitCheck> =
+    checksResult.status === "fulfilled" ? checksResult.value : new Map();
+  const links: Map<string, CommitTaskLink> =
+    linksResult.status === "fulfilled" ? linksResult.value : new Map();
+
+  const stats: ToolkitStats = {
+    commits2w: insights.activity.reduce((sum, d) => sum + d.count, 0),
+    branches: branchGraph ? branchGraph.root.children.length + 1 : 0,
+    contributors: new Set(
+      (insights.commits.length > 0 ? insights.commits : repoContext.recentCommits)
+        .map((c) => c.author?.login ?? c.author?.name ?? null)
+        .filter((v): v is string => Boolean(v))
+    ).size,
+    lastCommitIso: timeline[0]?.date ?? repoContext.recentCommits[0]?.date ?? null,
+    social: insights.stats,
   };
-
-  const profilePromise: Promise<ProjectProfile | null> = getProjectProfile(
-    repoContext,
-    toolContext
-  );
-
-  const repoUrl = `https://github.com/${owner}/${name}`;
-  const readmeUrl = `${repoUrl}/blob/${defaultBranch}/README.md`;
-
-  const commits14d = repoContext.recentCommits.filter((c) => {
-    const t = new Date(c.date).getTime();
-    return !Number.isNaN(t) && Date.now() - t < 14 * 86_400_000;
-  }).length;
-  const contributors = new Set(
-    repoContext.recentCommits
-      .map((c) => c.author?.login ?? c.author?.name ?? null)
-      .filter((v): v is string => Boolean(v))
-  ).size;
-
-  const branchGraphPromise: Promise<BranchGraph | null> = Promise.resolve(branchGraph);
-  const statsPromise: Promise<OverviewStats> = branchGraphPromise.then((graph) => ({
-    commits14d,
-    contributors,
-    branchCount: graph ? graph.root.children.length + 1 : 0,
-    lastSyncIso: new Date().toISOString(),
-  }));
-
-  const archLayersPromise = profilePromise.then((p) => deriveArchLayers(repoContext, p));
 
   // Title: prefer engagement title (the operator's chosen name) when paired,
   // otherwise fall back to the repo name.
   const title = engagement?.title ?? name;
-  const operatorName = engagement?.operator?.display_name ?? null;
 
   return (
-    <main className="krowe-page krowe-blueprint-canvas">
-      <div
-        className="krowe-page-inner anim-fade-up"
-        style={{ maxWidth: 1180, display: "flex", flexDirection: "column", gap: 20 }}
-      >
-        <RepoChips options={repoOptions} activeKey={activeRepo.key} />
+    <>
+      <RepoTopline title={title} repoUrl={repoUrl} />
 
-        <ProjectHeader
-          title={title}
-          org={owner}
-          repoName={name}
-          tagline={repoContext.description}
-          branch={defaultBranch}
-          repoUrl={repoUrl}
-          builderName={operatorName ? `for ${operatorName}` : profile.display_name}
-          startedAt={engagement?.created_at ?? new Date().toISOString()}
-          settingsHref="/b/settings/github"
-        />
+      <main className="krowe-page">
+        <div className="krowe-repo-inner anim-fade-up">
+          <RepoChips options={repoOptions} activeKey={activeRepo.key} />
 
-        <Suspense fallback={<OverviewCardSkeleton />}>
-          <OverviewCard profilePromise={profilePromise} statsPromise={statsPromise} />
-        </Suspense>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr)",
-            gap: 20,
-          }}
-        >
-          <Suspense fallback={<CommitsCardSkeleton />}>
-            <CommitsCard commits={repoContext.recentCommits} />
+          <Suspense fallback={<OverviewSectionSkeleton />}>
+            <OverviewSection profilePromise={profilePromise} />
           </Suspense>
-          <Suspense fallback={<TechStackCardSkeleton />}>
-            <AsyncTechStackCard
+
+          {/* Layers read better with the AI profile's service list, so this
+              streams alongside Overview rather than blocking the shell. */}
+          <Suspense fallback={<ToolkitSectionSkeleton />}>
+            <AsyncToolkitSection
+              stats={stats}
               languages={repoContext.languages}
-              layersPromise={archLayersPromise}
+              layersPromise={profilePromise.then((p) => deriveArchLayers(repoContext, p))}
             />
           </Suspense>
+
+          <UpdatesSection
+            commits={timeline}
+            activity={insights.activity}
+            repoUrl={repoUrl}
+            checks={checks}
+            links={links}
+          />
+
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            <Link href="/b" className="dashed-link" style={{ fontSize: 13.5, fontWeight: 500 }}>
+              See your build board
+            </Link>
+          </div>
         </div>
-
-        <Suspense fallback={<BranchesCardSkeleton />}>
-          <BranchesCard graphPromise={branchGraphPromise} />
-        </Suspense>
-
-        <StructureCard entries={repoContext.topLevelTree} />
-
-        <ReadmeCard markdown={repoContext.readmeExcerpt} readmeUrl={readmeUrl} />
-
-        <div
-          style={{
-            paddingTop: 4,
-            display: "flex",
-            gap: 18,
-            flexWrap: "wrap",
-          }}
-        >
-          <Link
-            href="/b"
-            className="dashed-link"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13.5,
-              fontWeight: 500,
-            }}
-          >
-            See your build board
-            <Icon name="arrow" size={13} color="currentColor" />
-          </Link>
-          <Link
-            href="/b/settings/github"
-            className="dashed-link"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13.5,
-              fontWeight: 500,
-            }}
-          >
-            GitHub settings
-            <Icon name="settings" size={13} color="currentColor" />
-          </Link>
-        </div>
-      </div>
-    </main>
+      </main>
+    </>
   );
+}
+
+async function AsyncToolkitSection({
+  stats,
+  languages,
+  layersPromise,
+}: {
+  stats: ToolkitStats;
+  languages: RepoContext["languages"];
+  layersPromise: Promise<ReturnType<typeof deriveArchLayers>>;
+}) {
+  const layers = await layersPromise;
+  return <ToolkitSection stats={stats} layers={layers} languages={languages} />;
 }
 
 function RepoChips({ options, activeKey }: { options: RepoOption[]; activeKey: string }) {
   if (options.length <= 1) return null;
   return (
-    <div className="krowe-filter-row" style={{ marginBottom: -4 }}>
+    <div className="krowe-filter-row">
       {options.map((o) => (
         <Link
           key={o.key}
@@ -330,15 +294,4 @@ function RepoChips({ options, activeKey }: { options: RepoOption[]; activeKey: s
       ))}
     </div>
   );
-}
-
-async function AsyncTechStackCard({
-  languages,
-  layersPromise,
-}: {
-  languages: RepoContext["languages"];
-  layersPromise: Promise<ReturnType<typeof deriveArchLayers>>;
-}) {
-  const layers = await layersPromise;
-  return <TechStackCard languages={languages} layers={layers} />;
 }

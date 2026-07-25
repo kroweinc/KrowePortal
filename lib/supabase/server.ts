@@ -7,7 +7,26 @@ import { cache } from "react";
 export function createAdminClient() {
   return createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      global: {
+        // PostgREST reads go out as plain GETs, which Next both memoizes for the
+        // duration of a render and can persist in the Data Cache. That makes a
+        // read-after-write inside one render silently return the pre-write rows:
+        // the layout and the staging page both read repo_branches, so a branch
+        // swept from the cache in between still came back on the second read and
+        // rendered as a live branch. A database client must never answer from a
+        // cached response — opt out of the Data Cache (`no-store`) and of request
+        // memoization (an AbortController signal, the documented escape hatch),
+        // while preserving any signal the caller set via `.abortSignal()`.
+        fetch: (input, init) =>
+          fetch(input, {
+            ...init,
+            cache: "no-store",
+            signal: init?.signal ?? new AbortController().signal,
+          }),
+      },
+    }
   );
 }
 

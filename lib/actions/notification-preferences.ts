@@ -18,6 +18,11 @@ export interface NotificationPreferenceFlags {
   notify_doc_signed: boolean;
   notify_change_order: boolean;
   notify_invite_accepted: boolean;
+  notify_task_approval_requested: boolean;
+  notify_task_approved: boolean;
+  notify_task_changes_requested: boolean;
+  notify_task_delivered: boolean;
+  notify_task_comment: boolean;
 }
 
 // Module-private: a "use server" file may only export async functions, so this
@@ -26,6 +31,11 @@ const NOTIFICATION_PREFERENCE_DEFAULTS: NotificationPreferenceFlags = {
   notify_doc_signed: true,
   notify_change_order: true,
   notify_invite_accepted: true,
+  notify_task_approval_requested: true,
+  notify_task_approved: true,
+  notify_task_changes_requested: true,
+  notify_task_delivered: true,
+  notify_task_comment: true,
 };
 
 /** Read the signed-in user's notification flags. Falls back to all-on when no
@@ -37,15 +47,23 @@ export async function getNotificationPreferences(): Promise<NotificationPreferen
   const supabase = await getClient(profile.id);
   const { data } = await supabase
     .from("notification_preferences")
-    .select("notify_doc_signed, notify_change_order, notify_invite_accepted")
+    .select(
+      "notify_doc_signed, notify_change_order, notify_invite_accepted, notify_task_approval_requested, notify_task_approved, notify_task_changes_requested, notify_task_delivered, notify_task_comment"
+    )
     .eq("user_id", profile.id)
     .maybeSingle();
 
   if (!data) return { ...NOTIFICATION_PREFERENCE_DEFAULTS };
+  const row = data as NotificationPreferences;
   return {
-    notify_doc_signed: (data as NotificationPreferences).notify_doc_signed ?? true,
-    notify_change_order: (data as NotificationPreferences).notify_change_order ?? true,
-    notify_invite_accepted: (data as NotificationPreferences).notify_invite_accepted ?? true,
+    notify_doc_signed: row.notify_doc_signed ?? true,
+    notify_change_order: row.notify_change_order ?? true,
+    notify_invite_accepted: row.notify_invite_accepted ?? true,
+    notify_task_approval_requested: row.notify_task_approval_requested ?? true,
+    notify_task_approved: row.notify_task_approved ?? true,
+    notify_task_changes_requested: row.notify_task_changes_requested ?? true,
+    notify_task_delivered: row.notify_task_delivered ?? true,
+    notify_task_comment: row.notify_task_comment ?? true,
   };
 }
 
@@ -53,6 +71,11 @@ const updateSchema = z.object({
   notify_doc_signed: z.boolean(),
   notify_change_order: z.boolean(),
   notify_invite_accepted: z.boolean(),
+  notify_task_approval_requested: z.boolean(),
+  notify_task_approved: z.boolean(),
+  notify_task_changes_requested: z.boolean(),
+  notify_task_delivered: z.boolean(),
+  notify_task_comment: z.boolean(),
 });
 
 /** Persist the signed-in user's notification flags. Upserts on user_id, so the

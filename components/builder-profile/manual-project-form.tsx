@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Plus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -72,7 +73,11 @@ export function ManualProjectForm({ project, trigger }: ManualProjectFormProps) 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        {trigger ?? <Button variant="outline" size="sm">Add project</Button>}
+        {trigger ?? (
+          <button type="button" className="ss-btn">
+            <Plus /> Add new project
+          </button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

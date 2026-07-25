@@ -43,17 +43,31 @@
 |---|---|---|
 | `--background` | `#fdfbfa` | Page canvas |
 | `--surface-subtle` | `#fbf8f5` | Card / panel backgrounds |
+| `--surface-sunken` | `#f7f3ef` | Recessed fills — meter tracks, glyph medallions |
 | `--foreground` | `#1a1512` | Body text, icons |
 | `--muted-foreground` | `#68625e` | Secondary text, placeholders |
+| `--faint-foreground` | `#908b87` | Hints, counters, empty-state copy |
 | `--border` | `#e7e4e1` | Dividers, input borders |
+| `--border-strong` | `#d4d0cd` | Hover borders, dashed affordances |
+| `--border-soft` | `#ebeae9` | Neutral chip fills that sit on white |
 
 #### Semantic Palette
 
-| Token | Hex | Light Variant | Usage |
+The soft variant is a 12% wash of its base over white. `--success` additionally
+carries a brighter mint pair for success states that must hold their own against
+white rather than whisper — a Verified pill, a recommendation panel.
+
+| Token | Hex | Soft Variant | Usage |
 |---|---|---|---|
-| `--success` | `#15803d` | `--success-light: #f0fdf4` | Confirmations |
-| `--warning` | `#b45309` | `--warning-light: #fffbeb` | Caution states |
-| `--danger` | `#b91c1c` | `--danger-light: #fef2f2` | Errors, destructive actions |
+| `--success` | `#15803d` | `--success-soft` | Confirmations |
+| `--warning` | `#b45309` | `--warning-soft` | Caution states |
+| `--danger` | `#b91c1c` | `--danger-soft` | Errors, destructive actions |
+| `--info` | `#1269a8` | `--info-soft: #f0f9ff` | Neutral-positive states — a chosen tag, an advisory note |
+| — | — | `--success-tint: #d0fae5` | Verified pills, recommendation chips |
+| — | — | `--success-surface: #f5fbf6` | Recommendation panel fill |
+
+`--info` is not `--builder-text`. The builder/operator accents identify *who is
+looking*; `--info` describes *what a thing is*. Never substitute one for the other.
 
 #### Extras
 
@@ -152,6 +166,27 @@ Subtitle text beneath a hero headline fades in at `--duration-slower` with a `20
 | `--space-4xl` | `48px` |
 | `--space-5xl` | `64px` |
 | `--space-6xl` | `96px` |
+
+#### Shell Dimensions
+
+| Token | Value | Usage |
+|---|---|---|
+| `--sidebar-width` | `260px` | Sidebar rail width. `216px` at ≤860px, `64px` when the rail is collapsed (set on `.krowe-app` via `:has()`, so the topbar can read it too). |
+| `--topbar-height` | `60px` | Topbar height. The topbar is sticky, so this is also the offset a scrolled-to anchor must clear — use it for `scroll-margin-top`, never a literal. |
+
+The rail and the topbar are the shell's two pinned surfaces: both stick to the
+window (the page itself is the scroll container), and the topbar sits at `z-30`
+— above a page's own sticky bits, below sheets, dialogs and menus. A page gets
+one pinned header, and the topbar is it; don't add a second sticky bar beneath
+it.
+
+The topbar renders inside the content column, to the right of the rail — so
+centering something in the topbar makes it read right of the window's true
+centerline. To center against the whole window, give the topbar's right-hand
+slot a flex-basis of `var(--sidebar-width)`; the extra basis shifts the centered
+item left by half a rail. Prefer this over a transform offset, so the item
+reflows instead of sliding under the rail when space runs short. The global
+search pill is the reference case.
 
 #### Border Radius
 

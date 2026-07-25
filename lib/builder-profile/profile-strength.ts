@@ -14,7 +14,7 @@ export interface ProfileStrengthInput {
   tags: string[];
   projects: { source: string }[];
   experience: unknown[];
-  educationSchool: string;
+  education: unknown[];
   codingTools: unknown[];
   avatarUrl: string | null;
   hasResume: boolean;
@@ -61,7 +61,7 @@ export function computeStrength(d: ProfileStrengthInput): ProfileStrength {
     { key: "projects", label: "Show 3+ projects", done: d.projects.length >= 3, weight: 8 },
     { key: "experience", label: "Add work experience", done: d.experience.length >= 1, weight: 10 },
     { key: "resume", label: "Upload a resume", done: d.hasResume, weight: 8 },
-    { key: "education", label: "Add education", done: has(d.educationSchool), weight: 4 },
+    { key: "education", label: "Add education", done: d.education.length >= 1, weight: 4 },
     { key: "tools", label: "List your coding tools", done: d.codingTools.length >= 3, weight: 4 },
   ];
   const total = items.reduce((s, i) => s + i.weight, 0);

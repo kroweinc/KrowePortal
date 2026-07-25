@@ -6,6 +6,7 @@ import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-ava
 import {
   getCachedBranchPurposes,
   getBranchesByEngagement,
+  warmEngagementBranches,
 } from "@/lib/actions/get-engagement-branches";
 import { StagingBoard } from "@/components/staging-board";
 import type { Task, StagingGroup } from "@/lib/types";
@@ -57,6 +58,11 @@ export default async function StagingPage() {
           .order("created_at", { ascending: true })
       : { data: [] };
   const stagingGroups = (groupRows ?? []) as StagingGroup[];
+  // Unlike the other boards, this page *renders* a bucket per live branch — a
+  // branch deleted on GitHub would show up as an empty group. So freshen before
+  // reading rather than in `after()`: the check is two queries when the cache is
+  // current, and one GitHub request when it isn't.
+  await warmEngagementBranches();
   const branchesByEngagement = await getBranchesByEngagement(engagementList);
 
   // Branch "purpose" one-liners for the group subtitles — read-only from the

@@ -241,6 +241,27 @@ export const TaskClassifyResult = z.object({
   tags: TagList,
 });
 
+// Commits on the default branch that appear to finish an open task — the
+// "you forgot to mark this done" safeguard. Deliberately a sparse ARRAY, not a
+// per-commit map: the model only emits the commits it actually matched, so
+// "no match" costs nothing to express and there's no field to fill in for the
+// (usual) case where a commit finishes nothing. taskId is a plain string, not
+// .uuid() — a hallucinated id has to be filtered by the caller's whitelist
+// anyway, and failing safeParse would throw away the whole batch's real matches.
+export const CommitTaskMatchResult = z.object({
+  matches: z
+    .array(
+      z.object({
+        sha: z.string().min(7).max(64),
+        taskId: z.string().min(1).max(64),
+        confidence: z.number().min(0).max(1),
+        reason: z.string().min(1).max(200),
+      })
+    )
+    .max(40)
+    .default([]),
+});
+
 export const ProjectProfileResult = z.object({
   summary: z.string().min(20).max(600),
   audience: z.string().min(10).max(400),
@@ -585,6 +606,7 @@ export type SubtaskDraft = z.infer<typeof SubtaskDraft>;
 export type SubtasksResult = z.infer<typeof SubtasksResult>;
 export type TaskEstimateResult = z.infer<typeof TaskEstimateResult>;
 export type TaskClassifyResult = z.infer<typeof TaskClassifyResult>;
+export type CommitTaskMatchResult = z.infer<typeof CommitTaskMatchResult>;
 export type SimplifiedSubtask = z.infer<typeof SimplifiedSubtask>;
 export type SimplifiedTask = z.infer<typeof SimplifiedTask>;
 export type SimplifyTasksResult = z.infer<typeof SimplifyTasksResult>;
