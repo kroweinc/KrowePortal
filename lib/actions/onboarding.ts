@@ -7,9 +7,12 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createProject } from "@/lib/actions/projects";
 import { createInvitation } from "@/lib/actions/invitations";
+import { normalizeUrl } from "@/lib/project/business-context";
+import { fetchBrand, type FetchedBrand } from "@/lib/brand-fetch";
 import {
   AGENCY_TYPES,
   AGENCY_SIZES,
+  ONBOARDING_STEPS,
   PRICING_MODELS,
   type Engagement,
   type OnboardingState,
@@ -54,7 +57,7 @@ export async function saveOnboardingProgress(
   return { success: true };
 }
 
-const stepSchema = z.enum(["identity", "agency_type", "agency_size", "client", "charging"]);
+const stepSchema = z.enum(ONBOARDING_STEPS);
 
 // Skip helper: advances the wizard step without doing any work.
 export async function advanceOnboarding(
@@ -65,21 +68,49 @@ export async function advanceOnboarding(
   return saveOnboardingProgress({ step: parsed.data });
 }
 
+const brandUrlSchema = z.string().trim().min(1, "Add your website link first.").max(300);
+
+/**
+ * Identity step: reads an agency's brand off its own website so the builder
+ * doesn't retype what their homepage already says. Returns the fetched brand
+ * for the client to preview — nothing is persisted until they continue, so a
+ * wrong link costs one click to correct.
+ */
+export async function fetchAgencyBrand(
+  url: string
+): Promise<{ brand: FetchedBrand } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders have onboarding." };
+
+  const parsed = brandUrlSchema.safeParse(url);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Enter a website link." };
+
+  const normalized = normalizeUrl(parsed.data);
+  if (!normalized) return { error: "Enter a website link, like acme.com." };
+
+  const { brand, error } = await fetchBrand(normalized);
+  if (!brand) return { error: error ?? "Couldn't read that site." };
+  return { brand };
+}
+
 const identitySchema = z.object({
   displayName: z.string().trim().min(1, "Enter your name.").max(80).optional().or(z.literal("")),
   agencyName: z.string().trim().max(120).optional().or(z.literal("")),
   agencyRole: z.string().trim().max(120).optional().or(z.literal("")),
+  agencyWebsite: z.string().trim().max(300).optional().or(z.literal("")),
 });
 
 /**
  * Identity step: saves the builder's display name (if changed) plus their agency
- * name and role, then advances to the agency-type step. Avatar upload is handled
- * separately (uploadAvatar) against the row bootstrapped at signup.
+ * name, role, and website, then advances to the agency-type step. Avatar upload
+ * is handled separately (uploadAvatar) against the row bootstrapped at signup.
  */
 export async function saveAgencyIdentity(input: {
   displayName?: string;
   agencyName?: string;
   agencyRole?: string;
+  agencyWebsite?: string;
 }): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -98,6 +129,9 @@ export async function saveAgencyIdentity(input: {
   const saved = await patchBuilderProfile(profile.id, {
     agency_name: (parsed.data.agencyName ?? "").trim() || null,
     agency_role: (parsed.data.agencyRole ?? "").trim() || null,
+    // normalizeUrl also rejects non-http(s) schemes, so a typed link can never
+    // be stored and later rendered into an href.
+    agency_website: normalizeUrl(parsed.data.agencyWebsite),
   });
   if (saved.error) return { error: saved.error };
 
@@ -187,7 +221,6 @@ export async function createClientEngagement(input: {
   if (profile.role !== "builder") return { error: "Only builders can create clients." };
 
   const admin = createAdminClient();
-
   // Resume guard: an engagement from a previous wizard attempt is reused.
   if (profile.onboarding?.engagement_id) {
     const { data: existing } = await admin

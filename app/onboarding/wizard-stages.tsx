@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
+import { BrandLogo } from "@/components/prd/brand-logo";
 import { WzIcon } from "./wizard-shell";
 
 /* ============================================================
@@ -38,11 +39,14 @@ function StageWindow({ titlebar, status, statusTone = "muted", children, width =
   );
 }
 
-function MetaRow({ label, value, mono }: { label: string; value?: string; mono?: boolean }) {
+function MetaRow({ label, value, mono, glyph }: { label: string; value?: string; mono?: boolean; glyph?: ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
       <span style={{ fontFamily: "var(--font-sans)", fontSize: 11, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>{label}</span>
-      <span style={{ fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)", fontSize: 13.5, color: value ? "var(--foreground)" : "var(--border)", fontWeight: value ? 500 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 230 }}>{value || "—"}</span>
+      <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        {glyph}
+        <span style={{ fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)", fontSize: 13.5, color: value ? "var(--foreground)" : "var(--border)", fontWeight: value ? 500 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 230 }}>{value || "—"}</span>
+      </span>
     </div>
   );
 }
@@ -92,12 +96,14 @@ export function PortalTeaserStage() {
 }
 
 /* ---------- Identity — the builder's profile card ---------- */
-export function IdentityStage({ name, agency, role, avatarUrl }: {
+export function IdentityStage({ name, agency, role, avatarUrl, domain }: {
   name?: string; agency?: string; role?: string; avatarUrl?: string | null;
+  /** Bare host from the agency website — resolves the real brand logo. */
+  domain?: string;
 }) {
   const displayName = (name || "").trim() || "Your name";
   const roleLine = [(role || "").trim(), (agency || "").trim()].filter(Boolean).join(" · ");
-  const filled = !!(name || agency || role);
+  const filled = !!(name || agency || role || domain);
   return (
     <StageWindow titlebar="Your profile" status={filled ? "Draft" : "New"} statusTone="muted">
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
@@ -114,7 +120,12 @@ export function IdentityStage({ name, agency, role, avatarUrl }: {
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <MetaRow label="Agency" value={(agency || "").trim()} />
+        <MetaRow
+          label="Agency"
+          value={(agency || "").trim()}
+          glyph={domain ? <BrandLogo domain={domain} name={agency || domain} size={20} /> : undefined}
+        />
+        <MetaRow label="Website" value={domain} mono />
         <MetaRow label="Role" value={(role || "").trim()} />
       </div>
     </StageWindow>

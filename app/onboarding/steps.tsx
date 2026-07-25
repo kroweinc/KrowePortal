@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, useTransition, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { AvatarUpload } from "@/components/builder-profile/avatar-upload";
 import {
   advanceOnboarding,
   createClientEngagement,
+  fetchAgencyBrand,
   saveAgencyIdentity,
   saveAgencyType,
   saveAgencySize,
@@ -134,6 +135,41 @@ function ModelPill({ title, hint, selected, onClick, disabled }: {
 
 /* ------------------------------- identity -------------------------------- */
 
+/* Pause in typing that reads as "done with the domain" — long enough that a
+   half-typed host isn't looked up, short enough to feel automatic. */
+const BRAND_LOOKUP_DELAY_MS = 700;
+
+/** Bare host out of whatever the builder typed — "" until it looks like one, so
+    the logo only appears once there's a real domain to resolve. */
+function hostOf(raw: string): string {
+  const host = raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .replace(/\s/g, "");
+  return host.includes(".") ? host : "";
+}
+
+/* Quiet status sharing a line field's row. The brand lookup runs on its own, so
+   this is the only sign it's working — non-interactive by design. */
+function WzFieldStatus({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      role="status"
+      style={{
+        flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 7,
+        fontFamily: "var(--font-sans)", fontSize: 13, whiteSpace: "nowrap",
+        color: "var(--muted-foreground)",
+      }}
+    >
+      <WzIcon name="clock" size={14} />
+      {children}
+    </span>
+  );
+}
+
 export function IdentityStep({ nav, profile }: { nav: WizardNav; profile: OnboardingBuilderProfile }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -143,6 +179,62 @@ export function IdentityStep({ nav, profile }: { nav: WizardNav; profile: Onboar
     agency: profile.agencyName ?? "",
     role: profile.agencyRole ?? "",
   });
+  const [website, setWebsite] = useState(profile.agencyWebsite ?? "");
+  const [brandError, setBrandError] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
+  // Host the lookup last ran on, so settling back onto it — a re-render, the
+  // redirect that rewrites the field — doesn't fetch it twice. Seeded with the
+  // saved site: resuming the step shouldn't hit the network. Editing away and
+  // back is the retry.
+  const lookedUp = useRef(hostOf(profile.agencyWebsite ?? ""));
+  // Latest text in the field, so a lookup that's still in flight can tell
+  // whether the builder has typed on since it started.
+  const typed = useRef(website);
+
+  // Read the agency's own site for its name and logo, on a pause in typing
+  // rather than a button. Deliberately its own pending flag, not the form
+  // transition: nothing is saved and the step doesn't advance, so the Continue
+  // button shouldn't flicker.
+  const host = hostOf(website);
+  useEffect(() => {
+    if (!host || host === lookedUp.current) return;
+    let live = true;
+    const timer = setTimeout(async () => {
+      const requested = typed.current;
+      lookedUp.current = host;
+      setBrandError(null);
+      setFetching(true);
+      let res;
+      try {
+        res = await fetchAgencyBrand(host);
+      } finally {
+        setFetching(false);
+      }
+      // The field moved on while we were reading — this answer describes a site
+      // that's no longer in it.
+      if (!live) return;
+
+      if ("error" in res) {
+        setBrandError(res.error);
+        return;
+      }
+      const fetched = res.brand;
+      lookedUp.current = hostOf(fetched.websiteUrl);
+      // Swap in the URL the site actually resolved to — but only while the
+      // field still holds what we looked up; anything typed since is theirs.
+      if (typed.current === requested) {
+        typed.current = fetched.websiteUrl;
+        setWebsite(fetched.websiteUrl);
+      }
+      // Only fills a blank field — a name the builder already typed is theirs
+      // to keep.
+      setForm((f) => (fetched.name && !f.agency.trim() ? { ...f, agency: fetched.name } : f));
+    }, BRAND_LOOKUP_DELAY_MS);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [host]);
 
   function handleSubmit(formData: FormData) {
     startTransition(async () => {
@@ -150,6 +242,7 @@ export function IdentityStep({ nav, profile }: { nav: WizardNav; profile: Onboar
         displayName: (formData.get("display_name") as string) || undefined,
         agencyName: (formData.get("agency_name") as string) || undefined,
         agencyRole: (formData.get("agency_role") as string) || undefined,
+        agencyWebsite: (formData.get("agency_website") as string) || undefined,
       });
       if ("error" in res) {
         setError(res.error);
@@ -165,11 +258,18 @@ export function IdentityStep({ nav, profile }: { nav: WizardNav; profile: Onboar
       progress={{ pathLabel: "Your account", index: 1, total: 5 }}
       title="Let's set up your identity"
       sub="This is how clients and teammates see you across the portal."
-      note="You can refine any of this later in Settings."
       stageEyebrow="Your profile"
       stageHeadline="You, front and center."
       stageSub="Your name and agency show on every doc you send."
-      stage={<IdentityStage name={form.name} agency={form.agency} role={form.role} avatarUrl={profile.avatarUrl} />}
+      stage={
+        <IdentityStage
+          name={form.name}
+          agency={form.agency}
+          role={form.role}
+          avatarUrl={profile.avatarUrl}
+          domain={hostOf(website)}
+        />
+      }
     >
       <form action={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <AvatarUpload avatarUrl={profile.avatarUrl} displayName={form.name || profile.displayName || "You"} />
@@ -179,10 +279,24 @@ export function IdentityStep({ nav, profile }: { nav: WizardNav; profile: Onboar
           onChange={(v) => setForm((f) => ({ ...f, name: v }))}
         />
         <WzLineField
-          label="Agency or company" name="agency_name" defaultValue={profile.agencyName ?? ""}
+          label="Agency or company" name="agency_name" value={form.agency}
           placeholder="Ember Studio" maxLength={120}
           onChange={(v) => setForm((f) => ({ ...f, agency: v }))}
         />
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <WzLineField
+            label="Agency website" optional name="agency_website" value={website}
+            placeholder="emberstudio.com" maxLength={300}
+            onChange={(v) => {
+              typed.current = v;
+              setWebsite(v);
+              // The error describes a site that's no longer in the field.
+              setBrandError(null);
+            }}
+            trailing={fetching ? <WzFieldStatus>Reading your site…</WzFieldStatus> : undefined}
+          />
+          {brandError && <p style={errStyle}>{brandError}</p>}
+        </div>
         <WzLineField
           label="Your role" optional name="agency_role" defaultValue={profile.agencyRole ?? ""}
           placeholder="Founder & lead engineer" maxLength={120}

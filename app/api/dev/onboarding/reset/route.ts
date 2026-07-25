@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { DEV_TOGGLE_ENABLED, DEV_ROLE_COOKIE, DEV_ONBOARDING_COOKIE } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
+import { ONBOARDING_STEPS } from "@/lib/types";
 import type { OnboardingStep } from "@/lib/types";
 
 /**
@@ -17,7 +18,6 @@ import type { OnboardingStep } from "@/lib/types";
  */
 
 const DEV_BUILDER_ID = "00000000-0000-0000-0000-000000000002";
-const STEPS: OnboardingStep[] = ["identity", "agency_type", "agency_size", "client", "charging"];
 const COOKIE = { httpOnly: true, sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 30 } as const;
 
 export async function GET(request: Request) {
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
   }
 
   const requested = params.get("step");
-  const step: OnboardingStep = STEPS.includes(requested as OnboardingStep)
+  const step: OnboardingStep = ONBOARDING_STEPS.includes(requested as OnboardingStep)
     ? (requested as OnboardingStep)
     : "identity";
 
@@ -61,10 +61,14 @@ export async function GET(request: Request) {
       user_id: DEV_BUILDER_ID,
       agency_name: null,
       agency_role: null,
+      agency_website: null,
       agency_type: null,
       agency_size: null,
       pricing_model: null,
-      default_hourly_rate: null,
+      // Back to the column default, NOT null: default_hourly_rate is NOT NULL
+      // (0058), and one rejected column fails the whole upsert — which left
+      // every answer above stale and the wizard replaying against old data.
+      default_hourly_rate: 45,
       avatar_storage_path: null,
       updated_at: new Date().toISOString(),
     },

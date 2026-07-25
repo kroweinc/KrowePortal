@@ -214,12 +214,15 @@ interface LineFieldProps {
   mono?: boolean;
   /** Optional live listener — fires without making the input controlled. */
   onChange?: (value: string) => void;
+  /** Node rendered beside the input, sharing its row (e.g. a lookup status). */
+  trailing?: ReactNode;
 }
 
 /* Ledger-style underline input — editorial, not boxed. Uncontrolled by default. */
 export function WzLineField({
   label, optional, type = "text", name, placeholder,
   defaultValue, value, readOnly, required, maxLength, autoFocus, mono, onChange,
+  trailing,
 }: LineFieldProps) {
   const [focused, setFocused] = useState(false);
   return (
@@ -230,28 +233,31 @@ export function WzLineField({
           {optional && <span style={{ fontWeight: 500, letterSpacing: "0.04em", opacity: 0.7 }}> · optional</span>}
         </label>
       )}
-      <input
-        type={type}
-        name={name}
-        placeholder={placeholder}
-        defaultValue={value === undefined ? defaultValue : undefined}
-        value={value}
-        readOnly={readOnly}
-        required={required}
-        maxLength={maxLength}
-        autoFocus={autoFocus}
-        onChange={onChange ? (e) => onChange(e.target.value) : undefined}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        style={{
-          width: "100%", padding: "7px 2px", boxSizing: "border-box",
-          border: "none", borderBottom: `1.5px solid ${focused ? "var(--primary)" : "var(--border)"}`,
-          borderRadius: 0, background: "transparent", boxShadow: "none",
-          fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)",
-          fontSize: mono ? 14 : 17, fontWeight: 400, color: "var(--foreground)", outline: "none",
-          transition: "border-color var(--duration-fast) var(--ease-out-smooth)",
-        }}
-      />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <input
+          type={type}
+          name={name}
+          placeholder={placeholder}
+          defaultValue={value === undefined ? defaultValue : undefined}
+          value={value}
+          readOnly={readOnly}
+          required={required}
+          maxLength={maxLength}
+          autoFocus={autoFocus}
+          onChange={onChange ? (e) => onChange(e.target.value) : undefined}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            flex: 1, minWidth: 0, padding: "7px 2px", boxSizing: "border-box",
+            border: "none", borderBottom: `1.5px solid ${focused ? "var(--primary)" : "var(--border)"}`,
+            borderRadius: 0, background: "transparent", boxShadow: "none",
+            fontFamily: mono ? "var(--font-mono)" : "var(--font-sans)",
+            fontSize: mono ? 14 : 17, fontWeight: 400, color: "var(--foreground)", outline: "none",
+            transition: "border-color var(--duration-fast) var(--ease-out-smooth)",
+          }}
+        />
+        {trailing}
+      </div>
     </div>
   );
 }

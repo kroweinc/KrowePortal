@@ -11,6 +11,7 @@ import {
   ChargingStep,
 } from "./steps";
 import type { WizardNav } from "./wizard-shell";
+import { ONBOARDING_STEPS } from "@/lib/types";
 import type {
   AgencySize,
   AgencyType,
@@ -24,6 +25,7 @@ export interface OnboardingBuilderProfile {
   displayName: string;
   agencyName: string | null;
   agencyRole: string | null;
+  agencyWebsite: string | null;
   agencyType: AgencyType | null;
   agencySize: AgencySize | null;
   pricingModel: PricingModel | null;
@@ -38,14 +40,12 @@ export interface WizardProps {
   profile: OnboardingBuilderProfile;
 }
 
-// Single linear flow — no fork. Back is derived from this order so forward and
-// backward navigation can never desync; state lives in the DB, not a history
-// stack, so this survives router.refresh() and resume.
-const STEPS: OnboardingStep[] = ["identity", "agency_type", "agency_size", "client", "charging"];
-
+// Single linear flow — no fork. Back is derived from ONBOARDING_STEPS' order so
+// forward and backward navigation can never desync; state lives in the DB, not a
+// history stack, so this survives router.refresh() and resume.
 function prevStep(step: OnboardingStep): OnboardingStep | null {
-  const i = STEPS.indexOf(step);
-  return i > 0 ? STEPS[i - 1] : null;
+  const i = ONBOARDING_STEPS.indexOf(step);
+  return i > 0 ? ONBOARDING_STEPS[i - 1] : null;
 }
 
 export function OnboardingWizard({ step, engagement, inviteToken, profile }: WizardProps) {

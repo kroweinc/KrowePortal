@@ -1,8 +1,5 @@
-import { lookup } from "node:dns/promises";
+import { fetchHtmlPage, decodeEntities, ERR_UNREACHABLE } from "@/lib/fetch-html";
 
-const FETCH_TIMEOUT_MS = 10_000;
-const MAX_REDIRECTS = 3;
-const MAX_PAGE_BYTES = 500_000;
 const MAX_EXTRA_PAGES = 4;
 const MAX_PAGE_CHARS = 15_000;
 const MAX_TOTAL_CHARS = 40_000;
@@ -15,142 +12,17 @@ const SKIP_EXTENSIONS =
   /\.(pdf|png|jpe?g|gif|webp|avif|svg|ico|zip|tar|gz|mp4|mov|webm|mp3|css|js|mjs|json|xml|txt|woff2?)$/i;
 const SKIP_HREF = /^(#|mailto:|javascript:|tel:|data:)/i;
 
-const ERR_UNFETCHABLE = "That URL can't be fetched.";
-const ERR_UNREACHABLE = "Couldn't reach that site. Check the URL and try again.";
-
 export interface FetchedSite {
   content: string;
   pagesFetched: number;
 }
 
-function isPrivateIpv4(address: string): boolean {
-  const parts = address.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
-    return true;
-  }
-  const [a, b] = parts;
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168)
-  );
-}
-
-function isPrivateAddress(address: string, family: number): boolean {
-  if (family === 4) return isPrivateIpv4(address);
-  const addr = address.toLowerCase();
-  if (addr === "::" || addr === "::1") return true;
-  const mappedV4 = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
-  if (mappedV4) return isPrivateIpv4(mappedV4[1]);
-  if (/^f[cd]/.test(addr)) return true; // fc00::/7 unique-local
-  if (/^fe[89ab]/.test(addr)) return true; // fe80::/10 link-local
-  return false;
-}
-
-/**
- * SSRF guard: only public http(s) hosts may be fetched. Resolves the hostname
- * and rejects if ANY address is private/reserved. DNS rebinding between this
- * lookup and the actual fetch is a residual risk we accept for v1 (fetch()
- * can't pin a resolved IP).
- *
- * Returns a user-facing error string, or null when the URL is safe.
- */
-async function checkUrlSafe(u: URL): Promise<string | null> {
-  if (u.protocol !== "http:" && u.protocol !== "https:") return ERR_UNFETCHABLE;
-  const host = u.hostname.toLowerCase().replace(/\.$/, "");
-  if (
-    host === "localhost" ||
-    host === "0.0.0.0" ||
-    host.endsWith(".localhost") ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal")
-  ) {
-    return ERR_UNFETCHABLE;
-  }
-  let addresses: { address: string; family: number }[];
-  try {
-    addresses = await lookup(host, { all: true });
-  } catch {
-    return ERR_UNREACHABLE;
-  }
-  if (addresses.length === 0 || addresses.some((a) => isPrivateAddress(a.address, a.family))) {
-    return ERR_UNFETCHABLE;
-  }
-  return null;
-}
-
-/**
- * Fetch one page with manual redirect handling so every hop is re-validated
- * against the SSRF guard (a public site could otherwise redirect us to an
- * internal address).
- */
-async function fetchPage(
-  rawUrl: string
-): Promise<{ html?: string; finalUrl?: string; error?: string }> {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return { error: ERR_UNFETCHABLE };
-  }
-
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    const unsafe = await checkUrlSafe(url);
-    if (unsafe) return { error: unsafe };
-
-    let res: Response;
-    try {
-      res = await fetch(url.href, {
-        redirect: "manual",
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-        headers: {
-          "User-Agent": "KrowePortal-ProfileImport/1.0",
-          Accept: "text/html",
-        },
-      });
-    } catch {
-      return { error: ERR_UNREACHABLE };
-    }
-
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get("location");
-      if (!location) return { error: ERR_UNREACHABLE };
-      try {
-        url = new URL(location, url);
-      } catch {
-        return { error: ERR_UNFETCHABLE };
-      }
-      continue;
-    }
-
-    if (!res.ok) return { error: ERR_UNREACHABLE };
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.includes("text/html")) {
-      return { error: "That URL isn't a web page. Link your portfolio site's homepage." };
-    }
-    const body = await res.text();
-    return { html: body.slice(0, MAX_PAGE_BYTES), finalUrl: url.href };
-  }
-
-  return { error: ERR_UNREACHABLE };
-}
-
-const ENTITIES: Record<string, string> = {
-  "&amp;": "&",
-  "&lt;": "<",
-  "&gt;": ">",
-  "&quot;": '"',
-  "&#39;": "'",
-  "&apos;": "'",
-  "&nbsp;": " ",
-};
-
-function decodeEntities(s: string): string {
-  return s.replace(/&(?:amp|lt|gt|quot|#39|apos|nbsp);/g, (m) => ENTITIES[m] ?? m);
+/** Portfolio-flavored wrapper around the shared guarded fetcher. */
+function fetchPage(rawUrl: string) {
+  return fetchHtmlPage(rawUrl, {
+    userAgent: "KrowePortal-ProfileImport/1.0",
+    notHtmlError: "That URL isn't a web page. Link your portfolio site's homepage.",
+  });
 }
 
 /**

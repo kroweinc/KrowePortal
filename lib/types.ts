@@ -50,7 +50,17 @@ export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
 export type TourStatus = "pending" | "completed" | "dismissed";
 // The onboarding wizard is an about-you intake: who you are, what kind of
 // agency you run, its size, an optional current client, and how you charge.
-export type OnboardingStep = "identity" | "agency_type" | "agency_size" | "client" | "charging";
+// Declared in wizard order — the sequence IS the flow, so Back derives from it
+// and a stored step that isn't in this list is treated as stale (see
+// app/onboarding/page.tsx).
+export const ONBOARDING_STEPS = [
+  "identity",
+  "agency_type",
+  "agency_size",
+  "client",
+  "charging",
+] as const;
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 // Wizard-internal state — only the onboarding flow reads/writes this.
 // engagement_id/project_id are set when the optional client step creates one.
@@ -911,6 +921,7 @@ export interface BuilderProfile {
   // Agency identity + charging captured during onboarding (migration 0080).
   agency_name: string | null;
   agency_role: string | null; // the builder's role/title, e.g. "Founder"
+  agency_website: string | null; // brand-fetched site url, e.g. "https://acme.com" (0081)
   agency_type: AgencyType | null;
   agency_size: AgencySize | null;
   pricing_model: PricingModel | null;

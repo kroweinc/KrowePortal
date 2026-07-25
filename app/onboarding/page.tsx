@@ -5,6 +5,7 @@ import { OnboardingForm } from "./onboarding-form";
 import { OnboardingWizard, type OnboardingBuilderProfile, type WizardProps } from "./wizard";
 import { EditorialShell } from "./wizard-shell";
 import { PortalTeaserStage } from "./wizard-stages";
+import { ONBOARDING_STEPS } from "@/lib/types";
 import type { AgencySize, AgencyType, OnboardingStep, PricingModel } from "@/lib/types";
 
 // The wizard's current step lives in profiles.onboarding.step — this page just
@@ -49,13 +50,19 @@ export default async function OnboardingPage() {
 
   // ?? {} — tolerates a DB that hasn't run migration 0053 yet.
   const ob = profile.onboarding ?? {};
-  const step: OnboardingStep = ob.step ?? "identity";
+  // A step the wizard no longer knows about — a builder stranded mid-flow when
+  // the steps changed — restarts at identity instead of rendering nothing. The
+  // wizard's switch has no case for it, and the page they'd get back has no Back
+  // or Skip to escape with, so an unrecognized value can't be trusted here.
+  const step: OnboardingStep = ONBOARDING_STEPS.includes(ob.step as OnboardingStep)
+    ? (ob.step as OnboardingStep)
+    : "identity";
   const admin = createAdminClient();
 
   // The builder's answers so far, so every step renders prefilled and resume-safe.
   const { data: bp } = await admin
     .from("builder_profiles")
-    .select("agency_name, agency_role, agency_type, agency_size, pricing_model, default_hourly_rate, avatar_storage_path")
+    .select("agency_name, agency_role, agency_website, agency_type, agency_size, pricing_model, default_hourly_rate, avatar_storage_path")
     .eq("user_id", profile.id)
     .maybeSingle();
 
@@ -71,6 +78,7 @@ export default async function OnboardingPage() {
     displayName: profile.display_name ?? "",
     agencyName: (bp?.agency_name as string | null) ?? null,
     agencyRole: (bp?.agency_role as string | null) ?? null,
+    agencyWebsite: (bp?.agency_website as string | null) ?? null,
     agencyType: (bp?.agency_type as AgencyType | null) ?? null,
     agencySize: (bp?.agency_size as AgencySize | null) ?? null,
     pricingModel: (bp?.pricing_model as PricingModel | null) ?? null,
