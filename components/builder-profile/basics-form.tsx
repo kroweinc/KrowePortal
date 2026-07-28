@@ -169,7 +169,7 @@ interface LinkInputProps {
 // the expected prefix, so an unusual link is shown as-is rather than mangled.
 function LinkInput({ kind, id, field, value, setField, onBlur, disabled }: LinkInputProps) {
   return (
-    <div className="ss-prefix">
+    <div className="krowe-field-shell ss-prefix">
       <span className="fix" aria-hidden>
         {LINK_PREFIXES[kind]}
       </span>

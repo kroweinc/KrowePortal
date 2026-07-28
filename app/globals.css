@@ -55,6 +55,9 @@
   --border:           oklch(92% 0.005 60);
   --border-strong:    oklch(86% 0.006 60);
   --border-soft:      #ebeae9;  /* quietest fill — neutral chips that sit on white */
+  --border-focus:     oklch(58% 0.01 60);  /* #7f7974 — keyboard focus on a typed-into
+                        surface. 4.29:1 on white (WCAG 1.4.11 needs 3:1) so it still reads
+                        as focus, and darker than --border-strong, which some shells rest at */
 
   /* Role accents */
   --builder-text:   #1d4ed8;
@@ -181,14 +184,50 @@ html, body {
 h1, h2, h3, h4, h5, h6, p { margin: 0; }
 button { font-family: inherit; }
 
-/* Focus ring */
-input:focus-visible,
-textarea:focus-visible,
+/* Focus ring — two treatments, split by how the control is operated.
+   See DESIGN.md → Focus Ring; these rules are the law's implementation.
+
+   Click / pick / toggle it → the 4px orange halo. */
+button:focus-visible,
 select:focus-visible,
-button:focus-visible {
+input:is([type="checkbox"], [type="radio"]):focus-visible {
   outline: none;
   border-color: var(--primary);
   box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+
+/* Type into it → a quiet border step. Never orange, never a halo: on a text
+   surface the ring reads as an error state on an idle field. Do NOT re-add an
+   orange focus treatment to an input or textarea in a feature stylesheet. */
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: none;
+}
+
+/* A bordered shell wrapping a borderless control (composer, search pill, input
+   group) carries .krowe-field-shell. The shell draws the one focus treatment
+   and the control inside draws nothing, so two rings can never stack — the bug
+   this class exists to make unrepeatable. Reach for it instead of hand-rolling
+   a :focus-within rule plus an inner zeroing rule.
+
+   The class is deliberately doubled in both selectors below. This is a utility
+   that has to outrank the feature rule it lands on, and a shell's own base rule
+   can be two classes deep and later in the file (`.ppsetup .ss-prefix`), which
+   would otherwise tie and win on source order — leaving the field with no focus
+   indicator at all. Don't "simplify" it back to a single class. */
+.krowe-field-shell.krowe-field-shell:focus-within {
+  border-color: var(--border-focus);
+  /* Zeroed so a shell that is itself a <button> or <select> can't pick up the
+     halo from the rule above. A shell with resting elevation keeps it by
+     declaring --field-shell-shadow alongside its own box-shadow. */
+  box-shadow: var(--field-shell-shadow, none);
+}
+.krowe-field-shell.krowe-field-shell :is(input, textarea, select):focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
 }
 
 /* ── Keyframes ── */
@@ -263,16 +302,9 @@ button:focus-visible {
               box-shadow 160ms var(--ease-out-smooth);
 }
 .krowe-tb-search:hover { border-color: var(--border-strong); }
-.krowe-tb-search:focus-within {
-  border-color: var(--border);
-  box-shadow: none;
-}
 .krowe-tb-search input {
   border: none; background: none; outline: none; flex: 1; min-width: 0;
   font-size: 13.5px; color: var(--foreground);
-}
-.krowe-tb-search input:focus-visible {
-  box-shadow: none; border-color: transparent;
 }
 .krowe-tb-search input::placeholder { color: var(--faint-foreground); }
 
@@ -321,10 +353,6 @@ button:focus-visible {
   border: none; outline: none; background: none;
   font-size: 13.5px; color: var(--foreground);
 }
-/* Search inputs opt out of the global orange focus ring (they sit inside their
-   own styled containers). Plain CSS so it wins over the unlayered global rule. */
-.krowe-cmd-input:focus-visible,
-.krowe-search-input:focus-visible { outline: none; box-shadow: none; border-color: transparent; }
 .krowe-cmd-input::placeholder { color: var(--faint-foreground); }
 .krowe-cmd-list { max-height: 56vh; overflow-y: auto; padding: 6px; }
 .krowe-cmd-group { padding-bottom: 4px; }
@@ -2772,12 +2800,8 @@ button.krowe-desc-inline-text:hover {
   transition: border-color var(--duration-fast) var(--ease-out-smooth),
               box-shadow var(--duration-fast) var(--ease-out-smooth);
 }
-/* Focus is carried by a quiet border step, not the orange halo — the composer
-   is a container, and the ring read as an alarm on an idle text box. */
-.krowe-cm-composer:focus-within {
-  border-color: var(--border-strong);
-  box-shadow: none;
-}
+/* Focus comes from .krowe-field-shell. The flagged state keeps its amber border
+   through focus — that's a mode signal, not a focus treatment. */
 .krowe-cm-composer.flagged { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
 .krowe-cm-composer.flagged:focus-within {
   border-color: var(--warning);
@@ -2787,11 +2811,6 @@ button.krowe-desc-inline-text:hover {
   width: 100%; resize: none; border: none; outline: none; background: none;
   font-family: inherit; font-size: 13.5px; line-height: 1.6;
   color: var(--foreground); min-height: 24px; max-height: 200px;
-}
-/* The borderless textarea would otherwise stack the global focus halo inside
-   the composer's own border. */
-.krowe-cm-composer textarea:focus-visible {
-  box-shadow: none; border-color: transparent;
 }
 .krowe-cm-composer textarea::placeholder { color: var(--faint-foreground); }
 .krowe-cm-composer-foot {
@@ -2926,11 +2945,6 @@ button.krowe-desc-inline-text:hover {
               box-shadow var(--duration-fast) var(--ease-out-smooth);
 }
 .krowe-regen-textarea::placeholder { color: var(--faint-foreground); }
-.krowe-regen-textarea:focus-visible {
-  outline: none;
-  border-color: var(--primary);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
-}
 .krowe-regen-textarea:disabled { opacity: 0.6; }
 .krowe-regen-actions { display: flex; align-items: center; gap: 8px; }
 
@@ -4276,7 +4290,7 @@ button.krowe-desc-inline-text:hover {
 .prdnew .ed-date { display: flex; flex-direction: column; }
 .prdnew .ed-date-input { width: 100%; max-width: 280px; padding: 14px 16px; border: 1.5px solid var(--primary); border-radius: var(--radius-md); background: white; font-family: var(--font-mono); font-size: 18px; letter-spacing: 0.06em; color: var(--foreground); box-shadow: var(--shadow-1); }
 .prdnew .ed-date-input::placeholder { color: var(--faint-foreground); letter-spacing: 0.06em; }
-.prdnew .ed-date-input:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 14%, transparent), var(--shadow-1); }
+.prdnew .ed-date-input:focus-visible { outline: none; border-color: var(--border-focus); box-shadow: var(--shadow-1); }
 .prdnew .ed-date-hint { margin-top: 10px; font-size: 12.5px; color: var(--muted-foreground); }
 
 /* visually-hidden native input — kept focusable + in the a11y tree (radio
@@ -4758,22 +4772,14 @@ button.krowe-desc-inline-text:hover {
 }
 .ppsetup textarea.ss-input { resize: vertical; min-height: 104px; }
 .ppsetup .ss-input::placeholder { color: var(--faint-foreground); }
-.ppsetup .ss-input:focus {
-  outline: none; border-color: var(--primary);
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
-}
 
 /* Prefixed link input: fixed origin + the part the builder types. */
 .ppsetup .ss-prefix {
   display: flex; align-items: stretch; overflow: hidden;
   border: 1px solid var(--border); border-radius: var(--radius-md);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-1); --field-shell-shadow: var(--shadow-1);
   transition: border-color var(--duration-fast) var(--ease-out-smooth),
               box-shadow var(--duration-fast) var(--ease-out-smooth);
-}
-.ppsetup .ss-prefix:focus-within {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
 }
 .ppsetup .ss-prefix .fix {
   display: flex; align-items: center; flex-shrink: 0;
@@ -5344,7 +5350,7 @@ button.krowe-desc-inline-text:hover {
 .krowe-nt-titleinput:focus,
 .krowe-nt-titleinput:focus-visible {
   outline: none; box-shadow: none;
-  border-color: var(--foreground); background: #fff;
+  border-color: var(--border-focus); background: #fff;
 }
 .krowe-nt-title {
   font-family: var(--font-serif); font-size: 20px; line-height: 1;
@@ -5451,14 +5457,11 @@ button.krowe-desc-inline-text:hover {
   background: #fff;
   transition: border-color 160ms var(--ease-out-smooth), box-shadow 160ms var(--ease-out-smooth);
 }
-.krowe-nt-inputwrap.is-focus,
-.krowe-nt-inputwrap:focus-within {
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 10%, transparent);
-}
-/* focus treatment lives on the wrapper — zero the global input ring inside */
-.krowe-nt-inputwrap :is(input, textarea):focus-visible {
-  outline: none; border-color: transparent; box-shadow: none;
+/* :focus-within comes from .krowe-field-shell; .is-focus is the panel painting
+   the same state before the control has actually taken focus. */
+.krowe-nt-inputwrap.is-focus {
+  border-color: var(--border-focus);
+  box-shadow: none;
 }
 .krowe-nt-input {
   width: 100%; border: none; outline: none; background: none;
@@ -5934,10 +5937,8 @@ button.krowe-desc-inline-text:hover {
   background: var(--surface-subtle);
   transition: all 160ms var(--ease-out-smooth);
 }
-.krowe-gr-search:focus-within {
-  background: white; border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 9%, transparent);
-}
+/* The surface lift stays; the border and halo come from .krowe-field-shell. */
+.krowe-gr-search:focus-within { background: white; }
 .krowe-gr-search .si { color: var(--faint-foreground); display: inline-flex; flex-shrink: 0; }
 .krowe-gr-search input { border: none; background: none; outline: none; flex: 1; min-width: 0; font-size: 13.5px; color: var(--foreground); font-family: var(--font-sans); }
 .krowe-gr-search input::placeholder { color: var(--faint-foreground); }
@@ -6033,7 +6034,7 @@ button.krowe-desc-inline-text:hover {
   padding: 3px 5px; margin: -3px -5px; border-radius: 6px;
   transition: box-shadow 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth);
 }
-.krowe-gr-title-input:focus { background: var(--surface-subtle); box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 22%, transparent); }
+.krowe-gr-title-input:focus { background: var(--surface-subtle); }
 .krowe-gr-title-input:disabled { color: var(--faint-foreground); }
 .krowe-gr-details-btn {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
@@ -6058,10 +6059,8 @@ button.krowe-desc-inline-text:hover {
   resize: vertical; outline: none;
   transition: all 150ms var(--ease-out-smooth);
 }
-.krowe-gr-desc:focus {
-  background: white; border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 9%, transparent);
-}
+/* The surface lift stays; the quiet border comes from the global text rule. */
+.krowe-gr-desc:focus { background: white; }
 /* checklist / dependencies / confidence on an extracted draft */
 .krowe-gr-checklist { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .krowe-gr-checklist li {
@@ -6169,7 +6168,9 @@ button.krowe-desc-inline-text:hover {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888078' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px;
 }
-.krowe-set-input:focus, .krowe-set-select:focus {
+/* The select is a picker, so it keeps the halo; the text input takes the quiet
+   border step from the global rule. */
+.krowe-set-select:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
   box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 9%, transparent);

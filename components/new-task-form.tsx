@@ -611,7 +611,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
     <>
       <div className="krowe-nt-scroll" onPaste={handleImagePaste}>
         <p className="krowe-nt-lede">Describe what you want built — krowe drafts the rest.</p>
-        <div className="krowe-nt-inputwrap is-focus">
+        <div className="krowe-field-shell krowe-nt-inputwrap is-focus">
           <textarea
             className="krowe-nt-textarea krowe-nt-textarea-lg"
             autoFocus
@@ -703,7 +703,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
             })}
           </div>
           {followUpChoice === OTHER && (
-            <div className="krowe-nt-inputwrap">
+            <div className="krowe-field-shell krowe-nt-inputwrap">
               <textarea
                 className="krowe-nt-textarea"
                 autoFocus
@@ -857,7 +857,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
         </div>
         <div className="krowe-nt-field">
           <span className="krowe-nt-flabel">Description</span>
-          <div className="krowe-nt-inputwrap">
+          <div className="krowe-field-shell krowe-nt-inputwrap">
             <textarea
               className="krowe-nt-textarea krowe-nt-desc"
               name="description"
@@ -907,7 +907,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
   const manualView = (
     <form ref={formRef} onSubmit={handleSubmit} className="krowe-nt-form">
       <div className="krowe-nt-scroll">
-        <div className="krowe-nt-inputwrap">
+        <div className="krowe-field-shell krowe-nt-inputwrap">
           <input
             className="krowe-nt-input"
             name="title"
@@ -918,7 +918,7 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
             required
           />
         </div>
-        <div className="krowe-nt-inputwrap">
+        <div className="krowe-field-shell krowe-nt-inputwrap">
           <textarea
             className="krowe-nt-textarea"
             name="description"

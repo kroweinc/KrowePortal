@@ -532,7 +532,7 @@ export function TaskCommentThread() {
         <div ref={endRef} />
       </div>
 
-      <div className={`krowe-cm-composer ${requestChanges ? "flagged" : ""}`}>
+      <div className={`krowe-field-shell krowe-cm-composer ${requestChanges ? "flagged" : ""}`}>
         <textarea
           ref={textareaRef}
           value={draft}
