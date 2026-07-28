@@ -4561,14 +4561,19 @@ button.krowe-desc-inline-text:hover {
    in the shell. So --topbar-height, not this block's height, is what a
    scrolled-to section has to clear: it feeds .ss-sec's scroll-margin-top and
    the scroll-spy rootMargin in profile-setup.tsx. Change one, change both. */
-.ppsetup { --ss-measure: 880px; }
+/* Page metrics ride the standard builder shell so this route lines up with
+   every other one: the same 1500px measure as .krowe-page-inner and the same
+   28px gutter as .krowe-page (no token covers 28 — .krowe-repo-topline
+   hardcodes it for the same reason). The band and the body share --ss-gutter,
+   so the tabs sit directly above the cards they scroll to. */
+.ppsetup { --ss-measure: 1500px; --ss-gutter: 28px; }
 .ppsetup .ss-head {
   background: var(--background);
   border-bottom: 1px solid var(--border);
 }
 .ppsetup .ss-head .inner {
   max-width: var(--ss-measure); margin: 0 auto;
-  padding: var(--spacing-xl) var(--spacing-2xl) 0;
+  padding: var(--spacing-lg) var(--ss-gutter) 0;
 }
 .ppsetup .ss-top {
   display: flex; align-items: center; justify-content: space-between;
@@ -4585,9 +4590,12 @@ button.krowe-desc-inline-text:hover {
   color: var(--foreground);
 }
 
-/* completion meter */
+/* Completion meter. Uncapped on purpose: it's the row's only flexible child,
+   so it absorbs the free space and the ring / saver / actions stay flush to
+   their edges. A fixed cap here leaves a hole between the bar and "Saved" at
+   the page's full measure. */
 .ppsetup .ss-meter {
-  flex: 1; min-width: 0; max-width: 434px;
+  flex: 1; min-width: 0;
   display: flex; flex-direction: column; gap: var(--spacing-md);
 }
 .ppsetup .ss-status {
@@ -4640,7 +4648,7 @@ button.krowe-desc-inline-text:hover {
 
 /* ── Section tabs (scroll-spy) ── */
 .ppsetup .ss-tabs {
-  display: flex; gap: 0; margin-top: var(--spacing-2xl);
+  display: flex; gap: 0; margin-top: var(--spacing-lg);
   overflow-x: auto; scrollbar-width: none;
 }
 .ppsetup .ss-tabs::-webkit-scrollbar { height: 0; }
@@ -4665,12 +4673,13 @@ button.krowe-desc-inline-text:hover {
 /* ── Page body ── */
 .ppsetup .ss-page {
   max-width: var(--ss-measure); margin: 0 auto;
-  padding: var(--spacing-4xl) var(--spacing-2xl) var(--spacing-6xl);
-  display: flex; flex-direction: column; gap: var(--spacing-4xl);
+  padding: 28px var(--ss-gutter) var(--spacing-6xl);
+  display: flex; flex-direction: column; gap: var(--spacing-3xl);
 }
+/* Same step as .krowe-page-title — the hero is this page's H1, not a Display. */
 .ppsetup .ss-hero h1 {
-  font-family: var(--font-serif); font-size: 56px; line-height: 1.15;
-  letter-spacing: -1.12px; margin: 0; color: var(--foreground);
+  font-family: var(--font-serif); font-size: 40px; line-height: 1.1;
+  letter-spacing: -0.015em; margin: 0; color: var(--foreground);
 }
 .ppsetup .ss-hero p {
   margin: 0; font-size: 12px; letter-spacing: 0.02em;
@@ -4681,15 +4690,15 @@ button.krowe-desc-inline-text:hover {
 /* ── Section ── */
 .ppsetup .ss-sec {
   scroll-margin-top: calc(var(--topbar-height) + var(--spacing-xl));
-  display: flex; flex-direction: column; gap: var(--spacing-2xl);
+  display: flex; flex-direction: column; gap: var(--spacing-xl);
 }
 .ppsetup .ss-sec > .sh {
-  display: flex; align-items: center; gap: var(--spacing-xl);
+  display: flex; align-items: center; gap: var(--spacing-lg);
 }
 .ppsetup .ss-sec > .sh .tt { flex: 1; min-width: 0; }
 .ppsetup .ss-sec > .sh .tt h2 {
-  font-family: var(--font-serif); font-size: 28px; line-height: 1.15;
-  letter-spacing: -0.56px; margin: 0; color: var(--foreground);
+  font-family: var(--font-serif); font-size: 22px; line-height: 1.2;
+  letter-spacing: -0.01em; margin: 0; color: var(--foreground);
 }
 .ppsetup .ss-sec > .sh .tt p {
   margin: var(--spacing-sm) 0 0; font-size: 12px; letter-spacing: 0.02em;
@@ -4699,12 +4708,12 @@ button.krowe-desc-inline-text:hover {
 
 /* section glyph */
 .ppsetup .medallion {
-  width: 48px; height: 48px; border-radius: var(--radius-md); flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: var(--radius-md); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--surface-sunken); border: 1px solid var(--border);
   color: var(--muted-foreground);
 }
-.ppsetup .medallion svg { width: 20px; height: 20px; }
+.ppsetup .medallion svg { width: 17px; height: 17px; }
 
 /* The card. Outer radius 24px with 24px padding, so per DESIGN.md's nesting
    rule inner elements are free to use their own standard radii. */
@@ -4712,7 +4721,7 @@ button.krowe-desc-inline-text:hover {
   background: white; border: 1px solid var(--border);
   border-radius: var(--radius-xl); box-shadow: var(--shadow-1);
   padding: var(--spacing-2xl);
-  display: flex; flex-direction: column; gap: var(--spacing-2xl);
+  display: flex; flex-direction: column; gap: var(--spacing-xl);
 }
 .ppsetup .ss-divider { height: 1px; background: var(--border); }
 
@@ -4733,7 +4742,7 @@ button.krowe-desc-inline-text:hover {
 }
 .ppsetup .ss-count.over { color: var(--danger); }
 .ppsetup .ss-row {
-  display: flex; gap: var(--spacing-2xl); align-items: flex-start;
+  display: flex; gap: var(--spacing-xl); align-items: flex-start;
 }
 .ppsetup .ss-row > * { flex: 1; min-width: 0; }
 
@@ -5042,10 +5051,11 @@ button.krowe-desc-inline-text:hover {
 /* ── Narrow viewports: the header's four-up row can't hold its measure ── */
 @media (max-width: 900px) {
   .ppsetup .ss-top { flex-wrap: wrap; gap: var(--spacing-lg); }
-  .ppsetup .ss-meter { max-width: none; order: 3; width: 100%; }
+  /* flex-basis, not width — the meter's `flex: 1` zeroes its basis, so only a
+     100% basis actually breaks it onto its own line once the row wraps. */
+  .ppsetup .ss-meter { order: 3; flex-basis: 100%; }
   .ppsetup .ss-headacts { margin-left: auto; }
-  .ppsetup .ss-hero h1 { font-size: 40px; letter-spacing: -0.8px; }
-  .ppsetup .ss-row { flex-direction: column; gap: var(--spacing-xl); }
+  .ppsetup .ss-row { flex-direction: column; }
   .ppsetup .ss-item { padding-right: var(--spacing-2xl); }
   .ppsetup .ss-cardacts { position: static; margin-left: auto; align-self: flex-start; }
   .ppsetup .ss-cardgrip { display: none; }
