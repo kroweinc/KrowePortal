@@ -433,6 +433,28 @@ Show green for acceptable input and red for inacceptable. Gray is default.
 | Error border | `--danger` |
 | Error ring | 4px `rgba(185,28,28,0.10)` |
 
+#### Checkbox
+
+Opt-in/opt-out for a single choice inside a form. A real `<input type="checkbox">`
+kept focusable but visually replaced by the box, wrapped in a `<label>` so the
+text is part of the hit target. Implemented as `.wz-check` in `app/globals.css`.
+
+| Property | Value |
+|---|---|
+| Box | 20×20px, `--radius-sm` (6px) |
+| Border (unchecked) | 2px `--border` |
+| Border (hover) | 2px `--primary` at 55% |
+| Checked | `--primary` fill + border, white check glyph |
+| Row height | 44px min (touch target) |
+| Gap (box → text) | `--space-lg` (12px) |
+| Label | Body S (14.5px), weight 500, `--foreground` |
+| Hint (optional) | Caption (12.5px), `--muted-foreground`, below the label |
+| Focus ring | 4px `rgba(249,115,22,0.10)` + `--primary` border, on the box via `:has(input:focus-visible)` |
+| Transition | `background` + `border-color`, `--duration-fast`, `--ease-out-smooth` |
+
+Never a bare checkbox with no `<label>`. When the choice changes what the primary
+button does, restate it in the button ("Create client" vs "Create client & invite link").
+
 #### Progress Stepper
 
 Used in onboarding to show completion progress across question sets.

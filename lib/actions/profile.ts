@@ -37,11 +37,20 @@ export async function completeOnboarding(formData: FormData) {
     display_name: parsed.data.display_name,
     role: parsed.data.role,
     ...(isBuilder
-      ? { onboarding_status: "in_progress", onboarding: { step: "path" } }
+      ? { onboarding_status: "in_progress", onboarding: { step: "identity" } }
       : {}),
   });
 
   if (error) return { error: error.message };
+
+  // Bootstrap the builder_profiles row up front so the very next step (identity)
+  // can accept an avatar upload — uploadAvatar requires an existing row. Ignore
+  // a duplicate: the builder may already have a profile from a prior session.
+  if (isBuilder) {
+    await supabase
+      .from("builder_profiles")
+      .upsert({ user_id: user.id }, { onConflict: "user_id", ignoreDuplicates: true });
+  }
 
   if (!isBuilder) redirect("/o");
   return { success: true };

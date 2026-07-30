@@ -7,10 +7,36 @@ import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { createProject } from "@/lib/actions/projects";
 import { createInvitation } from "@/lib/actions/invitations";
-import type { Engagement, OnboardingState, OnboardingStatus } from "@/lib/types";
+import { normalizeUrl } from "@/lib/project/business-context";
+import { fetchBrand, type FetchedBrand } from "@/lib/brand-fetch";
+import {
+  AGENCY_TYPES,
+  AGENCY_SIZES,
+  ONBOARDING_STEPS,
+  PRICING_MODELS,
+  type Engagement,
+  type OnboardingState,
+  type OnboardingStatus,
+} from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
+}
+
+// Upsert a patch onto the signed-in builder's builder_profiles row (bootstrapped
+// at signup). Mirrors updatePricingDefaults — onConflict on the unique user_id.
+async function patchBuilderProfile(
+  profileId: string,
+  patch: Record<string, unknown>
+): Promise<{ error?: string }> {
+  const supabase = await getClient(profileId);
+  const { error } = await supabase
+    .from("builder_profiles")
+    .upsert(
+      { user_id: profileId, ...patch, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+  return error ? { error: error.message } : {};
 }
 
 // Shallow-merges a patch into the signed-in builder's onboarding jsonb.
@@ -31,60 +57,143 @@ export async function saveOnboardingProgress(
   return { success: true };
 }
 
-const stepSchema = z.enum(["path", "prospect", "handoff", "client", "repo", "tasks", "docs"]);
+const stepSchema = z.enum(ONBOARDING_STEPS);
 
-// Skip/path-selection helper: advances the wizard step without doing any work.
+// Skip helper: advances the wizard step without doing any work.
 export async function advanceOnboarding(
-  step: z.infer<typeof stepSchema>,
-  path?: "no_clients" | "has_clients"
+  step: z.infer<typeof stepSchema>
 ): Promise<{ success: true } | { error: string }> {
   const parsed = stepSchema.safeParse(step);
   if (!parsed.success) return { error: "Invalid step." };
-  return saveOnboardingProgress(path ? { step: parsed.data, path } : { step: parsed.data });
+  return saveOnboardingProgress({ step: parsed.data });
 }
 
+const brandUrlSchema = z.string().trim().min(1, "Add your website link first.").max(300);
+
 /**
- * Path 1 (no clients): creates the prospect's project and advances to the
- * handoff step in one round trip. Document creation continues in the existing
- * pipeline (/b/projects/[id]).
+ * Identity step: reads an agency's brand off its own website so the builder
+ * doesn't retype what their homepage already says. Returns the fetched brand
+ * for the client to preview — nothing is persisted until they continue, so a
+ * wrong link costs one click to correct.
  */
-export async function createProspectProject(input: {
-  name: string;
-  prospectName?: string;
-  prospectEmail?: string;
-  websiteUrl?: string;
-}): Promise<{ projectId: string } | { error: string }> {
+export async function fetchAgencyBrand(
+  url: string
+): Promise<{ brand: FetchedBrand } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "builder") return { error: "Only builders can create documents." };
+  if (profile.role !== "builder") return { error: "Only builders have onboarding." };
 
-  // Resume guard: reuse the project from a previous wizard attempt — but only if
-  // it still exists and is owned by this builder. A stale project_id (the project
-  // was deleted, or it was left behind in the onboarding jsonb when switching
-  // paths) must fall through to a fresh create, never trap the wizard on this
-  // step. Mirrors createClientEngagement, which validates its resume entity too.
-  const existingId = profile.onboarding?.project_id;
-  if (existingId) {
-    const admin = createAdminClient();
-    const { data: existing } = await admin
-      .from("projects")
-      .select("id")
-      .eq("id", existingId)
-      .eq("owner_id", profile.id)
-      .maybeSingle();
-    if (existing) {
-      // Always advance the step — otherwise a resubmit returns "success" while
-      // the wizard stays on "prospect" forever.
-      await saveOnboardingProgress({ step: "handoff" });
-      return { projectId: existing.id as string };
-    }
+  const parsed = brandUrlSchema.safeParse(url);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Enter a website link." };
+
+  const normalized = normalizeUrl(parsed.data);
+  if (!normalized) return { error: "Enter a website link, like acme.com." };
+
+  const { brand, error } = await fetchBrand(normalized);
+  if (!brand) return { error: error ?? "Couldn't read that site." };
+  return { brand };
+}
+
+const identitySchema = z.object({
+  displayName: z.string().trim().min(1, "Enter your name.").max(80).optional().or(z.literal("")),
+  agencyName: z.string().trim().max(120).optional().or(z.literal("")),
+  agencyRole: z.string().trim().max(120).optional().or(z.literal("")),
+  agencyWebsite: z.string().trim().max(300).optional().or(z.literal("")),
+});
+
+/**
+ * Identity step: saves the builder's display name (if changed) plus their agency
+ * name, role, and website, then advances to the agency-type step. Avatar upload
+ * is handled separately (uploadAvatar) against the row bootstrapped at signup.
+ */
+export async function saveAgencyIdentity(input: {
+  displayName?: string;
+  agencyName?: string;
+  agencyRole?: string;
+  agencyWebsite?: string;
+}): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders have onboarding." };
+
+  const parsed = identitySchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const supabase = await getClient(profile.id);
+  const name = (parsed.data.displayName ?? "").trim();
+  if (name && name !== profile.display_name) {
+    const { error } = await supabase.from("profiles").update({ display_name: name }).eq("id", profile.id);
+    if (error) return { error: error.message };
   }
 
-  const project = await createProject(input);
-  if ("error" in project) return { error: project.error };
+  const saved = await patchBuilderProfile(profile.id, {
+    agency_name: (parsed.data.agencyName ?? "").trim() || null,
+    agency_role: (parsed.data.agencyRole ?? "").trim() || null,
+    // normalizeUrl also rejects non-http(s) schemes, so a typed link can never
+    // be stored and later rendered into an href.
+    agency_website: normalizeUrl(parsed.data.agencyWebsite),
+  });
+  if (saved.error) return { error: saved.error };
 
-  await saveOnboardingProgress({ project_id: project.id, step: "handoff" });
-  return { projectId: project.id };
+  return saveOnboardingProgress({ step: "agency_type" });
+}
+
+/** Agency-type step: persists the discipline and advances to size. */
+export async function saveAgencyType(
+  type: (typeof AGENCY_TYPES)[number]
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders have onboarding." };
+  if (!AGENCY_TYPES.includes(type)) return { error: "Invalid agency type." };
+
+  const saved = await patchBuilderProfile(profile.id, { agency_type: type });
+  if (saved.error) return { error: saved.error };
+  return saveOnboardingProgress({ step: "agency_size" });
+}
+
+/** Agency-size step: persists the size band and advances to the client step. */
+export async function saveAgencySize(
+  size: (typeof AGENCY_SIZES)[number]
+): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders have onboarding." };
+  if (!AGENCY_SIZES.includes(size)) return { error: "Invalid agency size." };
+
+  const saved = await patchBuilderProfile(profile.id, { agency_size: size });
+  if (saved.error) return { error: saved.error };
+  return saveOnboardingProgress({ step: "client" });
+}
+
+const chargingSchema = z.object({
+  pricingModel: z.enum(PRICING_MODELS),
+  hourlyRate: z.number().int().min(0).max(100000),
+});
+
+/**
+ * Final step: saves how the builder charges — the pricing model plus a typical
+ * rate that seeds default_hourly_rate (0058) so new quotes prefill from it — and
+ * completes onboarding. The caller redirects to /b afterward.
+ */
+export async function saveCharging(input: {
+  pricingModel: (typeof PRICING_MODELS)[number];
+  hourlyRate: number;
+}): Promise<{ success: true } | { error: string }> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only builders have onboarding." };
+
+  const parsed = chargingSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const saved = await patchBuilderProfile(profile.id, {
+    pricing_model: parsed.data.pricingModel,
+    default_hourly_rate: parsed.data.hourlyRate,
+  });
+  if (saved.error) return { error: saved.error };
+
+  return finishOnboarding("completed");
 }
 
 const clientSchema = z.object({
@@ -106,12 +215,18 @@ export type ClientEngagementResult =
 export async function createClientEngagement(input: {
   clientName: string;
   clientEmail?: string;
+  /** Mint a join link now. Off means the board is the builder's alone until
+      they invite the client later, from Clients. Defaults on. */
+  createInvite?: boolean;
 }): Promise<ClientEngagementResult> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only builders can create clients." };
 
   const admin = createAdminClient();
+  // Read off the raw input, not the parse below — the resume guard returns
+  // before it, and this is a plain boolean with a safe default either way.
+  const wantsInvite = input.createInvite !== false;
 
   // Resume guard: an engagement from a previous wizard attempt is reused.
   if (profile.onboarding?.engagement_id) {
@@ -124,7 +239,7 @@ export async function createClientEngagement(input: {
     if (existing) {
       const engagement = existing as Engagement;
       let inviteToken: string | null = null;
-      if (!engagement.operator_id) {
+      if (wantsInvite && !engagement.operator_id) {
         const invite = await createInvitation(engagement.id);
         if ("token" in invite) inviteToken = invite.token;
       }
@@ -179,13 +294,20 @@ export async function createClientEngagement(input: {
   }
 
   let inviteToken: string | null = null;
-  const invite = await createInvitation(engagement.id as string);
-  if ("token" in invite) inviteToken = invite.token;
+  if (wantsInvite) {
+    const invite = await createInvitation(engagement.id as string);
+    if ("token" in invite) inviteToken = invite.token;
+  }
 
+  // Records the engagement but deliberately stays on the "client" step — the
+  // invite panel that renders next is still part of it, and page.tsx only looks
+  // up the invite token while the step is "client". Advancing here instead meant
+  // the revalidate below refetched a page already on "charging", so the first
+  // state change behind the invite panel (Back) skipped past the link. The
+  // panel's Continue is what moves the wizard on.
   await saveOnboardingProgress({
     engagement_id: engagement.id as string,
     project_id: project.id,
-    step: "repo",
   });
 
   revalidatePath("/b/engagements");
