@@ -24,12 +24,14 @@ import {
   Play,
   Hourglass,
   Undo2,
+  Pin,
+  PinOff,
   CheckCircle2,
   Trash2,
 } from "lucide-react";
 import { useContextMenu, type MenuItem } from "@/components/ui/context-menu";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { updateTaskStatus, withdrawTaskApproval, deleteTask } from "@/lib/actions/tasks";
+import { updateTaskStatus, withdrawTaskApproval, setTaskPinned, deleteTask } from "@/lib/actions/tasks";
 import { isAwaitingApproval } from "@/lib/utils";
 import type { Task, Role, TaskStatus } from "@/lib/types";
 
@@ -90,6 +92,24 @@ export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, req
         },
       },
     ];
+
+    // Pin to top — the operator's primary "prioritize" affordance (their menu is
+    // otherwise Open / Copy link / Delete), and available to the builder too so
+    // either side can lift or clear the pin. Meaningless on done work, so hidden
+    // once a task ships.
+    if (task.status !== "done") {
+      const pinned = !!task.pinned_at;
+      list.push({
+        label: pinned ? "Unpin from top" : "Pin to top",
+        icon: pinned ? <PinOff size={15} strokeWidth={1.9} /> : <Pin size={15} strokeWidth={1.9} />,
+        separatorBefore: true,
+        onSelect: async () => {
+          const r = await setTaskPinned(task.id, !pinned);
+          if (isErr(r)) toast.error(r.error);
+          else toast.success(pinned ? "Unpinned" : "Pinned to top");
+        },
+      });
+    }
 
     // Status moves are a builder interaction (operators have no drag/advance),
     // and the done/approval flows need their deliverable dialogs available.
@@ -170,7 +190,7 @@ export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, req
     return list;
     // task is the only data input; router/confirm/onOpen/request* are stable per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id, task.title, task.status, task.approval_sent_at, task.approval_approved_at, role, href]);
+  }, [task.id, task.title, task.status, task.approval_sent_at, task.approval_approved_at, task.pinned_at, role, href]);
 
   return { menu, items, dialogs: confirmDialog };
 }

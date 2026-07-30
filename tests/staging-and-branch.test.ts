@@ -60,6 +60,44 @@ describe("groupTasksByBranch", () => {
     expect(buckets).toHaveLength(1);
     expect(buckets[0].label).toBe("No branch");
   });
+
+  it("seeds empty buckets for live branches with no queued work", () => {
+    const buckets = groupTasksByBranch(
+      [task("1", { branch_name: "feature/a" })],
+      ["feature/a", "feature/b", "feature/c"]
+    );
+    // feature/a keeps its task; b and c show up empty.
+    expect(buckets.map((b) => b.label)).toEqual([
+      "feature/a",
+      "feature/b",
+      "feature/c",
+    ]);
+    expect(buckets[1].tasks).toHaveLength(0);
+    expect(buckets[2].tasks).toHaveLength(0);
+  });
+
+  it("sorts branches with queued work above empty ones", () => {
+    const buckets = groupTasksByBranch(
+      [task("1", { branch_name: "zebra" })],
+      ["alpha", "zebra"]
+    );
+    // 'zebra' has work so it leads despite the alphabetical 'alpha'.
+    expect(buckets.map((b) => b.label)).toEqual(["zebra", "alpha"]);
+  });
+
+  it("excludes default and already-shown branches from empty seeding", () => {
+    const buckets = groupTasksByBranch(
+      [task("1", { branch_name: "feature/a" })],
+      ["main", "feature/a", "feature/shipped", "feature/new"],
+      ["main", "feature/shipped"]
+    );
+    expect(buckets.map((b) => b.label)).toEqual(["feature/a", "feature/new"]);
+  });
+
+  it("ignores empty/whitespace names in the seed list", () => {
+    const buckets = groupTasksByBranch([], ["", "   ", "feature/x"]);
+    expect(buckets.map((b) => b.label)).toEqual(["feature/x"]);
+  });
 });
 
 describe("groupTasksByStagingGroup", () => {

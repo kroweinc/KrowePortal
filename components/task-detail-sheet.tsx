@@ -6,6 +6,8 @@ import {
   AlignLeft,
   ArrowRight,
   Check,
+  ChevronDown,
+  ChevronUp,
   GitBranch,
   Info,
   Link2,
@@ -91,6 +93,10 @@ interface TaskDetailSheetProps {
   // chips paint with no fetch. Staging groups likewise, for the group field.
   branchesByEngagement?: Record<string, PreloadedBranches>;
   stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
+  // On-screen order of the sibling tasks + a jump callback, so the sheet can
+  // step to the previous/next task (‹ › buttons and ↑/↓ keys) without closing.
+  siblingIds?: string[];
+  onNavigate?: (id: string) => void;
 }
 
 export function TaskDetailSheet({
@@ -101,6 +107,8 @@ export function TaskDetailSheet({
   onOpenChange,
   branchesByEngagement,
   stagingGroupsByEngagement,
+  siblingIds,
+  onNavigate,
 }: TaskDetailSheetProps) {
   return (
     <Sheet open={!!task} onOpenChange={onOpenChange}>
@@ -118,6 +126,8 @@ export function TaskDetailSheet({
             onOpenChange={onOpenChange}
             branchesByEngagement={branchesByEngagement}
             stagingGroupsByEngagement={stagingGroupsByEngagement}
+            siblingIds={siblingIds}
+            onNavigate={onNavigate}
           />
         )}
       </SheetContent>
@@ -133,6 +143,8 @@ interface TaskDetailBodyProps {
   onOpenChange: (open: boolean) => void;
   branchesByEngagement?: Record<string, PreloadedBranches>;
   stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
+  siblingIds?: string[];
+  onNavigate?: (id: string) => void;
 }
 
 function TaskDetailBody({
@@ -143,6 +155,8 @@ function TaskDetailBody({
   onOpenChange,
   branchesByEngagement,
   stagingGroupsByEngagement,
+  siblingIds,
+  onNavigate,
 }: TaskDetailBodyProps) {
   const router = useRouter();
   const requestDone = useRequestDone();
@@ -171,6 +185,41 @@ function TaskDetailBody({
   useEffect(() => {
     setTab("overview");
   }, [task.id]);
+
+  // Prev/next stepping through the sibling tasks the board is showing. The ids
+  // arrive in on-screen order; a missing/empty list simply disables the arrows.
+  const navIndex = siblingIds ? siblingIds.indexOf(task.id) : -1;
+  const prevId = navIndex > 0 ? siblingIds![navIndex - 1] : null;
+  const nextId =
+    navIndex >= 0 && siblingIds && navIndex < siblingIds.length - 1
+      ? siblingIds[navIndex + 1]
+      : null;
+  const total = siblingIds?.length ?? 0;
+
+  useEffect(() => {
+    if (!onNavigate) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      // Don't hijack arrows while the user is typing or a listbox is focused.
+      const el = e.target as HTMLElement | null;
+      if (
+        el &&
+        (el.isContentEditable ||
+          el.closest('input, textarea, select, [role="listbox"], [contenteditable="true"]'))
+      ) {
+        return;
+      }
+      if ((e.key === "ArrowUp" || e.key === "[") && prevId) {
+        e.preventDefault();
+        onNavigate!(prevId);
+      } else if ((e.key === "ArrowDown" || e.key === "]") && nextId) {
+        e.preventDefault();
+        onNavigate!(nextId);
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onNavigate, prevId, nextId]);
 
   useEffect(() => {
     if (role !== "operator") return;
@@ -278,6 +327,36 @@ function TaskDetailBody({
           )}
         </div>
         <div className="krowe-task-sheet-actions">
+          {onNavigate && total > 1 && (
+            <div className="krowe-task-nav" role="group" aria-label="Move between tasks">
+              <button
+                type="button"
+                className="krowe-task-iconbtn"
+                title="Previous task (↑)"
+                aria-label="Previous task"
+                disabled={!prevId}
+                onClick={() => prevId && onNavigate(prevId)}
+              >
+                <ChevronUp className="h-4 w-4" />
+              </button>
+              <span className="krowe-task-nav-pos" aria-hidden="true">
+                {navIndex >= 0 ? navIndex + 1 : "–"}
+                <span className="sep">/</span>
+                {total}
+              </span>
+              <button
+                type="button"
+                className="krowe-task-iconbtn"
+                title="Next task (↓)"
+                aria-label="Next task"
+                disabled={!nextId}
+                onClick={() => nextId && onNavigate(nextId)}
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
+              <span className="krowe-task-nav-div" aria-hidden="true" />
+            </div>
+          )}
           <button
             type="button"
             className="krowe-task-iconbtn"

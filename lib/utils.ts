@@ -34,14 +34,22 @@ export function getActiveChangeRequest(
   return entry;
 }
 
-/** Column ordering shared by the board and the operator list: tasks awaiting
- *  approval first, then priority, then manual sort_order. */
+/** Column ordering shared by the board and the operator list: pinned tasks
+ *  first, then tasks awaiting approval, then priority, then manual sort_order.
+ *  A task pinned from either board (pinned_at set) lifts to the top of its
+ *  column here — the operator list renders its own dedicated Pinned section. */
 export function sortWithApprovalPin<
-  T extends ApprovalFields & { priority: TaskPriority; sort_order?: number | null }
+  T extends ApprovalFields & {
+    priority: TaskPriority;
+    sort_order?: number | null;
+    pinned_at?: string | null;
+  }
 >(items: T[]): T[] {
   return [...items].sort((a, b) => {
-    const pinDiff = Number(isAwaitingApproval(b)) - Number(isAwaitingApproval(a));
-    if (pinDiff !== 0) return pinDiff;
+    const pinnedDiff = Number(!!b.pinned_at) - Number(!!a.pinned_at);
+    if (pinnedDiff !== 0) return pinnedDiff;
+    const approvalDiff = Number(isAwaitingApproval(b)) - Number(isAwaitingApproval(a));
+    if (approvalDiff !== 0) return approvalDiff;
     const rankDiff = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
     if (rankDiff !== 0) return rankDiff;
     return (a.sort_order ?? 0) - (b.sort_order ?? 0);
@@ -63,6 +71,7 @@ export const TASK_SORT_OPTIONS: { value: TaskSortKey; label: string }[] = [
 type SortableTask = ApprovalFields & {
   priority: TaskPriority;
   sort_order?: number | null;
+  pinned_at?: string | null;
   title: string;
   created_at: string;
   updated_at: string;

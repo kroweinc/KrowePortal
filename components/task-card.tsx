@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, CornerUpLeft, RotateCcw, Trash2 } from "lucide-react";
+import { CalendarDays, Check, CornerUpLeft, Pin, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateTaskStatus } from "@/lib/actions/tasks";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -111,6 +111,11 @@ export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDr
           </Link>
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+          {task.pinned_at && (
+            <span className="krowe-card-pin" title="Pinned to top" aria-label="Pinned to top">
+              <Pin width={13} height={13} strokeWidth={2.2} />
+            </span>
+          )}
           <ApprovalPill task={task} role={role} />
         </div>
       </div>
