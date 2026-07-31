@@ -369,18 +369,6 @@ export function PrdDocument({ content: c }: { content: PrdContent }) {
         </DocSection>
       )}
 
-      {(c.risks ?? []).length > 0 && (
-        <DocSection title="Risks">
-          <Bullets items={c.risks!} />
-        </DocSection>
-      )}
-
-      {(c.openQuestions ?? []).length > 0 && (
-        <DocSection title="Open Questions">
-          <Bullets items={c.openQuestions!} />
-        </DocSection>
-      )}
-
       {milestoneList.length > 0 && (
         <DocSection title="Milestones">
           <ul className="doc-flat doc-flat--cost">

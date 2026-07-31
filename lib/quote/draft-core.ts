@@ -50,6 +50,11 @@ export const draftQuoteSchema = z.object({
     .max(40)
     .optional(),
   round: z.number().int().min(0).max(10),
+  /** Regenerate: the existing draft this run replaces. When set, the finished quote
+      overwrites that row in place (same id, same share token) instead of inserting a
+      new one. Validated in resolveQuoteDraft — must be the builder's own draft in
+      this project. */
+  replaceId: z.string().uuid().optional(),
 });
 
 export type DraftQuoteInput = z.input<typeof draftQuoteSchema>;
@@ -77,6 +82,9 @@ export type QuoteSaveContext = {
   answers: QuoteAnswerRow[];
   deepContext: boolean;
   pricingDefaults: PricingDefaults;
+  /** Regenerate target — the draft to overwrite instead of inserting. The token is
+      carried so the replace path can revalidate the public share link too. */
+  replace?: { id: string; token: string | null };
 };
 
 export type QuoteDraftResolution =
@@ -97,11 +105,16 @@ export async function resolveQuoteDraft(input: DraftQuoteInput): Promise<QuoteDr
   const parsed = draftQuoteSchema.safeParse(input);
   if (!parsed.success) return { ok: false, status: 400, error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
-  const { projectId, title, source, sourcePrdId, notes, answers = [], round } = parsed.data;
+  const { projectId, title, source, sourcePrdId, notes, answers = [], round, replaceId } = parsed.data;
 
   const project = await getProjectById(projectId);
   if (!project) return { ok: false, status: 404, error: "Document not found." };
   if (project.owner_id !== profile.id) return { ok: false, status: 403, error: "Not your document." };
+
+  // Resolve the regenerate target up front so an invalid one fails before any AI
+  // spend, and every round of the re-run carries the same validated target.
+  const replace = await resolveReplaceTarget(profile.id, projectId, replaceId);
+  if (replace && "error" in replace) return { ok: false, status: replace.status, error: replace.error };
 
   const materials = await getProjectMaterials(projectId);
   const sopTranscripts = await getProjectSopTranscripts(projectId);
@@ -143,8 +156,48 @@ export async function resolveQuoteDraft(input: DraftQuoteInput): Promise<QuoteDr
     ok: true,
     profile,
     genInput,
-    save: { profile, project, projectId, title, source, sourcePrdId, notes, answers, deepContext, pricingDefaults },
+    save: {
+      profile,
+      project,
+      projectId,
+      title,
+      source,
+      sourcePrdId,
+      notes,
+      answers,
+      deepContext,
+      pricingDefaults,
+      replace: replace ?? undefined,
+    },
   };
+}
+
+/**
+ * Resolve a `replaceId` to the draft it's allowed to overwrite. Returns null when
+ * there's nothing to replace (the ordinary new-quote path). Only the builder's OWN
+ * draft, in this project, can be replaced — a sent, accepted or signed quote is live
+ * at a share link the client may already hold, so regenerating it is refused.
+ * Queried directly rather than via getQuoteById to keep draft-core free of a
+ * circular import back into the "use server" action file.
+ */
+async function resolveReplaceTarget(
+  profileId: string,
+  projectId: string,
+  replaceId: string | undefined
+): Promise<{ id: string; token: string | null } | { error: string; status: number } | null> {
+  if (!replaceId) return null;
+  const supabase = await getClient(profileId);
+  const { data } = await supabase
+    .from("quotes")
+    .select("id, status, created_by, project_id, token")
+    .eq("id", replaceId)
+    .maybeSingle();
+
+  if (!data) return { status: 404, error: "Quote not found." };
+  if (data.created_by !== profileId) return { status: 403, error: "Not your quote." };
+  if (data.project_id !== projectId) return { status: 400, error: "That quote belongs to another document." };
+  if (data.status !== "draft") return { status: 409, error: "Only drafts can be regenerated." };
+  return { id: data.id as string, token: (data.token as string | null) ?? null };
 }
 
 /**
@@ -158,7 +211,8 @@ export async function persistQuoteDraft(
   rawContent: QuoteContent,
   contextSummary?: string
 ): Promise<{ quoteId: string } | { error: string }> {
-  const { profile, project, projectId, title, source, sourcePrdId, notes, answers, deepContext, pricingDefaults } = save;
+  const { profile, project, projectId, title, source, sourcePrdId, notes, answers, deepContext, pricingDefaults, replace } =
+    save;
 
   const transcript = answers.length
     ? answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n")
@@ -172,21 +226,43 @@ export async function persistQuoteDraft(
   );
 
   const supabase = await getClient(profile.id);
-  const { data, error } = await supabase
-    .from("quotes")
-    .insert({
-      project_id: projectId,
-      created_by: profile.id,
-      title,
-      status: "draft",
-      content,
-      source_notes: sourceNotes,
-      source_prd_id: source === "prd" ? sourcePrdId : null,
-    })
-    .select("id")
-    .single();
 
-  if (error || !data) return { error: error?.message ?? "Failed to create quote." };
+  let quoteId: string;
+  if (replace) {
+    // Regenerate: overwrite the draft in place so its id — and the share link the
+    // client may already hold — survive the re-run. `status`, `token` and the
+    // created_* columns are deliberately left alone. `source_prd_id` IS rewritten,
+    // so re-pointing the re-run at a different PRD sticks.
+    const { error } = await supabase
+      .from("quotes")
+      .update({
+        title,
+        content,
+        source_notes: sourceNotes,
+        source_prd_id: source === "prd" ? sourcePrdId : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", replace.id);
+    if (error) return { error: error.message };
+    quoteId = replace.id;
+  } else {
+    const { data, error } = await supabase
+      .from("quotes")
+      .insert({
+        project_id: projectId,
+        created_by: profile.id,
+        title,
+        status: "draft",
+        content,
+        source_notes: sourceNotes,
+        source_prd_id: source === "prd" ? sourcePrdId : null,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data) return { error: error?.message ?? "Failed to create quote." };
+    quoteId = data.id as string;
+  }
 
   // Deep-context path: persist the synthesized business context to the project so
   // future documents start warm. Only when the project has no context yet.
@@ -202,5 +278,11 @@ export async function persistQuoteDraft(
   }
 
   revalidatePath(`/b/projects/${projectId}`);
-  return { quoteId: data.id as string };
+  // A replaced draft is already cached at its own routes — bust the builder page
+  // and the public share link so both serve the regenerated content immediately.
+  if (replace) {
+    revalidatePath(`/b/projects/${projectId}/quotes/${replace.id}`);
+    if (replace.token) revalidatePath(`/quotes/${replace.token}`);
+  }
+  return { quoteId };
 }

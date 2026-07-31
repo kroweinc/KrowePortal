@@ -7,6 +7,8 @@
 
 import { useState, useEffect, useRef, type ComponentType, type ReactNode } from "react";
 import { toast } from "sonner";
+import { Boxes, ChevronRight, Cloud, CodeXml, Database, House, Mail } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { PrdContent, PrdPriority, PrdStackItem, PrdIntegration, FreeTierAssumption, FreeTierAnalysis, PrdMilestone } from "@/lib/types";
 import type { StackLookup, IntegrationLookup } from "@/lib/ai/lookup-stack-item";
 import {
@@ -52,6 +54,69 @@ const STACK_LAYER_LABEL: Record<StackLayer, string> = {
   hosting: "Hosting",
   other: "Other",
 };
+const STACK_LAYER_ICON: Record<StackLayer, LucideIcon> = {
+  frontend: CodeXml,
+  backend: Cloud,
+  database: Database,
+  email: Mail,
+  hosting: House,
+  other: Boxes,
+};
+
+// --- collapse / expand ------------------------------------------------
+/* Features, pages, stack items and integrations all read as a compact summary
+   that opens in place to reveal its editor. Openness is view state keyed by list
+   index, so removing an item has to re-key it: the removed index closes and
+   everything after it shifts down, otherwise a neighbour pops open. */
+function useExpanded() {
+  const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set());
+  return {
+    isOpen: (i: number) => open.has(i),
+    toggle: (i: number) =>
+      setOpen((prev) => {
+        const next = new Set(prev);
+        if (!next.delete(i)) next.add(i);
+        return next;
+      }),
+    expand: (i: number) => setOpen((prev) => new Set(prev).add(i)),
+    /** Call alongside removing list index `i`. */
+    dropAt: (i: number) =>
+      setOpen((prev) => new Set([...prev].filter((x) => x !== i).map((x) => (x > i ? x - 1 : x)))),
+  };
+}
+
+/** The chevron that marks an expandable summary; rotates when open (CSS). */
+function Disclose() {
+  return (
+    <span className="prd-row__go" aria-hidden="true">
+      <ChevronRight className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+/** One-line digest of a detail list, e.g. "Inbox, operator-requested, …". */
+function digest(items?: string[] | null, fallback?: string | null): string {
+  const joined = (items ?? []).map((s) => s.trim()).filter(Boolean).join(", ");
+  return joined || (fallback ?? "").trim();
+}
+
+/** Read-only cost, mirroring what <Cost> renders outside edit mode. Safe inside
+    a summary <button> — nothing here is interactive. */
+function CostText({ value, estimated }: { value?: string | null; estimated?: boolean }) {
+  if (!value) return null;
+  return (
+    <span className="cost-pill">
+      {priceRange(value)}
+      {estimated && <span className="cost-est">est.</span>}
+    </span>
+  );
+}
+
+/** Shown in place of an empty list when the reader can't add to it. */
+function EmptyNote({ children }: { children: ReactNode }) {
+  if (useEditing()) return null;
+  return <p className="empty-note">{children}</p>;
+}
 
 // --- list-of-objects helpers -----------------------------------------
 function listPatch<T>(arr: T[], patch: (p: Partial<PrdContent>) => void, key: keyof PrdContent) {
@@ -138,6 +203,8 @@ function UsersBody({ content, patch }: SectionBodyProps) {
   const h = listPatch(users, patch, "users");
   return (
     <div className="card-stack">
+      {users.length === 0 && <EmptyNote>No user types yet.</EmptyNote>}
+      <div className="prd-role-grid">
       {users.map((u, i) => (
         <div className="prd-card" key={i}>
           <RemoveCard onClick={() => h.remove(i)} />
@@ -169,6 +236,7 @@ function UsersBody({ content, patch }: SectionBodyProps) {
           />
         </div>
       ))}
+      </div>
       <AddButton label="Add user type" onClick={() => h.add({ role: "", authLevel: "", description: "", permissions: [] })} />
     </div>
   );
@@ -177,49 +245,95 @@ function UsersBody({ content, patch }: SectionBodyProps) {
 function FeaturesBody({ content, patch }: SectionBodyProps) {
   const features = content.features ?? [];
   const h = listPatch(features, patch, "features");
+  const rows = useExpanded();
+
   return (
     <div className="card-stack">
-      {features.map((f, i) => (
-        <div className="prd-card" key={i}>
-          <RemoveCard onClick={() => h.remove(i)} />
-          <div className="prd-card__head">
-            <InlineText
-              value={f.title}
-              onChange={(v) => h.update(i, { title: v })}
-              placeholder="Feature"
-              className="prd-card__title"
-            />
-            <span className={"prio prio--" + (f.priority ?? "should")}>
-              <InlineSelect
-                value={f.priority ?? "should"}
-                onChange={(v) => h.update(i, { priority: v as PrdPriority })}
-                options={PRIORITY_OPTS}
-                render={(v) => PRIORITY_LABEL[v as PrdPriority]}
-              />
-            </span>
-          </div>
-          <InlineText
-            value={f.description}
-            onChange={(v) => h.update(i, { description: v })}
-            placeholder="Short description"
-            className="prd-card__desc"
-            multiline
-          />
-          <p className="prd-card__label">Details — fields, columns, statuses, actions</p>
-          <InlineList items={f.details ?? []} onChange={(v) => h.update(i, { details: v })} addLabel="detail" placeholder="Detail" />
-          <p className="prd-card__label">Examples — illustrative sample values</p>
-          <InlineList
-            items={f.examples ?? []}
-            onChange={(v) => h.update(i, { examples: v })}
-            variant="plain"
-            addLabel="example"
-            placeholder="Example"
-          />
+      {features.length === 0 ? (
+        <EmptyNote>No features yet.</EmptyNote>
+      ) : (
+        <div className="prd-rows">
+          {features.map((f, i) => {
+            const priority = f.priority ?? "should";
+            const sub = digest(f.details, f.description);
+            return (
+              <div className={"prd-row" + (rows.isOpen(i) ? " is-open" : "")} key={i}>
+                <button
+                  type="button"
+                  className="prd-row__head"
+                  onClick={() => rows.toggle(i)}
+                  aria-expanded={rows.isOpen(i)}
+                >
+                  <span className="prd-row__main">
+                    <span className="prd-row__title">
+                      <span className="prd-row__name">{f.title || "Untitled feature"}</span>
+                      <span className={"prd-badge prd-badge--" + priority}>{PRIORITY_LABEL[priority]}</span>
+                    </span>
+                    {sub && <span className="prd-row__sub">{sub}</span>}
+                  </span>
+                  <Disclose />
+                </button>
+                {rows.isOpen(i) && (
+                  <div className="prd-row__body">
+                    <div className="prd-card">
+                      <div className="prd-card__head">
+                        <InlineText
+                          value={f.title}
+                          onChange={(v) => h.update(i, { title: v })}
+                          placeholder="Feature"
+                          className="prd-card__title"
+                        />
+                        <span className={"prio prio--" + priority}>
+                          <InlineSelect
+                            value={priority}
+                            onChange={(v) => h.update(i, { priority: v as PrdPriority })}
+                            options={PRIORITY_OPTS}
+                            render={(v) => PRIORITY_LABEL[v as PrdPriority]}
+                          />
+                        </span>
+                        <RemoveCard
+                          onClick={() => {
+                            h.remove(i);
+                            rows.dropAt(i);
+                          }}
+                        />
+                      </div>
+                      <InlineText
+                        value={f.description}
+                        onChange={(v) => h.update(i, { description: v })}
+                        placeholder="Short description"
+                        className="prd-card__desc"
+                        multiline
+                      />
+                      <p className="prd-card__label">Details — fields, columns, statuses, actions</p>
+                      <InlineList
+                        items={f.details ?? []}
+                        onChange={(v) => h.update(i, { details: v })}
+                        addLabel="detail"
+                        placeholder="Detail"
+                      />
+                      <p className="prd-card__label">Examples — illustrative sample values</p>
+                      <InlineList
+                        items={f.examples ?? []}
+                        onChange={(v) => h.update(i, { examples: v })}
+                        variant="plain"
+                        addLabel="example"
+                        placeholder="Example"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      ))}
+      )}
       <AddButton
         label="Add feature"
-        onClick={() => h.add({ title: "", description: "", priority: "should", details: [], examples: [] })}
+        onClick={() => {
+          rows.expand(features.length);
+          h.add({ title: "", description: "", priority: "should", details: [], examples: [] });
+        }}
       />
     </div>
   );
@@ -228,29 +342,78 @@ function FeaturesBody({ content, patch }: SectionBodyProps) {
 function PagesBody({ content, patch }: SectionBodyProps) {
   const pages = content.pagesScreens ?? [];
   const h = listPatch(pages, patch, "pagesScreens");
+  const rows = useExpanded();
+
   return (
     <div className="card-stack">
-      {pages.map((p, i) => (
-        <div className="prd-card" key={i}>
-          <RemoveCard onClick={() => h.remove(i)} />
-          <InlineText
-            value={p.name}
-            onChange={(v) => h.update(i, { name: v })}
-            placeholder="Page name"
-            className="prd-card__title"
-          />
-          <InlineText
-            value={p.description}
-            onChange={(v) => h.update(i, { description: v })}
-            placeholder="What this page is for"
-            className="prd-card__desc"
-            multiline
-          />
-          <p className="prd-card__label">Displays — what it shows or lets the user do</p>
-          <InlineList items={p.displays ?? []} onChange={(v) => h.update(i, { displays: v })} addLabel="element" placeholder="Element" />
+      {pages.length === 0 ? (
+        <EmptyNote>No pages or screens yet.</EmptyNote>
+      ) : (
+        <div className="prd-rows">
+          {pages.map((p, i) => {
+            const sub = digest(p.displays, p.description);
+            return (
+              <div className={"prd-row" + (rows.isOpen(i) ? " is-open" : "")} key={i}>
+                <button
+                  type="button"
+                  className="prd-row__head"
+                  onClick={() => rows.toggle(i)}
+                  aria-expanded={rows.isOpen(i)}
+                >
+                  <span className="prd-row__main">
+                    <span className="prd-row__title">
+                      <span className="prd-row__name">{p.name || "Untitled page"}</span>
+                    </span>
+                    {sub && <span className="prd-row__sub">{sub}</span>}
+                  </span>
+                  <Disclose />
+                </button>
+                {rows.isOpen(i) && (
+                  <div className="prd-row__body">
+                    <div className="prd-card">
+                      <div className="prd-card__head">
+                        <InlineText
+                          value={p.name}
+                          onChange={(v) => h.update(i, { name: v })}
+                          placeholder="Page name"
+                          className="prd-card__title"
+                        />
+                        <RemoveCard
+                          onClick={() => {
+                            h.remove(i);
+                            rows.dropAt(i);
+                          }}
+                        />
+                      </div>
+                      <InlineText
+                        value={p.description}
+                        onChange={(v) => h.update(i, { description: v })}
+                        placeholder="What this page is for"
+                        className="prd-card__desc"
+                        multiline
+                      />
+                      <p className="prd-card__label">Displays — what it shows or lets the user do</p>
+                      <InlineList
+                        items={p.displays ?? []}
+                        onChange={(v) => h.update(i, { displays: v })}
+                        addLabel="element"
+                        placeholder="Element"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-      ))}
-      <AddButton label="Add page" onClick={() => h.add({ name: "", description: "", displays: [] })} />
+      )}
+      <AddButton
+        label="Add page"
+        onClick={() => {
+          rows.expand(pages.length);
+          h.add({ name: "", description: "", displays: [] });
+        }}
+      />
     </div>
   );
 }
@@ -293,6 +456,7 @@ function IntegrationsBody({ content, patch }: SectionBodyProps) {
   const rows = content.integrations ?? [];
   const h = listPatch(rows, patch, "integrations");
   const editing = useEditing();
+  const tiles = useExpanded();
   const [busy, setBusy] = useState<number[]>([]);
   const ctx = content.overview ?? "";
 
@@ -320,29 +484,68 @@ function IntegrationsBody({ content, patch }: SectionBodyProps) {
   return (
     <div className="card-stack">
       <EstimateBanner flags={rows.map((r) => r.estimated)} />
-      {rows.map((it, i) => (
-        <div className="prd-card" key={i}>
-          <RemoveCard onClick={() => h.remove(i)} />
-          <div className="prd-card__head">
-            <BrandLogo domain={it.domain} name={it.name} />
-            <InlineText
-              value={it.name}
-              onChange={(v) => renameAndLookup(i, v)}
-              placeholder="Software"
-              className="prd-card__title"
-            />
-            <LookupPill on={busy.includes(i)} />
-            <Cost value={it.monthlyCost} estimated={it.estimated} onChange={(v) => h.update(i, { monthlyCost: v })} />
-          </div>
-          <InlineText
-            value={it.purpose}
-            onChange={(v) => h.update(i, { purpose: v })}
-            placeholder="What it's for"
-            className="prd-card__desc"
-          />
+      {rows.length === 0 ? (
+        <EmptyNote>No integrations or 3rd-party software yet.</EmptyNote>
+      ) : (
+        <div className="prd-tiles">
+          {rows.map((it, i) => (
+            <div className={"prd-tile" + (tiles.isOpen(i) ? " is-open" : "")} key={i}>
+              <button
+                type="button"
+                className="prd-tile__head"
+                onClick={() => tiles.toggle(i)}
+                aria-expanded={tiles.isOpen(i)}
+              >
+                <BrandLogo domain={it.domain} name={it.name} size={18} />
+                <span className="prd-tile__name">{it.name || "Untitled software"}</span>
+                <CostText value={it.monthlyCost} estimated={it.estimated} />
+                <Disclose />
+              </button>
+              {tiles.isOpen(i) ? (
+                <div className="prd-tile__body">
+                  <div className="prd-card">
+                    <div className="prd-card__head">
+                      <InlineText
+                        value={it.name}
+                        onChange={(v) => renameAndLookup(i, v)}
+                        placeholder="Software"
+                        className="prd-card__title"
+                      />
+                      <LookupPill on={busy.includes(i)} />
+                      <Cost
+                        value={it.monthlyCost}
+                        estimated={it.estimated}
+                        onChange={(v) => h.update(i, { monthlyCost: v })}
+                      />
+                      <RemoveCard
+                        onClick={() => {
+                          h.remove(i);
+                          tiles.dropAt(i);
+                        }}
+                      />
+                    </div>
+                    <InlineText
+                      value={it.purpose}
+                      onChange={(v) => h.update(i, { purpose: v })}
+                      placeholder="What it's for"
+                      className="prd-card__desc"
+                    />
+                  </div>
+                </div>
+              ) : (
+                it.purpose && <p className="prd-tile__sub">{it.purpose}</p>
+              )}
+            </div>
+          ))}
         </div>
-      ))}
-      <AddButton label="Add software" onClick={() => h.add({ name: "", purpose: "", monthlyCost: "", estimated: false })} />
+      )}
+      <AddButton
+        label="Add software"
+        onClick={() => {
+          tiles.expand(rows.length);
+          h.add({ name: "", purpose: "", monthlyCost: "", estimated: false });
+        }}
+      />
     </div>
   );
 }
@@ -351,6 +554,7 @@ function TechStackBody({ content, patch }: SectionBodyProps) {
   const items = content.techStack ?? [];
   const h = listPatch(items, patch, "techStack");
   const editing = useEditing();
+  const chips = useExpanded();
   const [busy, setBusy] = useState<number[]>([]);
   const ctx = content.overview ?? "";
 
@@ -404,39 +608,91 @@ function TechStackBody({ content, patch }: SectionBodyProps) {
       .finally(() => setBusy((b) => b.filter((x) => x !== idx)));
   }
 
+  // One column per populated layer, a chip per item in it. The chip is the
+  // summary; its editor opens below the whole grid so a wide editor never has to
+  // fit inside a narrow column.
   const groups = STACK_LAYER_ORDER.map((layer) => ({
     layer,
     items: items.map((it, idx) => ({ it, idx })).filter(({ it }) => (it.layer ?? "other") === layer),
   })).filter((g) => g.items.length > 0);
+  const open = items.map((it, idx) => ({ it, idx })).filter(({ idx }) => chips.isOpen(idx));
+
   return (
     <div className="card-stack">
       <EstimateBanner flags={items.map((r) => r.estimated)} />
-      {groups.map((g) => (
-        <div className="stack-group" key={g.layer}>
-          <h4 className="stack-group__head">{STACK_LAYER_LABEL[g.layer]}</h4>
-          {g.items.map(({ it, idx }) => (
-            <div className="prd-card" key={idx}>
-              <RemoveCard onClick={() => h.remove(idx)} />
-              <div className="prd-card__head">
-                <BrandLogo domain={it.domain} name={it.name} />
-                <InlineText
-                  value={it.name}
-                  onChange={(v) => renameAndLookup(idx, v)}
-                  placeholder="Technology"
-                  className="prd-card__title"
-                />
-                <LookupPill on={busy.includes(idx)} />
-                <Cost value={it.monthlyCost} estimated={it.estimated} onChange={(v) => h.update(idx, { monthlyCost: v })} />
+      {items.length === 0 ? (
+        <EmptyNote>No tech stack yet.</EmptyNote>
+      ) : (
+        <div className="prd-stack">
+          {groups.map((g) => {
+            const Icon = STACK_LAYER_ICON[g.layer];
+            return (
+              <div className="prd-stack__col" key={g.layer}>
+                <div className="prd-stack__head">
+                  <span>{STACK_LAYER_LABEL[g.layer]}</span>
+                  <span className="prd-stack__icon" aria-hidden="true">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                </div>
+                <div className="prd-chips">
+                  {g.items.map(({ it, idx }) => (
+                    <button
+                      type="button"
+                      key={idx}
+                      className={"prd-chip" + (chips.isOpen(idx) ? " is-open" : "")}
+                      onClick={() => chips.toggle(idx)}
+                      aria-expanded={chips.isOpen(idx)}
+                    >
+                      <BrandLogo domain={it.domain} name={it.name} size={14} plain />
+                      <span className="prd-chip__name">{it.name || "Untitled"}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-              <p className="prd-card__label">Includes — what this layer covers</p>
-              <InlineList items={it.includes ?? []} onChange={(v) => h.update(idx, { includes: v })} addLabel="item" placeholder="Covered" />
+            );
+          })}
+        </div>
+      )}
+      {open.map(({ it, idx }) => (
+        <div className="prd-stack__body" key={idx}>
+          <div className="prd-card">
+            <div className="prd-card__head">
+              <BrandLogo domain={it.domain} name={it.name} />
+              <InlineText
+                value={it.name}
+                onChange={(v) => renameAndLookup(idx, v)}
+                placeholder="Technology"
+                className="prd-card__title"
+              />
+              <LookupPill on={busy.includes(idx)} />
+              <Cost
+                value={it.monthlyCost}
+                estimated={it.estimated}
+                onChange={(v) => h.update(idx, { monthlyCost: v })}
+              />
+              <RemoveCard
+                onClick={() => {
+                  h.remove(idx);
+                  chips.dropAt(idx);
+                }}
+              />
             </div>
-          ))}
+            <p className="prd-card__label">Includes — what this layer covers</p>
+            <InlineList
+              items={it.includes ?? []}
+              onChange={(v) => h.update(idx, { includes: v })}
+              addLabel="item"
+              placeholder="Covered"
+            />
+          </div>
         </div>
       ))}
       <AddButton
         label="Add stack item"
-        onClick={() => h.add({ name: "", provider: "", layer: "other", monthlyCost: "", estimated: false, includes: [] })}
+        onClick={() => {
+          chips.expand(items.length);
+          h.add({ name: "", provider: "", layer: "other", monthlyCost: "", estimated: false, includes: [] });
+        }}
       />
     </div>
   );
@@ -1022,47 +1278,60 @@ function MilestonesBody({ content, patch }: SectionBodyProps) {
   );
 }
 
-// Simple list/text section bodies via factory.
+// Simple list/text section bodies via factory. An empty one says so rather than
+// leaving a card with nothing but its hint under the title — the reader can't add
+// to it, so silence reads as a broken section.
 const listBody = (
   key: keyof PrdContent,
   variant: "bullet" | "ordered" | "check" | "plain",
   addLabel: string,
   ph: string
 ) => {
-  const Body = ({ content, patch }: SectionBodyProps): ReactNode => (
-    <InlineList
-      items={(content[key] as string[]) ?? []}
-      onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
-      variant={variant}
-      addLabel={addLabel}
-      placeholder={ph}
-    />
-  );
+  const Body = ({ content, patch }: SectionBodyProps): ReactNode => {
+    const items = (content[key] as string[]) ?? [];
+    return (
+      <>
+        {items.length === 0 && <EmptyNote>Nothing recorded here yet.</EmptyNote>}
+        <InlineList
+          items={items}
+          onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
+          variant={variant}
+          addLabel={addLabel}
+          placeholder={ph}
+        />
+      </>
+    );
+  };
   Body.displayName = `ListBody(${String(key)})`;
   return Body;
 };
 
 const textBody = (key: keyof PrdContent, ph: string) => {
-  const Body = ({ content, patch }: SectionBodyProps): ReactNode => (
-    <InlineText
-      value={content[key] as string | undefined}
-      onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
-      placeholder={ph}
-      className="prose-text"
-      multiline
-      tag="p"
-    />
-  );
+  const Body = ({ content, patch }: SectionBodyProps): ReactNode => {
+    const value = content[key] as string | undefined;
+    return (
+      <>
+        {!value && <EmptyNote>Nothing recorded here yet.</EmptyNote>}
+        <InlineText
+          value={value}
+          onChange={(v) => patch({ [key]: v } as Partial<PrdContent>)}
+          placeholder={ph}
+          className="prose-text"
+          multiline
+          tag="p"
+        />
+      </>
+    );
+  };
   Body.displayName = `TextBody(${String(key)})`;
   return Body;
 };
 
 // =====================================================================
-//  Section registry — order, numbering, grouping
+//  Section registry — order and grouping
 // =====================================================================
 export interface SectionDef {
   id: string;
-  num?: string;
   title: string;
   hint?: string;
   group: string;
@@ -1070,29 +1339,27 @@ export interface SectionDef {
 }
 
 export const SECTIONS: SectionDef[] = [
-  { id: "overview", num: "1", title: "Overview", hint: "The problem statement and a summary of the product.", group: "overview", Body: textBody("overview", "Describe the problem and product…") },
-  { id: "goals", num: "2", title: "Goals", hint: "What the finished product looks like — the outcomes the client will have.", group: "overview", Body: listBody("goals", "bullet", "goal", "Goal") },
+  { id: "overview", title: "Overview", hint: "The problem statement and a summary of the product.", group: "overview", Body: textBody("overview", "Describe the problem and product…") },
+  { id: "goals", title: "Goals", hint: "What the finished product looks like — the outcomes the client will have.", group: "overview", Body: listBody("goals", "bullet", "goal", "Goal") },
   { id: "successMetrics", title: "Success Metrics", hint: "How you'll tell adoption is healthy.", group: "overview", Body: listBody("successMetrics", "bullet", "metric", "Metric") },
-  { id: "users", num: "3", title: "Who It's For", hint: "Each user type, their authorization level, and what they may do.", group: "overview", Body: UsersBody },
+  { id: "users", title: "Who It's For", hint: "Each user type, their authorization level, and what they may do.", group: "overview", Body: UsersBody },
   { id: "coreUserFlow", title: "Core User Flow", hint: "One numbered, end-to-end walkthrough of the whole product.", group: "overview", Body: listBody("coreUserFlow", "ordered", "step", "Step") },
 
-  { id: "features", num: "4", title: "Features", hint: "Prioritized capabilities needed for this to work.", group: "scope", Body: FeaturesBody },
+  { id: "features", title: "Features", hint: "Prioritized capabilities needed for this to work.", group: "scope", Body: FeaturesBody },
   { id: "requirements", title: "Functional Requirements", hint: "Concrete things the system must do.", group: "scope", Body: listBody("requirements", "bullet", "requirement", "The system must…") },
   { id: "pagesScreens", title: "Pages & Screens", hint: "Every page/screen in this version and what it displays.", group: "scope", Body: PagesBody },
   { id: "successCriteria", title: "Success Criteria", hint: "Testable, binary acceptance checklist — each item is verifiably done or not.", group: "scope", Body: listBody("successCriteria", "check", "criterion", "Criterion") },
-  { id: "nonFunctionalRequirements", num: "5", title: "Non-Functional Requirements", hint: "Non-feature qualities: performance, setup/hosting, security.", group: "scope", Body: listBody("nonFunctionalRequirements", "bullet", "requirement", "Quality") },
-  { id: "scopeLater", num: "6", title: "Scope — Later", hint: "Features intentionally not in this version.", group: "scope", Body: listBody("scopeLater", "bullet", "item", "Deferred feature") },
+  { id: "nonFunctionalRequirements", title: "Non-Functional Requirements", hint: "Non-feature qualities: performance, setup/hosting, security.", group: "scope", Body: listBody("nonFunctionalRequirements", "bullet", "requirement", "Quality") },
+  { id: "scopeLater", title: "Scope — Later", hint: "Features intentionally not in this version.", group: "scope", Body: listBody("scopeLater", "bullet", "item", "Deferred feature") },
   { id: "futureExpansion", title: "Future Expansion", hint: "Post-MVP upgrade opportunities the client could add later.", group: "scope", Body: listBody("futureExpansion", "bullet", "opportunity", "Opportunity") },
 
-  { id: "dataModel", num: "7", title: "Data Model & Sources", hint: "What data moves in/out and where it comes from.", group: "build", Body: DataModelBody },
-  { id: "integrations", num: "8", title: "Integrations & 3rd-Party Software", hint: "Recommended software and its monthly rate (not setup/dev cost).", group: "build", Body: IntegrationsBody },
-  { id: "techStack", num: "9", title: "Tech Stack & Infrastructure", hint: "Languages and providers the build uses, with monthly cost.", group: "build", Body: TechStackBody },
+  { id: "dataModel", title: "Data Model & Sources", hint: "What data moves in/out and where it comes from.", group: "build", Body: DataModelBody },
+  { id: "integrations", title: "Integrations & 3rd-Party Software", hint: "Recommended software and its monthly rate (not setup/dev cost).", group: "build", Body: IntegrationsBody },
+  { id: "techStack", title: "Tech Stack & Infrastructure", hint: "Languages and providers the build uses, with monthly cost.", group: "build", Body: TechStackBody },
   { id: "freeTierFit", title: "Free-Tier Fit", hint: "Whether the product can run on each service's free tier, and what forces the first paid upgrade.", group: "build", Body: FreeTierFitBody },
-  { id: "uxFlows", num: "10", title: "UX Flows", hint: "Each user type's likely journey through the product.", group: "build", Body: UxFlowsBody },
+  { id: "uxFlows", title: "UX Flows", hint: "Each user type's likely journey through the product.", group: "build", Body: UxFlowsBody },
 
-  { id: "assumptions", num: "11", title: "Assumptions & Dependencies", hint: "What the client must provide within a reasonable timeframe.", group: "plan", Body: listBody("assumptions", "bullet", "assumption", "Assumption") },
-  { id: "constraints", num: "12", title: "Constraints", hint: "Hard limits on the build.", group: "plan", Body: ConstraintsBody },
-  { id: "risks", num: "13", title: "Risks", hint: "Things that could cause delay.", group: "plan", Body: listBody("risks", "bullet", "risk", "Risk") },
-  { id: "openQuestions", title: "Open Questions", hint: "Unknowns to resolve with the client.", group: "plan", Body: listBody("openQuestions", "bullet", "question", "Question") },
-  { id: "milestones", num: "14", title: "Milestones", hint: "What's due by each date.", group: "plan", Body: MilestonesBody },
+  { id: "assumptions", title: "Assumptions & Dependencies", hint: "What the client must provide within a reasonable timeframe.", group: "plan", Body: listBody("assumptions", "bullet", "assumption", "Assumption") },
+  { id: "constraints", title: "Constraints", hint: "Hard limits on the build.", group: "plan", Body: ConstraintsBody },
+  { id: "milestones", title: "Milestones", hint: "What's due by each date.", group: "plan", Body: MilestonesBody },
 ];

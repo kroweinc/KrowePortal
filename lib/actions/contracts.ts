@@ -87,6 +87,10 @@ const createSchema = z.object({
   // Which quote/PRD to build from (chosen in the form). Empty = none.
   prdId: z.string().uuid().optional(),
   quoteId: z.string().uuid().optional(),
+  // Regenerate: the existing draft this run replaces. When set, the finished
+  // contract overwrites that row in place (same id, same share token) instead of
+  // inserting a new one. Must be the builder's own draft in this project.
+  replaceId: z.string().uuid().optional(),
 });
 
 export async function createContractDraft(
@@ -103,12 +107,25 @@ export async function createContractDraft(
     providerName: formData.get("providerName") || undefined,
     prdId: formData.get("prdId") || undefined,
     quoteId: formData.get("quoteId") || undefined,
+    replaceId: formData.get("replaceId") || undefined,
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
   const project = await getProjectById(parsed.data.projectId);
   if (!project) return { error: "Document not found." };
   if (project.owner_id !== profile.id) return { error: "Not your document." };
+
+  // Resolve the regenerate target up front so an invalid one fails before any AI
+  // spend. Only the builder's OWN draft, in this project, can be replaced — a sent
+  // or signed contract is live at a share link the client may already hold.
+  let replace: { id: string; token: string | null } | null = null;
+  if (parsed.data.replaceId) {
+    const target = await getContractById(parsed.data.replaceId);
+    if (!target) return { error: "Contract not found." };
+    if (target.project_id !== parsed.data.projectId) return { error: "That contract belongs to another document." };
+    if (target.status !== "draft") return { error: "Only drafts can be regenerated." };
+    replace = { id: target.id, token: target.token };
+  }
 
   const quoteContent = await selectedQuoteContent(parsed.data.projectId, parsed.data.quoteId);
   const prdContent = await selectedPrdContent(parsed.data.projectId, parsed.data.prdId);
@@ -133,6 +150,27 @@ export async function createContractDraft(
   const content: ContractContent = { ...aiContent, ...exhibitFromQuote(quoteContent) };
 
   const supabase = await getClient(profile.id);
+
+  // Regenerate: overwrite the draft in place so its id — and the share link the
+  // client may already hold — survive the re-run. `status`, `token` and the
+  // created_* columns are deliberately left alone; the exhibit above already
+  // re-snapshotted the current quote's totals and payment schedule.
+  if (replace) {
+    const { error } = await supabase
+      .from("contracts")
+      .update({
+        title: parsed.data.title,
+        content,
+        source_notes: parsed.data.notes ?? null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", replace.id);
+    if (error) return { error: error.message };
+
+    revalidateContract(parsed.data.projectId, replace.id, replace.token);
+    return { contractId: replace.id };
+  }
+
   const { data, error } = await supabase
     .from("contracts")
     .insert({

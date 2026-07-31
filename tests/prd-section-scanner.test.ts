@@ -38,8 +38,6 @@ const PRD_CONTENT = {
   uxFlows: [{ role: "Admin", steps: ["Log in", "View list"] }],
   assumptions: ["Client provides logo"],
   constraintsDetail: { deadline: "08/01/2026", budget: "modest", branding: "provided", security: "standard" },
-  risks: ["Scope creep"],
-  openQuestions: [],
   milestoneList: [{ label: "Build", dueDate: "07/25/2026" }],
   milestoneDueDate: "08/01/2026",
 };

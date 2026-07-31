@@ -2967,22 +2967,32 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-regen-trigger:active { transform: translateY(0) scale(0.98); }
 
-.krowe-regen-label {
+/* The AI-instruction composer: a micro-label over a textarea the builder types a
+   plain-English change into. Shared by the task regenerate panel and the PRD /
+   quote refine dialogs (.krowe-refine-*), which is why the selectors are lists —
+   the surfaces differ only in the sizes split out below each rule. */
+.krowe-regen-label,
+.krowe-refine-label {
   font-size: 10px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.09em;
   color: var(--muted-foreground);
 }
-.krowe-regen-textarea {
+.krowe-regen-textarea,
+.krowe-refine-textarea {
   width: 100%; resize: vertical; min-height: 68px;
   padding: 10px 12px; border-radius: var(--radius-md);
   border: 1px solid var(--border);
-  background: white; color: var(--foreground);
+  background: var(--background); color: var(--foreground);
   font-family: inherit; font-size: 13.5px; line-height: 1.55;
-  transition: border-color var(--duration-fast) var(--ease-out-smooth),
-              box-shadow var(--duration-fast) var(--ease-out-smooth);
+  /* No focus rule: the base textarea:focus-visible step at the top of this file
+     is the one treatment a text surface gets. Never orange, never a halo. */
+  transition: border-color var(--duration-fast) var(--ease-out-smooth);
 }
-.krowe-regen-textarea::placeholder { color: var(--faint-foreground); }
-.krowe-regen-textarea:disabled { opacity: 0.6; }
+.krowe-refine-textarea { min-height: 72px; }
+.krowe-regen-textarea::placeholder,
+.krowe-refine-textarea::placeholder { color: var(--faint-foreground); }
+.krowe-regen-textarea:disabled,
+.krowe-refine-textarea:disabled { opacity: 0.6; }
 .krowe-regen-actions { display: flex; align-items: center; gap: 8px; }
 
 .krowe-regen-trigger:focus-visible,
@@ -3198,6 +3208,45 @@ button.krowe-desc-inline-text:hover {
 .krowe-btn-pill.ghost:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 /* Right-aligned action cluster in the sheet footer (e.g. Unsend + primary). */
 .krowe-task-sheet-footer-actions { display: inline-flex; align-items: center; gap: 10px; }
+
+/* ── Refine diff preview (prd|quote refine-section-dialog.tsx) ─────────────
+   Each entry of a proposed section marked kept / new / removed, so it's visible
+   that the refine added to the section rather than replacing it. Lives here
+   rather than in prd-editor.css or quote.css because both dashboards use it, and
+   every rule in those files is scoped to its own dashboard root. The composer
+   itself shares .krowe-regen-* above. */
+.krowe-refine-hint {
+  font-size: 11.5px; line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.krowe-refine-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.krowe-refine-item:last-child { border-bottom: none; }
+.krowe-refine-item.is-removed { opacity: 0.55; }
+.krowe-refine-item.is-removed > :first-child { text-decoration: line-through; }
+
+.krowe-refine-tag {
+  flex-shrink: 0; margin-top: 1px;
+  padding: 1px 7px; border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  background: var(--surface-subtle); color: var(--faint-foreground);
+  font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+/* .is-kept needs no rule — the base tag above already is the "kept" look. */
+.krowe-refine-tag.is-new,
+.krowe-refine-tag.is-rewritten {
+  background: var(--primary-soft); color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 20%, transparent);
+}
+.krowe-refine-tag.is-removed {
+  background: var(--danger-soft); color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 20%, transparent);
+}
 
 /* ── Interactive "Sent → Unsend" approval pill (approval-pill.tsx) ──────
    Builder-only. Reads "Sent" at rest; on hover/focus it cross-fades to an

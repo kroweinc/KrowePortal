@@ -23,7 +23,14 @@ const Question = z
     text: z.string().min(3).max(300),
     // Choice options, ranked most→least likely. Empty for "date" and "text"
     // questions, where the builder types a value instead of picking an option.
-    options: z.array(z.string().min(1).max(80)).max(5).default([]),
+    //
+    // The cap is a BACKSTOP, not the target: strict mode strips maxLength from the wire
+    // schema (see STRIP_KEYWORDS), so the model never sees it, yet zod still enforces it
+    // at safeParse time — an 85-character option used to fail the entire round and
+    // degrade the builder to the generic fallback questions. The prompt asks for ~80
+    // characters (which is what the UI reads well at); this leaves enough headroom that
+    // overshooting costs nothing.
+    options: z.array(z.string().min(1).max(200)).max(5).default([]),
     // "choice" (default) renders selectable options; "date" renders an MM/DD/YYYY
     // input; "text" renders an open-ended textarea (e.g. the "what's your idea?"
     // opener of the no-scope intake). Lets the AI mark a question as free-form
@@ -33,7 +40,9 @@ const Question = z
     multiSelect: z.boolean().default(false),
     // The exact text of the option the AI judges best — MUST equal one of `options`.
     // Surfaced in the UI as a "Recommended" badge and pre-selected for the builder.
-    recommended: z.string().min(1).max(80).optional(),
+    // Shares `options`' backstop cap — it holds a copy of one of them, so a tighter
+    // limit here would fail every round whose best option ran long.
+    recommended: z.string().min(1).max(200).optional(),
     // One short, plain-language sentence on WHY it's the best default, for a
     // non-technical builder. Interview-time guidance only; not persisted.
     recommendation: z.string().min(1).max(280).optional(),
@@ -443,8 +452,6 @@ export const PrdContentSchema = z.object({
   assumptions: z.array(z.string().min(1).max(400)).max(30).default([]),
   constraintsDetail: PrdConstraintsSchema.optional(),
   constraints: z.array(z.string().min(1).max(300)).max(30).default([]),
-  risks: z.array(z.string().min(1).max(400)).max(30).default([]),
-  openQuestions: z.array(z.string().min(1).max(400)).max(30).default([]),
   milestoneDueDate: z.string().max(80).nullish(),
   milestoneList: z.array(PrdMilestoneSchema).max(30).default([]),
   milestones: z.string().max(2000).optional(),
@@ -473,26 +480,55 @@ export const PrdFinalResult = z.object({
   contextSummary: z.string().max(2000).optional(),
 });
 
+// Forced on a round the interview must spend asking (every staged scope round, and
+// the opening rounds of the adaptive interview). The mirror image of PrdFinalResult:
+// a SINGLE-OBJECT schema, so it can ship as a strict json_schema and make "here is the
+// finished PRD" structurally impossible rather than merely discouraged in prose. The
+// union above can't do that — a root oneOf is illegal in strict mode — which is exactly
+// how a three-word note could come back as a finished, invented PRD on round 0.
+export const PrdQuestionsResult = z.object({
+  kind: z.literal("questions"),
+  items: z.array(Question).min(2).max(5),
+});
+
 // ── PRD section refine ───────────────────────────────────────────────────────
-// A partial PRD: the refine flow only ever touches one section's keys (the
-// server whitelists to those keys), so every field is optional here.
+// A partial PRD: the refine flow only ever touches one section's keys, so every
+// field is optional here. Still used by the streaming wizard's live render.
 export const PrdSectionPatchSchema = PrdContentSchema.partial();
 
-// While the refine wizard may still ask: clarifying questions OR a section patch.
-export const RefineSectionResult = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("questions"), items: z.array(Question).min(1).max(4) }),
-  z.object({ kind: z.literal("section"), patch: PrdSectionPatchSchema }),
-]);
+/**
+ * The strict response schema for ONE section's refine, narrowed to that section's
+ * own keys. Narrowing matters twice over: strict mode forces every key of the
+ * schema into `required`, so the full content schema would make the model emit a
+ * null for ~25 keys it isn't touching (and cost ~1.6k input tokens of schema on
+ * every call), and a narrowed schema makes an off-section key structurally
+ * impossible rather than something the server has to filter out afterwards.
+ *
+ * Cached per section — the strict JSON Schema is rebuilt from zod on each call
+ * otherwise, and there are only ~19 sections.
+ */
+const sectionResultCache = new Map<string, z.ZodType>();
 
-// Forced on the final round: the model must return a section patch, not questions.
-export const RefineSectionFinalResult = z.object({
-  kind: z.literal("section"),
-  patch: PrdSectionPatchSchema,
-});
+function sectionPatchResult(shape: z.ZodObject<z.ZodRawShape>, cacheKey: string, fields: string[]): z.ZodType {
+  const cached = sectionResultCache.get(cacheKey);
+  if (cached) return cached;
+  const own = fields.filter((f) => f in shape.shape);
+  const mask = Object.fromEntries(own.map((f) => [f, true]));
+  // An unknown section id would pick nothing, which the model could never
+  // satisfy — fall back to the whole partial rather than emitting an empty object.
+  const patch = own.length > 0 ? shape.pick(mask as never).partial() : shape.partial();
+  const built = z.object({ patch });
+  sectionResultCache.set(cacheKey, built);
+  return built;
+}
+
+export function prdSectionResult(sectionId: string, fields: string[]): z.ZodType {
+  return sectionPatchResult(PrdContentSchema, `prd:${sectionId}`, fields);
+}
 
 // ── Quote ──────────────────────────────────────────────────────────────────
 // A priced quote breakdown (the Sherwood structure). Reuses the Question schema
-// above for the wizard/refine interview. Money fields are plain numbers (dollars).
+// above for the wizard interview. Money fields are plain numbers (dollars).
 const QuoteLineItemSchema = z.object({
   label: z.string().min(1).max(200),
   // Effort-based pricing: the model returns hours; the runtime computes the
@@ -580,19 +616,14 @@ export const QuoteFinalResult = z.object({
 });
 
 // ── Quote section refine ─────────────────────────────────────────────────────
-// A partial quote: the refine flow only ever touches one section's keys (the
-// server whitelists to those keys), so every field is optional here.
+// A partial quote: the refine flow only ever touches one section's keys, so every
+// field is optional here. Still used by the streaming wizard's live render.
 export const QuoteSectionPatchSchema = QuoteContentSchema.partial();
 
-export const RefineQuoteSectionResult = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("questions"), items: z.array(Question).min(1).max(4) }),
-  z.object({ kind: z.literal("section"), patch: QuoteSectionPatchSchema }),
-]);
-
-export const RefineQuoteSectionFinalResult = z.object({
-  kind: z.literal("section"),
-  patch: QuoteSectionPatchSchema,
-});
+/** Section-narrowed strict response schema — see prdSectionResult above. */
+export function quoteSectionResult(sectionId: string, fields: string[]): z.ZodType {
+  return sectionPatchResult(QuoteContentSchema, `quote:${sectionId}`, fields);
+}
 
 export type TaskDraftDependency = z.infer<typeof TaskDraftDependency>;
 export type Question = z.infer<typeof Question>;
@@ -612,10 +643,9 @@ export type SimplifiedTask = z.infer<typeof SimplifiedTask>;
 export type SimplifyTasksResult = z.infer<typeof SimplifyTasksResult>;
 export type PrdGenerationResult = z.infer<typeof PrdGenerationResult>;
 export type PrdFinalResult = z.infer<typeof PrdFinalResult>;
-export type RefineSectionResult = z.infer<typeof RefineSectionResult>;
+export type PrdQuestionsResult = z.infer<typeof PrdQuestionsResult>;
 export type QuoteGenerationResult = z.infer<typeof QuoteGenerationResult>;
 export type QuoteFinalResult = z.infer<typeof QuoteFinalResult>;
-export type RefineQuoteSectionResult = z.infer<typeof RefineQuoteSectionResult>;
 export type FreeTierServiceVerdict = z.infer<typeof FreeTierServiceVerdict>;
 export type FreeTierAssumption = z.infer<typeof FreeTierAssumption>;
 export type FreeTierAnalysis = z.infer<typeof FreeTierAnalysisResult>;

@@ -682,8 +682,6 @@ export interface PrdContent {
   assumptions?: string[]; // §11 — what the client must provide
   constraintsDetail?: PrdConstraints; // §12
   constraints?: string[]; //    legacy fallback
-  risks?: string[]; // §13
-  openQuestions?: string[]; // §13
   milestoneDueDate?: string | null; // §14 — overall deadline the milestones build toward
   milestoneList?: PrdMilestone[]; // §14
   milestones?: string; //    legacy fallback

@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { draftQuote } from "@/lib/actions/quote-docs";
 import type { DraftQuoteInput, DraftQuoteResult } from "@/lib/quote/draft-core";
 import type { Question } from "@/lib/ai/schemas";
-import { streamDraft } from "@/lib/ai/stream-client";
+import { streamDraft, generationErrorMessage } from "@/lib/ai/stream-client";
 
 const OTHER = "__other__";
 
@@ -64,12 +64,25 @@ interface Props {
   initialTitle: string;
   prds: WizardPrd[];
   initialPrdId?: string | null;
+  /** Regenerate mode: the existing draft this run replaces. The finished quote
+      overwrites that document in place — same id, same share link — instead of
+      creating a new one. Absent ⇒ the ordinary new-quote flow. */
+  regenerateId?: string | null;
   /** When true, the final generation streams progressively via the SSE route
       (OPENAI_ENABLE_STREAMING). Off ⇒ the blocking draftQuote action path. */
   streamingEnabled?: boolean;
 }
 
-export function QuoteWizard({ projectId, projectName, backHref, initialTitle, prds, initialPrdId, streamingEnabled = false }: Props) {
+export function QuoteWizard({
+  projectId,
+  projectName,
+  backHref,
+  initialTitle,
+  prds,
+  initialPrdId,
+  regenerateId = null,
+  streamingEnabled = false,
+}: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -110,6 +123,9 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
       notes: src === "notes" ? notes.trim() || undefined : undefined,
       answers: nextAnswers,
       round: nextRound,
+      // Regenerate: the finished quote replaces this draft instead of inserting a
+      // new row, so the done-handler's push below lands back on the same document.
+      replaceId: regenerateId ?? undefined,
     };
 
     // One result handler for both the streaming and blocking paths.
@@ -151,12 +167,17 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
             signal: controller.signal,
           });
           if (myGen !== genId.current) return;
+          // The request never reached the route (dropped connection, server
+          // restart) — nothing was generated, so re-run the round blocking
+          // instead of throwing the builder back onto the question they just
+          // answered. Keeps a transient network blip invisible.
+          if (evt.type === "unavailable") return handle(await draftQuote(payload));
           if (evt.type === "questions") handle({ kind: "questions", items: evt.items });
           else if (evt.type === "done" && evt.quoteId) handle({ kind: "quote", quoteId: evt.quoteId });
           else handle({ error: evt.type === "error" ? evt.error : "Generation failed." });
         } catch (err) {
           if (myGen !== genId.current) return; // aborted by cancelLoading — ignore
-          handle({ error: err instanceof Error ? err.message : "Something went wrong generating the quote." });
+          handle({ error: generationErrorMessage(err, "Something went wrong generating the quote.") });
         }
       })();
       return;
@@ -169,7 +190,7 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
         if (myGen !== genId.current) return; // cancelled — abandon the result
         // A thrown/rejected server action (network drop, timeout) must never
         // leave the wizard stuck on the spinner with no feedback or escape.
-        toast.error(err instanceof Error ? err.message : "Something went wrong generating the quote.");
+        toast.error(generationErrorMessage(err, "Something went wrong generating the quote."));
         restoreScreen();
       }
     });
@@ -318,9 +339,13 @@ export function QuoteWizard({ projectId, projectName, backHref, initialTitle, pr
         <Link href={backHref} className="text-xs text-neutral-500 hover:text-neutral-900">
           ← {projectName}
         </Link>
-        <h1 className="text-2xl font-semibold text-neutral-900 mb-1 mt-3">New quote</h1>
+        <h1 className="text-2xl font-semibold text-neutral-900 mb-1 mt-3">
+          {regenerateId ? "Regenerate quote" : "New quote"}
+        </h1>
         <p className="text-sm text-neutral-500">
-          Generate a priced breakdown from a PRD, from scratch, or from notes. AI estimates the numbers; you edit anything before sending.
+          {regenerateId
+            ? "Price the work again from a PRD, from scratch, or from notes. Finishing replaces the current draft — its share link stays the same."
+            : "Generate a priced breakdown from a PRD, from scratch, or from notes. AI estimates the numbers; you edit anything before sending."}
         </p>
       </div>
 

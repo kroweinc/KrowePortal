@@ -15,7 +15,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
 import { fieldsForSection, refinableSection } from "@/lib/prd/section-fields";
-import type { Question } from "@/lib/ai/schemas";
+import { MIN_INSTRUCTION, MAX_INSTRUCTION } from "@/lib/doc/refine";
 import { PrdContentSchema } from "@/lib/ai/schemas";
 import type { Prd, PrdContent, PrdSummary } from "@/lib/types";
 
@@ -32,9 +32,6 @@ import {
   type DraftPrdInput,
   type DraftPrdResult,
 } from "@/lib/prd/draft-core";
-
-/** Hard cap on refine question rounds before a section patch is forced. */
-const MAX_REFINE_ROUNDS = 2;
 
 function revalidatePrd(projectId: string, id: string, token?: string | null) {
   revalidatePath(`/b/projects/${projectId}`);
@@ -80,7 +77,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   if (isEmptyPrdContent(result.content)) {
     try {
       result = await generatePrd(
-        { ...resolved.genInput, forceFinal: true },
+        { ...resolved.genInput, forceFinal: true, mustAsk: false },
         { userId: resolved.profile.id, operation: "generate_prd" }
       );
     } catch (err) {
@@ -153,55 +150,42 @@ const refineSchema = z.object({
   // The live PRD content (incl. unsaved inline edits) sent from the client so the
   // AI refines against what the builder currently sees, not the last-saved row.
   currentContent: z.record(z.string(), z.unknown()),
-  answers: z
-    .array(
-      z.object({
-        questionId: z.string(),
-        question: z.string().max(400),
-        answer: z.string().max(2000),
-      })
-    )
-    .max(20)
-    .optional(),
-  round: z.number().int().min(0).max(10),
+  // What the builder typed into "What do you want to change?" — a casual
+  // one-liner, not a structured brief.
+  instruction: z.string().trim().min(MIN_INSTRUCTION).max(MAX_INSTRUCTION),
 });
 
 export type RefinePrdSectionInput = z.input<typeof refineSchema>;
 
-export type RefinePrdSectionResult =
-  | { kind: "questions"; items: Question[] }
-  | { kind: "section"; patch: Partial<PrdContent> }
-  | { error: string };
+export type RefinePrdSectionResult = { patch: Partial<PrdContent> } | { error: string };
 
 /**
- * Adaptive single-section refine. Sends the live PRD content + section focus to
- * the AI and either asks a round of targeted clarifying questions or returns a
- * patch covering ONLY that section's keys. Does NOT persist — the client merges
- * the patch into its edit state and saves through updatePrdContent.
+ * Single-section refine driven by the builder's instruction. Sends the live PRD
+ * content + section focus + the instruction to the AI and returns a patch
+ * covering ONLY that section's keys. Does NOT persist — the client merges the
+ * patch into its edit state and saves through updatePrdContent.
  */
 export async function refinePrdSection(input: RefinePrdSectionInput): Promise<RefinePrdSectionResult> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only the builder can edit a PRD." };
 
-  const budget = await assertAiBudget(profile.id);
-  if (!budget.ok) return { error: budget.error };
-
   const parsed = refineSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
-  const { prdId, sectionId, currentContent, answers = [], round } = parsed.data;
+  const { prdId, sectionId, currentContent, instruction } = parsed.data;
 
   const fields = fieldsForSection(sectionId);
   if (fields.length === 0) return { error: "That section can't be refined." };
   const section = refinableSection(sectionId);
 
+  // The budget check and the ownership read only share profile.id — one round trip.
   const supabase = await getClient(profile.id);
-  const { data: before } = await supabase
-    .from("prds")
-    .select("created_by, source_notes")
-    .eq("id", prdId)
-    .single();
+  const [budget, { data: before }] = await Promise.all([
+    assertAiBudget(profile.id),
+    supabase.from("prds").select("created_by, source_notes").eq("id", prdId).single(),
+  ]);
+  if (!budget.ok) return { error: budget.error };
 
   if (!before) return { error: "PRD not found." };
   if (before.created_by !== profile.id) return { error: "Not your PRD." };
@@ -213,17 +197,15 @@ export async function refinePrdSection(input: RefinePrdSectionInput): Promise<Re
       sectionTitle: section?.title ?? sectionId,
       sectionFields: fields as string[],
       currentContent: currentContent as PrdContent,
+      instruction,
       businessContext: (before.source_notes as string | null) ?? undefined,
-      answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
-      forceFinal: round >= MAX_REFINE_ROUNDS,
       currentDate: new Date().toISOString().slice(0, 10),
     }, { userId: profile.id, operation: "refine_prd_section" });
   } catch (err) {
     return { error: friendlyAiError(err) };
   }
 
-  if (result.kind === "questions") return { kind: "questions", items: result.items };
-  return { kind: "section", patch: result.patch };
+  return { patch: result.patch };
 }
 
 const updateSchema = z.object({

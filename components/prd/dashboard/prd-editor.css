@@ -1,0 +1,568 @@
+/* ===========================================================
+   PRD Editor — the PRD screen's own presentation layer.
+
+   prd-dashboard.css is SHARED: the quote and contract dashboards
+   render inside .prd-dashboard and rely on its frame, rail, stat
+   and section rules. So everything specific to the PRD design —
+   the sticky document header, framed section cards, two-metric
+   stat tiles, hairline rows, stack chips and integration tiles —
+   lives here, scoped to .prd-dashboard.prd-editor, which only
+   the PRD surfaces add.
+
+   Every override is written as `.prd-dashboard.prd-editor <sel>`
+   so it outranks the shared single-class rule on specificity
+   rather than relying on stylesheet import order.
+
+   Both modes share this presentation; Edit adds the inline
+   editors inside it (see inline-edit.tsx).
+   =========================================================== */
+.prd-dashboard.prd-editor {
+  /* How far down the window the sticky document header parks: clear of the app
+     topbar in-portal, flush to the top on the public share page (no topbar). */
+  --prd-head-offset: var(--topbar-height);
+  --prd-dochead-h: 64px;
+  /* Top gutter of the shell the document sits in — .krowe-page's 28px (no token
+     covers 28). The header cancels it: in-portal the bar is translucent over the
+     same --background as the page, so that gutter can't be told apart from the
+     bar's own padding — it just pushed the title row to the floor of one tall
+     white band. Cancelled, the bar sits flush under the topbar at scroll-top
+     exactly as it does once scrolled. */
+  --prd-shell-gutter: 28px;
+  /* Everything scrolled to has to clear BOTH sticky bars plus a breath. */
+  --prd-anchor-offset: calc(var(--prd-head-offset) + var(--prd-dochead-h) + var(--spacing-xl));
+}
+/* No app topbar out on the public share page, and keep .prd-public's top gutter:
+   there the bar is a light card on the --surface-subtle canvas, so its own edges
+   are visible and the gutter reads as page margin rather than bar padding. */
+.prd-public .prd-dashboard.prd-editor {
+  --prd-head-offset: 0px;
+  --prd-shell-gutter: 0px;
+}
+
+/* The sticky header carries the top padding the frame used to. */
+.prd-dashboard.prd-editor .dash {
+  padding: 0 0 64px;
+}
+
+/* ---------- sticky document header ---------- */
+/* Parks under the app topbar and carries the doc's identity + every action, so
+   the title, Refine and Send stay reachable however far the reader has
+   scrolled. Same translucency recipe as .krowe-topbar (load-bearing: content
+   reads straight through a transparent bar) and z-20, which clears page content
+   but stays under the topbar (30), sheets and dialogs (40+). */
+.prd-dashboard.prd-editor .dash-dochead {
+  position: sticky;
+  top: var(--prd-head-offset);
+  /* Rise into the shell's top gutter so the bar's own padding is the only space
+     above the title row — the row then reads centred in the bar rather than
+     pinned to its floor. */
+  margin-top: calc(-1 * var(--prd-shell-gutter));
+  z-index: 20;
+  min-height: var(--prd-dochead-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-xl);
+  flex-wrap: wrap;
+  padding: var(--spacing-lg) 0;
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.prd-dashboard.prd-editor .dochead-lead {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  min-width: 0;
+}
+.prd-dashboard.prd-editor .dochead-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--radius-full);
+  color: var(--muted-foreground);
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+    background var(--duration-fast) var(--ease-out-smooth);
+}
+.prd-dashboard.prd-editor .dochead-back:hover {
+  color: var(--foreground);
+  background: var(--surface-subtle);
+}
+.prd-dashboard.prd-editor .dochead-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* Sans at H4, not the 32px page-title serif: this is a compact toolbar row, and
+   the serif pushed the bar past the height a sticky header can afford. 16px is
+   the largest thing on the page by a clear step, so it still reads as the
+   document's name against a 13px body. */
+.prd-dashboard.prd-editor .dash-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+  line-height: 1.3;
+  text-wrap: initial;
+  min-width: 0;
+}
+
+/* ---------- stat strip: three tiles, two metrics each ---------- */
+/* What it costs to run, when it lands, how long it takes to build. Every figure
+   is derived live from the document (prd-summary.ts), so the strip re-reads
+   correctly as the builder edits. */
+.prd-dashboard.prd-editor .stat-strip {
+  gap: var(--spacing-md);
+  margin: var(--spacing-2xl) 0 0;
+}
+.prd-dashboard.prd-editor .stat-card {
+  min-width: 0;
+  background: var(--surface-subtle);
+  padding: var(--spacing-xl);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--spacing-xl);
+}
+.prd-dashboard.prd-editor .stat-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.prd-dashboard.prd-editor .stat-row__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.prd-dashboard.prd-editor .stat-row__value {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.prd-dashboard.prd-editor .stat-row__label {
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  min-width: 0;
+}
+
+/* ---------- outline rail ---------- */
+.prd-dashboard.prd-editor .dash-grid {
+  margin-top: 0;
+}
+.prd-dashboard.prd-editor .rail-layout {
+  grid-template-columns: 192px 1fr;
+  gap: var(--spacing-2xl);
+  padding-top: var(--spacing-2xl);
+}
+.prd-dashboard.prd-editor .toc {
+  top: var(--prd-anchor-offset);
+  gap: var(--spacing-lg);
+  max-height: calc(100vh - var(--prd-anchor-offset) - var(--spacing-2xl));
+  padding-right: 0;
+  scrollbar-width: none;
+}
+.prd-dashboard.prd-editor .toc::-webkit-scrollbar {
+  display: none;
+}
+.prd-dashboard.prd-editor .toc__nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  min-width: 0;
+}
+/* A quiet outline: label only, marked by an orange edge rather than a filled
+   pill. 13px — the app's nav-label size, and the prototype's 16px pushed this
+   registry's 24 sections into their own scrollbar. */
+.prd-dashboard.prd-editor .toc__item {
+  display: block;
+  padding: 6px var(--spacing-md);
+  border-radius: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+    border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.prd-dashboard.prd-editor .toc__item:hover {
+  background: transparent;
+}
+.prd-dashboard.prd-editor .toc__item.is-active {
+  background: transparent;
+  font-weight: 500;
+}
+
+/* ---------- section cards ---------- */
+/* Every section is a framed card: icon + title, optional hint, then the body. */
+.prd-dashboard.prd-editor .rail-content {
+  gap: var(--spacing-md);
+}
+.prd-dashboard.prd-editor .dash-section {
+  scroll-margin-top: var(--prd-anchor-offset);
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--spacing-2xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xl);
+}
+.prd-dashboard.prd-editor .dash-section__head {
+  margin-bottom: 0;
+}
+.prd-dashboard.prd-editor .dash-section__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  letter-spacing: -0.008em;
+  line-height: 1.3;
+}
+.prd-dashboard.prd-editor .dash-section__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.prd-dashboard.prd-editor .dash-section__hint {
+  margin-top: 6px;
+}
+/* Per-section Refine sits in every card head, so it stays a quiet text
+   affordance — 22 solid pills down the document would out-shout the content. */
+.prd-dashboard.prd-editor .prd-sec-refine {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+.prd-dashboard.prd-editor .prd-sec-refine:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+/* Two sections sharing one card (Goals | Success Metrics) — heads on one row,
+   bodies on the next, so the pair reads as columns rather than two stacks. */
+.prd-dashboard.prd-editor .prd-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--spacing-4xl);
+  align-items: start;
+}
+.prd-dashboard.prd-editor .prd-cols > * {
+  min-width: 0;
+}
+/* User types side by side — the design's Builder | Client pair, which wraps
+   cleanly when a PRD carries three or more roles. */
+.prd-dashboard.prd-editor .prd-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--spacing-lg);
+  align-items: start;
+}
+.prd-dashboard.prd-editor .prd-role-grid:empty {
+  display: none;
+}
+
+/* ---------- hairline rows (features / pages) ---------- */
+/* Collapsed by default: title, badge, and a one-line digest of the detail list.
+   The chevron expands the row in place into its full editor. */
+.prd-dashboard.prd-editor .prd-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.prd-dashboard.prd-editor .prd-row {
+  border-top: 1px solid var(--border);
+}
+.prd-dashboard.prd-editor .prd-row:first-child {
+  border-top: none;
+}
+.prd-dashboard.prd-editor .prd-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+  width: 100%;
+  text-align: left;
+  padding: var(--spacing-lg) var(--spacing-xl);
+  background: transparent;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.prd-dashboard.prd-editor .prd-row__head:hover,
+.prd-dashboard.prd-editor .prd-row.is-open .prd-row__head {
+  background: var(--surface-subtle);
+}
+.prd-dashboard.prd-editor .prd-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.prd-dashboard.prd-editor .prd-row__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--foreground);
+  min-width: 0;
+}
+.prd-dashboard.prd-editor .prd-row__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prd-dashboard.prd-editor .prd-row__sub {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prd-dashboard.prd-editor .prd-row__go {
+  flex: none;
+  display: inline-flex;
+  color: var(--muted-foreground);
+  transition: transform var(--duration-fast) var(--ease-out-smooth);
+}
+.prd-dashboard.prd-editor .prd-row.is-open .prd-row__go {
+  transform: rotate(90deg);
+}
+.prd-dashboard.prd-editor .prd-row__body {
+  padding: var(--spacing-xl);
+  border-top: 1px solid var(--border);
+}
+/* An expanded row already sits in its own frame — drop the inner card chrome. */
+.prd-dashboard.prd-editor .prd-row__body .prd-card,
+.prd-dashboard.prd-editor .prd-tile__body .prd-card,
+.prd-dashboard.prd-editor .prd-stack__body .prd-card {
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+}
+/* The row/tile/chip frame already carries the remove affordance's context, and
+   an absolutely-positioned × would land on the header — inline it instead. */
+.prd-dashboard.prd-editor .prd-row__body .card-remove,
+.prd-dashboard.prd-editor .prd-tile__body .card-remove,
+.prd-dashboard.prd-editor .prd-stack__body .card-remove {
+  position: static;
+  opacity: 1;
+  align-self: flex-start;
+}
+
+/* ---------- badges ---------- */
+.prd-dashboard.prd-editor .prd-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 22px;
+  padding: 0 var(--spacing-md);
+  border-radius: var(--radius-sm);
+  /* 10.5px, as .prio and .fit run elsewhere in the document — an uppercase
+     badge at 12 out-weighed the 13.5px row title it annotates. */
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.prd-dashboard.prd-editor .prd-badge--must {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.prd-dashboard.prd-editor .prd-badge--should,
+.prd-dashboard.prd-editor .prd-badge--could {
+  background: var(--surface-subtle);
+  color: var(--muted-foreground);
+}
+
+/* ---------- tech stack: a column per layer, a chip per item ---------- */
+/* 150px so all six layers fit one row at document width, as the design shows. */
+.prd-dashboard.prd-editor .prd-stack {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--spacing-lg);
+  align-items: stretch;
+}
+.prd-dashboard.prd-editor .prd-stack__col {
+  min-width: 0;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+.prd-dashboard.prd-editor .prd-stack__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.008em;
+  color: var(--foreground);
+}
+.prd-dashboard.prd-editor .prd-stack__icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--muted-foreground);
+}
+.prd-dashboard.prd-editor .prd-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+/* Neutral chips carrying the vendor's own logo. The prototype tinted each chip
+   with its vendor's brand color; that hex is off-palette and can't be derived
+   for an arbitrary stack, so the logo does the identifying. */
+.prd-dashboard.prd-editor .prd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px var(--spacing-md);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--foreground);
+  text-align: left;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.prd-dashboard.prd-editor .prd-chip:hover,
+.prd-dashboard.prd-editor .prd-chip.is-open {
+  border-color: var(--accent);
+}
+/* Only the real logo drops the boxed chrome — the monogram fallback keeps its
+   tile, otherwise an unresolved vendor leaves a blank gap in the chip. */
+.prd-dashboard.prd-editor .prd-chip .brand-logo {
+  width: 14px;
+  height: 14px;
+}
+.prd-dashboard.prd-editor .prd-chip img.brand-logo {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+.prd-dashboard.prd-editor .prd-chip__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The expanded editor for whichever chip is open, below the columns. */
+.prd-dashboard.prd-editor .prd-stack__body {
+  background: var(--surface-subtle);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-xl);
+}
+
+/* ---------- integration tiles ---------- */
+.prd-dashboard.prd-editor .prd-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: var(--spacing-lg);
+}
+.prd-dashboard.prd-editor .prd-tile {
+  min-width: 0;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  transition: border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.prd-dashboard.prd-editor .prd-tile.is-open {
+  border-color: var(--accent);
+}
+.prd-dashboard.prd-editor .prd-tile__head {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  width: 100%;
+  text-align: left;
+}
+.prd-dashboard.prd-editor .prd-tile__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prd-dashboard.prd-editor .prd-tile__sub {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+/* Inside a tile the cost pill sits with the name, not shoved to the far edge. */
+.prd-dashboard.prd-editor .prd-tile .cost-pill {
+  margin-left: 0;
+}
+
+/* The one orange accent inside a section body — the document's bullet. */
+.prd-dashboard.prd-editor .inline-list--bullet .inline-list__marker {
+  color: var(--accent);
+}
+
+/* ---------- document type scale ---------- */
+/* prd-dashboard.css sets these primitives a step larger (14–17px) than the rest
+   of the portal, which runs a 13px body with 13.5px/600 titles and 12.5px
+   secondary text. At PRD length — 24 sections of prose, lists and rows — that
+   step read as a different app. Stepped down onto the portal's scale here
+   rather than in the shared sheet, which the quote and contract dashboards
+   still render against. Line heights are unitless, so they follow. */
+.prd-dashboard.prd-editor .prose-text,
+.prd-dashboard.prd-editor .inline-list__item,
+.prd-dashboard.prd-editor .flow-step__text,
+.prd-dashboard.prd-editor .constraint-value,
+.prd-dashboard.prd-editor .milestone-label {
+  font-size: 13px;
+}
+/* The marker stays a hair under its item, as it is in the shared sheet. */
+.prd-dashboard.prd-editor .inline-list__marker {
+  font-size: 12px;
+}
+.prd-dashboard.prd-editor .prd-card__title,
+.prd-dashboard.prd-editor .flow-role {
+  font-size: 13.5px;
+}
+.prd-dashboard.prd-editor .milestone-deadline-value,
+.prd-dashboard.prd-editor .milestone-deadline-value .milestone-date-input {
+  font-size: 13px;
+}
+/* The free-tier figures stay the page's one oversized number — they're the
+   verdict the section exists to deliver — but drop a step with everything else. */
+.prd-dashboard.prd-editor .freetier-stat__value {
+  font-size: 15px;
+}
+
+@media (max-width: 1080px) {
+  .prd-dashboard.prd-editor .rail-layout {
+    grid-template-columns: 1fr;
+  }
+  .prd-dashboard.prd-editor .prd-cols {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-2xl);
+  }
+}

@@ -24,17 +24,23 @@ import {
 } from "lucide-react";
 import { draftPrd } from "@/lib/actions/prds";
 import type { DraftPrdResult } from "@/lib/prd/draft-core";
-import { streamDraft } from "@/lib/ai/stream-client";
-import { PrdDocument } from "@/components/prd/prd-document";
+import { streamDraft, generationErrorMessage } from "@/lib/ai/stream-client";
 import {
   addSopTranscriptText,
   uploadSopTranscript,
   deleteSopTranscript,
 } from "@/lib/actions/project-sop";
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
-import { SCOPE_STAGE_COUNT, SCOPE_OPENER, deepStageIndex, scopeStageAt } from "@/lib/prd/scope-stages";
+import {
+  SCOPE_STAGE_COUNT,
+  SCOPE_OPENER,
+  resolveIntakeMode,
+  stageIndexForRound,
+  scopeStageAt,
+  type PrdIntakeMode,
+} from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
-import type { ProjectSopTranscript, PrdContent } from "@/lib/types";
+import type { ProjectSopTranscript } from "@/lib/types";
 
 const OTHER = "__other__";
 
@@ -120,8 +126,7 @@ type WizardState =
   | { kind: "intro" }
   // `sections` accumulates the PRD content keys the model has streamed so far (the
   // final, streamed round only) — it drives WizLoading's real progress meter.
-  // `partial` is the PRD-so-far (completed sections) for the live document preview.
-  | { kind: "loading"; label: string; sections?: string[]; partial?: PrdContent }
+  | { kind: "loading"; label: string; sections?: string[] }
   | {
       kind: "questions";
       items: Question[];
@@ -243,37 +248,6 @@ function DraftStage({ facts, docTitle, docMeta }: { facts: Fact[]; docTitle: str
   );
 }
 
-// While the final PRD streams, show it building for real: each section pops into
-// the stage the instant the model finishes writing it (fed by streamDraft's
-// onContent). Replaces the answer-facts DraftStage during the final round so the
-// ~30s wait is a document you watch assemble, not a bare progress bar. Reuses the
-// read-only PrdDocument renderer (it guards every section, so a partial is safe)
-// and the existing .ed-doc/.ed-fill styling — no new layout.
-function LivePrdStage({ content, docTitle, docMeta }: { content: PrdContent; docTitle: string; docMeta: string }) {
-  return (
-    <section className="ed-stage">
-      <div className="ed-stage-head">
-        <span className="ed-stage-eyebrow">
-          <Ember size={14} />
-          Drafting live
-        </span>
-      </div>
-      <div className="ed-stage-body">
-        <h2 className="ed-stage-h">Your PRD, taking shape.</h2>
-        <div className="ed-doc">
-          <div className="ed-doc-top">
-            <span className="ed-doc-title">{docTitle}</span>
-            <span className="ed-doc-meta">{docMeta}</span>
-          </div>
-          <div className="ed-fill">
-            <PrdDocument content={content} />
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 // Expected generation durations (ms) driving the progress estimate. The bar eases
 // toward an asymptote, so finishing early just snaps to done — these are generous
 // upper-ish guesses, deliberately set so the estimate under-promises. Tune by
@@ -304,8 +278,6 @@ const PRD_SECTION_LABELS: Record<string, string> = {
   uxFlows: "UX flows",
   assumptions: "Assumptions",
   constraintsDetail: "Constraints",
-  risks: "Risks",
-  openQuestions: "Open questions",
   milestoneList: "Timeline & milestones",
   milestoneDueDate: "Deadline",
 };
@@ -398,6 +370,10 @@ interface Props {
   backHref: string;
   initialTitle: string;
   initialSopTranscripts: ProjectSopTranscript[];
+  /** Regenerate mode: the existing draft this run replaces. The finished PRD
+      overwrites that document in place — same id, same share link — instead of
+      creating a new one. Absent ⇒ the ordinary new-PRD flow. */
+  regenerateId?: string | null;
   /** When true, the final generation streams progressively via the SSE route
       (OPENAI_ENABLE_STREAMING). Off ⇒ the blocking draftPrd action path. */
   streamingEnabled?: boolean;
@@ -409,6 +385,7 @@ export function PrdWizard({
   backHref,
   initialTitle,
   initialSopTranscripts,
+  regenerateId = null,
   streamingEnabled = false,
 }: Props) {
   const router = useRouter();
@@ -441,8 +418,10 @@ export function PrdWizard({
   const abortRef = useRef<AbortController | null>(null);
   // Snapshot of the screen + round history to restore if a round is cancelled or fails.
   const restoreRef = useRef<{ state: WizardState; back: RoundData[]; forward: RoundData[] } | null>(null);
-  // Cosmetic only — the server decides behavior from the (empty) notes each round.
-  const [deepMode, setDeepMode] = useState(false);
+  // Cosmetic only — the server re-derives the mode from the notes on every round; this
+  // just labels the progress rail with the right step. Mirrors resolveIntakeMode so the
+  // "Step 2 of 4 · Users & roles" the builder reads matches the stage actually running.
+  const [intakeMode, setIntakeMode] = useState<PrdIntakeMode>("notes");
 
   // ⌘ on Mac, Ctrl elsewhere — the label for the "advance" shortcut shown on
   // free-text questions. Read lazily; the questions phase is client-only, so it
@@ -536,6 +515,9 @@ export function PrdWizard({
       notes: notes.trim() || undefined,
       answers: nextAnswers,
       round: nextRound,
+      // Regenerate: the finished PRD replaces this draft instead of inserting a
+      // new row, so the done-handler's push below lands back on the same document.
+      replaceId: regenerateId ?? undefined,
     };
 
     // One result handler for both the streaming and blocking paths.
@@ -594,26 +576,34 @@ export function PrdWizard({
               if (myGen !== genId.current) return;
               setState((s) => (s.kind === "loading" ? { ...s, sections: [...(s.sections ?? []), key] } : s));
             },
-            // The PRD-so-far, for the live document preview. Same gen-token guard.
-            onContent: (partial) => {
-              if (myGen !== genId.current) return;
-              setState((s) => (s.kind === "loading" ? { ...s, partial } : s));
-            },
           });
           if (myGen !== genId.current) return;
+          // The request never reached the route (dropped connection, server
+          // restart) — nothing was generated, so re-run the round blocking
+          // instead of throwing the builder back onto the question they just
+          // answered. Keeps a transient network blip invisible.
+          if (evt.type === "unavailable") return handle(await draftPrd(payload));
           if (evt.type === "questions") handle({ kind: "questions", items: evt.items });
           else if (evt.type === "done" && evt.prdId) handle({ kind: "prd", prdId: evt.prdId });
           else handle({ error: evt.type === "error" ? evt.error : "Generation failed." });
         } catch (err) {
           if (myGen !== genId.current) return; // aborted by cancelLoading — ignore
-          handle({ error: err instanceof Error ? err.message : "Generation failed." });
+          handle({ error: generationErrorMessage(err, "Generation failed.") });
         }
       })();
       return;
     }
 
     startTransition(async () => {
-      handle(await draftPrd(payload));
+      try {
+        handle(await draftPrd(payload));
+      } catch (err) {
+        if (myGen !== genId.current) return; // cancelled — abandon the result
+        // A thrown/rejected server action (network drop, timeout) must never
+        // leave the wizard stuck on the spinner with no feedback or escape.
+        toast.error(generationErrorMessage(err, "Generation failed."));
+        restoreScreen();
+      }
     });
   }
 
@@ -656,7 +646,7 @@ export function PrdWizard({
   function start() {
     // No title needed to begin — an empty title falls back to the project name in
     // run(), so a no-notes builder can start straight from "what's your idea?".
-    setDeepMode(!notes.trim());
+    setIntakeMode(resolveIntakeMode(notes));
     setBack([]);
     setForward([]);
     // Cancelling or failing the first round returns to this setup screen.
@@ -907,7 +897,10 @@ export function PrdWizard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.kind]);
 
-  const hasNotes = notes.trim().length > 0;
+  // What the notes as typed will actually trigger, so the setup screen promises the flow
+  // the builder is about to get. A one-line note reads like a brief but can't ground a
+  // PRD, so it opens the guided scope steps rather than drafting straight from it.
+  const plannedMode = resolveIntakeMode(notes);
 
   return (
     <div className="prdnew">
@@ -918,13 +911,14 @@ export function PrdWizard({
         {projectName}
       </Link>
 
-      <h1 className="page-title">New PRD</h1>
+      <h1 className="page-title">{regenerateId ? "Regenerate PRD" : "New PRD"}</h1>
 
       {state.kind === "intro" && (
         <>
           <p className="page-lede">
-            Paste what you know — or nothing at all. Krowe asks a few questions to fill the gaps, then
-            drafts a full PRD you can edit.
+            {regenerateId
+              ? "Answer the questions again to rewrite this PRD from the ground up. Finishing replaces the current draft — its share link stays the same."
+              : "Paste what you know — or nothing at all. Krowe asks a few questions to fill the gaps, then drafts a full PRD you can edit."}
           </p>
 
           <div className="field">
@@ -958,7 +952,13 @@ export function PrdWizard({
               }
             />
             <div className="notes-foot">
-              <span className="field-note">Messy is fine. A sentence or two does the job.</span>
+              <span className="field-note">
+                {plannedMode === "notes"
+                  ? "Messy is fine — Krowe asks about whatever the notes leave open."
+                  : plannedMode === "seeded"
+                    ? "That names the category, not the product — Krowe will walk you through the scope steps."
+                    : "Messy is fine. Leave it blank and Krowe opens by asking for your idea."}
+              </span>
               <span className="notes-count">
                 {notes.trim() ? `${notes.trim().split(/\s+/).length} words` : ""}
               </span>
@@ -1142,7 +1142,7 @@ export function PrdWizard({
             <div className="cta-group">
               <button className="btn-primary" onClick={start}>
                 <Sparkles size={15} strokeWidth={2} />
-                {hasNotes ? "Start drafting" : "Start with questions"}
+                {plannedMode === "notes" ? "Start drafting" : "Start with questions"}
               </button>
             </div>
           </div>
@@ -1153,24 +1153,6 @@ export function PrdWizard({
         (() => {
           const docTitle = title.trim() || `${projectName} — PRD`;
           const docMeta = projectName.toUpperCase();
-          // Once the final PRD starts streaming its sections, show it building live.
-          const livePartial = state.partial && Object.keys(state.partial).length > 0 ? state.partial : null;
-
-          if (livePartial) {
-            // The document assembles on the left; the meter + Cancel ride along right.
-            return (
-              <div className="ed">
-                <LivePrdStage content={livePartial} docTitle={docTitle} docMeta={docMeta} />
-                <section className="ed-sheet">
-                  <div className="ed-sheet-body">
-                    <div className="ed-sheet-inner">
-                      <WizLoading label={state.label} expectedMs={EXPECTED_GENERATE_MS} onCancel={cancelLoading} sections={state.sections} />
-                    </div>
-                  </div>
-                </section>
-              </div>
-            );
-          }
 
           return back.length > 0 ? (
             // Mid-interview: keep the editorial overlay up with the draft visible
@@ -1232,15 +1214,18 @@ export function PrdWizard({
           const isDate = q.inputType === "date";
           const isText = q.inputType === "text";
           const optList = [...q.options.filter(isRealOption), OTHER];
-          // No-notes flow runs the fixed scope backbone. Round 0 is the unnumbered
-          // free-text opener ("Your idea"); rounds 1..N are the numbered stages
-          // ("Step 2 of 4 · Users & roles") via deepStageIndex(round).
-          const stageIdx = deepMode ? deepStageIndex(round) : null;
-          const progressLabel = !deepMode
-            ? "Sharpening the PRD"
-            : stageIdx === null
-              ? SCOPE_OPENER.label
-              : `Step ${stageIdx + 1} of ${SCOPE_STAGE_COUNT} · ${scopeStageAt(stageIdx).label}`;
+          // The staged flows run the fixed scope backbone. In "deep" (no notes) round 0
+          // is the unnumbered free-text opener ("Your idea") and the numbered stages
+          // start at round 1; in "seeded" (thin notes) the notes already stand in for
+          // the opener, so stage 1 starts at round 0. The adaptive interview has no
+          // fixed steps to number.
+          const stageIdx = stageIndexForRound(intakeMode, round);
+          const progressLabel =
+            intakeMode === "notes"
+              ? "Sharpening the PRD"
+              : stageIdx === null
+                ? SCOPE_OPENER.label
+                : `Step ${stageIdx + 1} of ${SCOPE_STAGE_COUNT} · ${scopeStageAt(stageIdx).label}`;
 
           // Left "draft" doc grows across rounds: answered facts from prior
           // rounds (always done) + this round's questions (active/done/pending).
