@@ -11,6 +11,7 @@ import { getBuilderBasicsForEngagement } from "@/lib/actions/operator-builder";
 import {
   getSignedDocsForEngagements,
   getPendingDocsForEngagements,
+  getUnsentNoticesForEngagements,
 } from "@/lib/actions/operator-docs";
 import { docMeta, quoteDocMeta } from "@/lib/doc/doc-summary";
 import type { Engagement } from "@/lib/types";
@@ -47,12 +48,13 @@ export default async function OperatorEngagementPage() {
   const builder = primaryEngagement
     ? await getBuilderBasicsForEngagement(primaryEngagement)
     : null;
-  const [signed, pending] = engagementList.length
+  const [signed, pending, unsentNotices] = engagementList.length
     ? await Promise.all([
         getSignedDocsForEngagements(engagementList),
         getPendingDocsForEngagements(engagementList),
+        getUnsentNoticesForEngagements(engagementList),
       ])
-    : [null, null];
+    : [null, null, []];
 
   const pendingItems: EngagementDocItem[] = [];
   for (const prd of pending?.prds ?? []) {
@@ -146,7 +148,9 @@ export default async function OperatorEngagementPage() {
 
             <section className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
               <h2 className="mb-2 text-sm font-semibold text-neutral-900">Documents</h2>
-              {pendingItems.length === 0 && docItems.length === 0 ? (
+              {pendingItems.length === 0 &&
+              docItems.length === 0 &&
+              unsentNotices.length === 0 ? (
                 <EngagementDocuments
                   items={[]}
                   emptyLabel="No documents yet — anything your builder sends will show up here to review."
@@ -167,6 +171,32 @@ export default async function OperatorEngagementPage() {
                         Signed
                       </h3>
                       <EngagementDocuments items={docItems} />
+                    </div>
+                  )}
+                  {unsentNotices.length > 0 && (
+                    <div>
+                      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
+                        Withdrawn by your builder
+                      </h3>
+                      <ul className="space-y-2">
+                        {unsentNotices.map((n) => (
+                          <li
+                            key={n.id}
+                            className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-600"
+                          >
+                            Your builder unsent{" "}
+                            <span className="font-medium text-neutral-800">
+                              &ldquo;{n.title}&rdquo;
+                            </span>{" "}
+                            on{" "}
+                            {new Date(n.when).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                            . It&apos;s no longer available to review.
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   )}
                 </div>

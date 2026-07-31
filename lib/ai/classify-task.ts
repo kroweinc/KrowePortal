@@ -20,6 +20,13 @@ export async function classifyTask(input: ClassifyInput, meta?: AiCallMeta): Pro
     const response = await runChat({
       model: AI_MODEL,
       max_completion_tokens: 400,
+      // Picking one of three types + at most one tag from a fixed list is a
+      // trivial classification — "none" skips the reasoning pass entirely (the
+      // biggest latency lever), so the tag lands sooner after a task is created
+      // (see the new-task form's poll-then-refresh). Overrides the default "low"
+      // from runChat. ("minimal" is rejected by gpt-5.4-mini; "none" is the
+      // fastest supported value.)
+      reasoning_effort: "none",
       response_format: jsonResponseFormat(TaskClassifyResult, "task_classification"),
       messages: [
         { role: "system", content: systemPrompt },

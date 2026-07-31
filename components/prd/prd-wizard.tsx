@@ -23,8 +23,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { draftPrd } from "@/lib/actions/prds";
+import { queuePrdRun } from "@/lib/actions/agent";
 import type { DraftPrdResult } from "@/lib/prd/draft-core";
+import { isPrdGenerationRound } from "@/lib/prd/rounds";
 import { streamDraft } from "@/lib/ai/stream-client";
+import { useAgentRunsApiOptional } from "@/components/agent/agent-runs-provider";
 import { PrdDocument } from "@/components/prd/prd-document";
 import {
   addSopTranscriptText,
@@ -413,6 +416,9 @@ export function PrdWizard({
 }: Props) {
   const router = useRouter();
   const [, startTransition] = useTransition();
+  // The durable-run queue (builders only; null if somehow outside the provider).
+  // The terminal generation round hands off to this instead of blocking the wizard.
+  const runsApi = useAgentRunsApiOptional();
 
   const [title, setTitle] = useState(initialTitle);
   const [notes, setNotes] = useState("");
@@ -528,7 +534,6 @@ export function PrdWizard({
 
   function run(nextAnswers: AnswerEntry[], nextRound: number, label: string) {
     const myGen = ++genId.current;
-    setState({ kind: "loading", label });
 
     const payload = {
       projectId,
@@ -537,6 +542,39 @@ export function PrdWizard({
       answers: nextAnswers,
       round: nextRound,
     };
+
+    // The terminal generation round (deterministic force-final) runs as a durable
+    // background agent: the builder leaves the wizard and watches the topbar queue
+    // ring instead of a loading screen, and the work survives navigation/refresh
+    // (the old inline stream aborted + discarded on navigate-away). Question rounds
+    // stay inline below — they're fast and interactive.
+    if (runsApi && isPrdGenerationRound({ round: nextRound, deepMode })) {
+      setState({ kind: "loading", label: "Sending your PRD to the background…" });
+      void (async () => {
+        const res = await queuePrdRun(payload);
+        if (myGen !== genId.current) return; // cancelled — abandon
+        if ("error" in res) {
+          toast.error(res.error);
+          restoreScreen();
+          return;
+        }
+        runsApi.startRun({
+          runId: res.runId,
+          kind: "prd",
+          engagementId: null,
+          projectId: res.projectId,
+          clientName: projectName,
+          title: res.title,
+        });
+        toast.success("Drafting your PRD in the background", {
+          description: "Watch the agent queue in the top bar — you can leave this page.",
+        });
+        router.push(backHref);
+      })();
+      return;
+    }
+
+    setState({ kind: "loading", label });
 
     // One result handler for both the streaming and blocking paths.
     const handle = (result: DraftPrdResult) => {

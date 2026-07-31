@@ -8,6 +8,7 @@ import { useState, useRef, useEffect } from "react";
 import { Sparkles } from "lucide-react";
 import type { PrdContent } from "@/lib/types";
 import { isRefinable } from "@/lib/prd/section-fields";
+import { setViewedSection, clearViewedSection } from "@/lib/prd/viewed-section";
 import { SECTIONS, type SectionDef, type PrdPatch } from "./prd-sections";
 import { useEditing } from "./inline-edit";
 
@@ -59,10 +60,15 @@ function SectionBlock({
 }
 
 export function PrdRail({
+  prdId,
   content,
   patch,
   onRefine,
 }: {
+  // The PRD id, present on the builder's editable dashboard so the section in view
+  // can be published for the agent. Absent on the read-only public client view,
+  // where there's no agent surface — then the rail publishes nothing.
+  prdId?: string;
   content: PrdContent;
   patch: PrdPatch;
   onRefine?: (sectionId: string) => void;
@@ -72,6 +78,19 @@ export function PrdRail({
   const setRef = (id: string) => (el: HTMLElement | null) => {
     refs.current[id] = el;
   };
+
+  // Publish the section in view so an agent turn fired from this page can assume
+  // it as the target (e.g. "change the tech stack" while scrolled to §9). Cleared
+  // on unmount so a stale section never leaks onto a later, unrelated turn. No-op
+  // on the public client view (no prdId, no agent).
+  useEffect(() => {
+    if (!prdId) return;
+    setViewedSection(prdId, active);
+  }, [prdId, active]);
+  useEffect(() => {
+    if (!prdId) return;
+    return () => clearViewedSection(prdId);
+  }, [prdId]);
 
   useEffect(() => {
     let raf: number | null = null;

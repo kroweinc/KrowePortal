@@ -11,6 +11,8 @@ import { getProjectMaterials } from "@/lib/actions/project-materials";
 import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeBusinessContext } from "@/lib/project/business-context";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
+import { syncDocumentContext, removeDocumentContext } from "@/lib/context/sync-document";
+import { recordDocumentEvent } from "@/lib/context/document-events";
 import { friendlyAiError } from "@/lib/ai/client";
 import { generateQuote } from "@/lib/ai/generate-quote";
 import { assertAiBudget } from "@/lib/ai/usage";
@@ -113,6 +115,15 @@ export async function regenerateQuote(
     .update({ content, source_notes: clean, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  await syncDocumentContext({
+    docKind: "quote",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content,
+    builderId: profile.id,
+  });
 
   revalidateQuote(before.project_id as string, id, before.token as string | null);
   return { success: true, content };
@@ -222,7 +233,7 @@ export async function updateQuoteContent(
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("quotes")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -239,6 +250,15 @@ export async function updateQuoteContent(
   const { error } = await supabase.from("quotes").update(patch).eq("id", id);
   if (error) return { error: error.message };
 
+  await syncDocumentContext({
+    docKind: "quote",
+    docId: id,
+    projectId: before.project_id as string,
+    title: parsed.data.title ?? (before.title as string),
+    content: (patch.content ?? before.content) as QuoteContent,
+    builderId: profile.id,
+  });
+
   revalidateQuote(before.project_id as string, id, before.token as string | null);
   return { success: true };
 }
@@ -251,7 +271,7 @@ export async function sendQuote(id: string): Promise<{ success: true } | { error
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("quotes")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -269,6 +289,26 @@ export async function sendQuote(id: string): Promise<{ success: true } | { error
   // Surface the quote in the client's portal right away when it's unambiguous
   // who that client is (see connectProjectToClientOnSend).
   await connectProjectToClientOnSend(before.project_id as string, profile.id);
+
+  // Sending often links an orphan project to an engagement for the first time,
+  // so this is frequently the first chance to mirror the quote into context.
+  await syncDocumentContext({
+    docKind: "quote",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content: before.content as QuoteContent,
+    builderId: profile.id,
+  });
+
+  await recordDocumentEvent({
+    docKind: "quote",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "sent",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
 
   revalidateQuote(before.project_id as string, id, before.token as string | null);
   return { success: true };
@@ -292,6 +332,17 @@ export async function deleteQuote(id: string): Promise<{ success: true } | { err
 
   const { error } = await supabase.from("quotes").delete().eq("id", id);
   if (error) return { error: error.message };
+
+  await recordDocumentEvent({
+    docKind: "quote",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "deleted",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
+
+  await removeDocumentContext("quote", id, before.project_id as string);
 
   revalidatePath(`/b/projects/${before.project_id as string}`);
   return { success: true };

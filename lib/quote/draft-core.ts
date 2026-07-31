@@ -20,6 +20,8 @@ import { assertAiBudget } from "@/lib/ai/usage";
 import { recomputeTotals, applyMilestonePercents } from "@/lib/quote/totals";
 import { applyPricingDefaults } from "@/lib/quote/defaults";
 import { getPricingDefaults } from "@/lib/actions/pricing-defaults";
+import { syncDocumentContext } from "@/lib/context/sync-document";
+import { recordDocumentEvent } from "@/lib/context/document-events";
 import type { QuoteGenInput } from "@/lib/ai/generate-quote";
 import type { Question } from "@/lib/ai/schemas";
 import type { QuoteContent, PrdContent } from "@/lib/types";
@@ -187,6 +189,28 @@ export async function persistQuoteDraft(
     .single();
 
   if (error || !data) return { error: error?.message ?? "Failed to create quote." };
+  const quoteId = data.id as string;
+
+  // Mirror the new quote into the client's context layer (no-op until the project
+  // is linked to an engagement). Best-effort — never blocks creation. Lives here in
+  // the shared core so the blocking action and the streaming route both sync.
+  await syncDocumentContext({
+    docKind: "quote",
+    docId: quoteId,
+    projectId,
+    title,
+    content,
+    builderId: profile.id,
+  });
+
+  await recordDocumentEvent({
+    docKind: "quote",
+    docId: quoteId,
+    projectId,
+    eventType: "created",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
 
   // Deep-context path: persist the synthesized business context to the project so
   // future documents start warm. Only when the project has no context yet.
@@ -202,5 +226,5 @@ export async function persistQuoteDraft(
   }
 
   revalidatePath(`/b/projects/${projectId}`);
-  return { quoteId: data.id as string };
+  return { quoteId };
 }

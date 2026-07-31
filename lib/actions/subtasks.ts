@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
+import { syncTaskContext } from "@/lib/context/sync-entity";
 import { isTaskMember, isSubtaskMember } from "@/lib/actions/task-access";
 import type { Subtask } from "@/lib/types";
 
@@ -61,6 +62,7 @@ export async function createSubtask(
   });
 
   await recomputeTaskEstimate(taskId);
+  await syncTaskContext(taskId);
 
   return { subtask: data as Subtask };
 }
@@ -98,6 +100,7 @@ export async function toggleSubtask(
       metadata: { title: before.title as string },
     });
   }
+  if (before?.task_id) await syncTaskContext(before.task_id as string);
   return {};
 }
 
@@ -140,6 +143,7 @@ export async function updateSubtaskTitle(
       newValue: parsedTitle.data,
     });
   }
+  if (before?.task_id) await syncTaskContext(before.task_id as string);
   return {};
 }
 
@@ -172,6 +176,7 @@ export async function deleteSubtask(
   });
 
   await recomputeTaskEstimate(taskId);
+  await syncTaskContext(taskId);
 
   return {};
 }

@@ -516,6 +516,68 @@ export interface GranolaImport {
   created_at: string;
 }
 
+// ── Client Context Layer (engagement-scoped, builder-only; migrations 0059/0060)
+// The single home for everything a builder knows about a client — documents,
+// SOPs, transcripts, materials, notes, links, and auto-synced builder/operator
+// profiles — chunked + embedded for RAG.
+export type ContextItemKind =
+  | "document"
+  | "sop"
+  | "transcript"
+  | "material"
+  | "note"
+  | "link"
+  | "profile" // auto-synced builder/operator profile mirror (migration 0062)
+  // auto-synced engagement entities (migration 0064) — see lib/context/sync-entity.ts
+  | "brief"
+  | "change_order"
+  | "agreement"
+  | "deliverable"
+  | "infra"
+  | "task"
+  | "milestone"
+  | "availability"
+  | "codebase"
+  // auto-synced task attachment content (migration 0068) — see lib/context/sync-entity.ts
+  | "task_attachment";
+
+export type ContextEmbeddingStatus = "pending" | "ready" | "failed" | "skipped";
+
+export interface ContextItem {
+  id: string;
+  engagement_id: string;
+  created_by: string;
+  kind: ContextItemKind;
+  title: string;
+  file_name: string | null;
+  storage_path: string | null; // engagements/<id>/context/<uuid>.<ext> in project-materials bucket
+  mime_type: string | null;
+  size_bytes: number | null;
+  url: string | null; // link source only
+  content: string | null; // extracted/pasted text — what the RAG layer embeds
+  char_count: number | null;
+  source_meta: Record<string, unknown>;
+  embedding_status: ContextEmbeddingStatus;
+  chunk_count: number;
+  // Set when a newer version logically replaces this mirror (e.g. a signed quote
+  // supersedes the project's other quote drafts, migration 0067). Superseded
+  // items stay visible for history but drop out of semantic retrieval.
+  superseded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextChunk {
+  id: string;
+  context_item_id: string;
+  engagement_id: string;
+  chunk_index: number;
+  content: string;
+  token_estimate: number | null;
+  created_at: string;
+  // `embedding` is intentionally omitted — it is server-only and never sent to the browser.
+}
+
 // ── Product Feedback ───────────────────────────────────────────────────
 export type FeedbackCategory = "bug" | "idea" | "other";
 

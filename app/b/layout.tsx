@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/sidebar";
 import { DoneDeliverableProvider } from "@/components/done-deliverable-provider";
 import { ApprovalDeliverableProvider } from "@/components/approval-deliverable-provider";
 import { TutorialProvider } from "@/components/tour/tutorial-provider";
+import { AgentRunsProvider } from "@/components/agent/agent-runs-provider";
 import {
   warmEngagementBranches,
   getBranchesByEngagement,
@@ -14,6 +15,7 @@ import {
 
 const BUILDER_TABS = [
   { label: "Tasks", href: "/b", icon: "list-checks", tour: "nav-tasks" },
+  { label: "Agents", href: "/b/agent", icon: "sparkles", tour: "nav-agents" },
   { label: "Clients", href: "/b/engagements", icon: "briefcase", tour: "nav-engagements" },
   { label: "Repo", href: "/b/github", icon: "git-branch" },
   { label: "Documents", href: "/b/projects", icon: "file-text", tour: "nav-documents" },
@@ -68,21 +70,27 @@ export default async function BuilderLayout({ children }: { children: React.Reac
 
   return (
     <div className="krowe-app">
-      <Sidebar tabs={BUILDER_TABS} basePath="/b" />
-      <div className="krowe-main">
-        <Nav profile={profile} />
-        <DoneDeliverableProvider branchesByEngagement={branchesByEngagement}>
-          <ApprovalDeliverableProvider>
-            <TutorialProvider
-              autoStart={autoStartTour}
-              projectId={tourProjectId}
-              hasProject={Boolean(tourProjectId)}
-            >
-              {children}
-            </TutorialProvider>
-          </ApprovalDeliverableProvider>
-        </DoneDeliverableProvider>
-      </div>
+      {/* Above <Nav> (which hosts the ⌘K palette and the running-agent ring dock)
+          AND {children}, so the agent streaming it owns survives the palette
+          closing and route navigation, and its rings render on every builder
+          route. */}
+      <AgentRunsProvider>
+        <Sidebar tabs={BUILDER_TABS} basePath="/b" />
+        <div className="krowe-main">
+          <Nav profile={profile} />
+          <DoneDeliverableProvider branchesByEngagement={branchesByEngagement}>
+            <ApprovalDeliverableProvider>
+              <TutorialProvider
+                autoStart={autoStartTour}
+                projectId={tourProjectId}
+                hasProject={Boolean(tourProjectId)}
+              >
+                {children}
+              </TutorialProvider>
+            </ApprovalDeliverableProvider>
+          </DoneDeliverableProvider>
+        </div>
+      </AgentRunsProvider>
     </div>
   );
 }

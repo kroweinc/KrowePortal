@@ -16,6 +16,8 @@ import { getProjectSopTranscripts } from "@/lib/actions/project-sop";
 import { composeSopBlock } from "@/lib/project/business-context";
 import { todayISODate, isISODate } from "@/lib/contract/effective-date";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
+import { syncDocumentContext, removeDocumentContext } from "@/lib/context/sync-document";
+import { recordDocumentEvent } from "@/lib/context/document-events";
 import type { Contract, ContractContent, ContractSummary, QuoteContent, PrdContent } from "@/lib/types";
 
 // Columns for list/summary reads — every Contract field except the heavy
@@ -148,6 +150,27 @@ export async function createContractDraft(
 
   if (error || !data) return { error: error?.message ?? "Failed to create contract." };
 
+  // Mirror the new contract into the client's context layer (no-op until the
+  // project is linked to an engagement). Best-effort, and before the redirect
+  // throws — never blocks contract creation.
+  await syncDocumentContext({
+    docKind: "contract",
+    docId: data.id as string,
+    projectId: parsed.data.projectId,
+    title: parsed.data.title,
+    content,
+    builderId: profile.id,
+  });
+
+  await recordDocumentEvent({
+    docKind: "contract",
+    docId: data.id as string,
+    projectId: parsed.data.projectId,
+    eventType: "created",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
+
   revalidatePath(`/b/projects/${parsed.data.projectId}`);
   // Return the id and let the client navigate, so a builder who cancels the
   // generation (Esc / Cancel) isn't yanked into the draft by a server redirect.
@@ -199,6 +222,15 @@ export async function regenerateContract(
     .eq("id", id);
   if (error) return { error: error.message };
 
+  await syncDocumentContext({
+    docKind: "contract",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content,
+    builderId: profile.id,
+  });
+
   revalidateContract(before.project_id as string, id, before.token as string | null);
   return { success: true, content };
 }
@@ -225,7 +257,7 @@ export async function updateContractContent(
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("contracts")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -239,6 +271,15 @@ export async function updateContractContent(
 
   const { error } = await supabase.from("contracts").update(patch).eq("id", id);
   if (error) return { error: error.message };
+
+  await syncDocumentContext({
+    docKind: "contract",
+    docId: id,
+    projectId: before.project_id as string,
+    title: parsed.data.title ?? (before.title as string),
+    content: (parsed.data.content ?? before.content) as ContractContent,
+    builderId: profile.id,
+  });
 
   revalidateContract(before.project_id as string, id, before.token as string | null);
   return { success: true };
@@ -258,7 +299,7 @@ export async function sendContract(
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("contracts")
-    .select("status, created_by, project_id, token, content")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -279,6 +320,26 @@ export async function sendContract(
   // Surface the contract in the client's portal right away when it's
   // unambiguous who that client is (see connectProjectToClientOnSend).
   await connectProjectToClientOnSend(before.project_id as string, profile.id);
+
+  // Sending often links an orphan project to an engagement for the first time,
+  // so this is frequently the first chance to mirror the contract into context.
+  await syncDocumentContext({
+    docKind: "contract",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content,
+    builderId: profile.id,
+  });
+
+  await recordDocumentEvent({
+    docKind: "contract",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "sent",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
 
   revalidateContract(before.project_id as string, id, before.token as string | null);
   return { success: true, effectiveDate };
@@ -302,6 +363,17 @@ export async function deleteContract(id: string): Promise<{ success: true } | { 
 
   const { error } = await supabase.from("contracts").delete().eq("id", id);
   if (error) return { error: error.message };
+
+  await recordDocumentEvent({
+    docKind: "contract",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "deleted",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
+
+  await removeDocumentContext("contract", id, before.project_id as string);
 
   revalidatePath(`/b/projects/${before.project_id as string}`);
   return { success: true };

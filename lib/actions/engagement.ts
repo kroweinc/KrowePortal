@@ -6,6 +6,14 @@ import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { normalizeUrl } from "@/lib/project/business-context";
+import {
+  syncAvailabilityContext,
+  syncDeliverableContext,
+  syncContextMaterialContext,
+  syncAgreementContext,
+  syncInfraContext,
+  removeEntityContext,
+} from "@/lib/context/sync-entity";
 import type {
   BuilderAvailability,
   Deliverable,
@@ -64,6 +72,7 @@ export async function setAvailability(
     updated_at: new Date().toISOString(),
   });
   if (error) return { error: error.message };
+  await syncAvailabilityContext(engagementId);
   revalidatePath("/o/project");
   revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
@@ -82,6 +91,7 @@ export async function clearAvailability(
     .delete()
     .eq("engagement_id", engagementId);
   if (error) return { error: error.message };
+  await syncAvailabilityContext(engagementId); // no row now → drops the mirror
   revalidatePath("/o/project");
   revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
@@ -118,15 +128,20 @@ export async function postDeliverable(
   if (!parsed.success) return { error: "Invalid deliverable." };
 
   const supabase = await getClient(profile.id);
-  const { error } = await supabase.from("deliverables").insert({
-    engagement_id: engagementId,
-    milestone_id: parsed.data.milestoneId,
-    author_id: profile.id,
-    title: parsed.data.title,
-    body: parsed.data.body,
-    url: parsed.data.url,
-  });
-  if (error) return { error: error.message };
+  const { data, error } = await supabase
+    .from("deliverables")
+    .insert({
+      engagement_id: engagementId,
+      milestone_id: parsed.data.milestoneId,
+      author_id: profile.id,
+      title: parsed.data.title,
+      body: parsed.data.body,
+      url: parsed.data.url,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Failed to post deliverable." };
+  await syncDeliverableContext(data.id as string);
   revalidatePath("/o/project");
   revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
@@ -138,6 +153,7 @@ export async function deleteDeliverable(id: string): Promise<{ success: true } |
   const supabase = await getClient(profile.id);
   const { error } = await supabase.from("deliverables").delete().eq("id", id);
   if (error) return { error: error.message };
+  await removeEntityContext("deliverable", id);
   revalidatePath("/o/project");
   revalidatePath("/b/engagements");
   return ok();
@@ -175,16 +191,21 @@ export async function addContextMaterial(
   if (!parsed.success) return { error: "Invalid material." };
 
   const supabase = await getClient(profile.id);
-  const { error } = await supabase.from("context_materials").insert({
-    engagement_id: engagementId,
-    kind: parsed.data.kind,
-    title: parsed.data.title,
-    url: parsed.data.url,
-    body: parsed.data.body,
-    category: parsed.data.category,
-    uploaded_by: profile.id,
-  });
-  if (error) return { error: error.message };
+  const { data, error } = await supabase
+    .from("context_materials")
+    .insert({
+      engagement_id: engagementId,
+      kind: parsed.data.kind,
+      title: parsed.data.title,
+      url: parsed.data.url,
+      body: parsed.data.body,
+      category: parsed.data.category,
+      uploaded_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Failed to add material." };
+  await syncContextMaterialContext(data.id as string);
   revalidatePath("/o/project");
   return ok();
 }
@@ -195,6 +216,7 @@ export async function deleteContextMaterial(id: string): Promise<{ success: true
   const supabase = await getClient(profile.id);
   const { error } = await supabase.from("context_materials").delete().eq("id", id);
   if (error) return { error: error.message };
+  await removeEntityContext("context_material", id);
   revalidatePath("/o/project");
   return ok();
 }
@@ -300,6 +322,7 @@ export async function updateOperatingAgreement(
     updated_at: new Date().toISOString(),
   });
   if (error) return { error: error.message };
+  await syncAgreementContext(engagementId);
   revalidatePath("/o/project");
   revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
@@ -327,6 +350,7 @@ export async function updatePriorityProfile(
       updated_at: new Date().toISOString(),
     });
   if (error) return { error: error.message };
+  await syncAgreementContext(engagementId);
   revalidatePath("/o/project");
   revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
@@ -363,14 +387,19 @@ export async function addInfraRecommendation(
   if (!parsed.success) return { error: "Invalid recommendation." };
 
   const supabase = await getClient(profile.id);
-  const { error } = await supabase.from("infra_recommendations").insert({
-    engagement_id: engagementId,
-    category: parsed.data.category,
-    item: parsed.data.item,
-    recommended_monthly: parsed.data.recommendedMonthly,
-    created_by: profile.id,
-  });
-  if (error) return { error: error.message };
+  const { data, error } = await supabase
+    .from("infra_recommendations")
+    .insert({
+      engagement_id: engagementId,
+      category: parsed.data.category,
+      item: parsed.data.item,
+      recommended_monthly: parsed.data.recommendedMonthly,
+      created_by: profile.id,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Failed to add recommendation." };
+  await syncInfraContext(data.id as string);
   revalidatePath("/o/project");
   revalidatePath(`/b/engagements/${engagementId}`);
   return ok();
@@ -402,6 +431,7 @@ export async function setInfraOverride(
     })
     .eq("id", id);
   if (error) return { error: error.message };
+  await syncInfraContext(id);
   revalidatePath("/o/project");
   return ok();
 }
@@ -413,6 +443,7 @@ export async function deleteInfraRecommendation(id: string): Promise<{ success: 
   const supabase = await getClient(profile.id);
   const { error } = await supabase.from("infra_recommendations").delete().eq("id", id);
   if (error) return { error: error.message };
+  await removeEntityContext("infra", id);
   revalidatePath("/o/project");
   revalidatePath("/b/engagements");
   return ok();

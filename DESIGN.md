@@ -402,6 +402,39 @@ Full-section states that replace primary content when data is absent or broken.
 
 ---
 
+#### Agent Console
+
+The ⌘K palette is a **unified omnibox**: one input drives live search, and a builder can hand that same text to a grounded, streaming agent over one client's Context Layer — there is no Search / Ask **tab**. Typing shows results as always; a pinned **Ask agent** action (`.krowe-cmd-ask`, `Sparkles` + `⌘↵`) sits atop the list and, on click or `⌘↵`, swaps the list for the Agent Console (implemented as `.krowe-agent-*` in `app/globals.css`). `⌘J` opens the console directly (unseeded). Builder-only — operators see search only (the Context Layer is builder-only).
+
+**Omnibox contract:** plain `Enter` opens the highlighted search result (fast navigation preserved); `⌘↵` / `Ctrl+↵` asks the agent about the current query. `Escape` in the console returns to search (query preserved); `Escape` in search closes the palette.
+
+| Part | Treatment |
+|---|---|
+| Shell | Reuses the command-palette modal (`.krowe-cmd`, `--radius-lg`, `--shadow-3`), fixed height 62vh |
+| Ask action | Pinned row atop the results (`.krowe-cmd-ask`): `--primary` `Sparkles` icon, `“query”` in `--primary-hover`, trailing `⌘↵` keycap; hover/focus = `--primary-soft` bg |
+| Back to search | Ghost icon button (`.krowe-agent-back`, `ArrowLeft`) at the head, `--radius-full`, sized to the 30px header controls |
+| Client picker | `--radius-md` select on `--surface-subtle`; defaults to the current engagement |
+| Message bubbles | User = `--primary` / `--primary-foreground`, right-aligned; Assistant = `--surface-subtle` + `--border`, left-aligned, markdown-rendered |
+| Live status | In-bubble "Reading {client}'s context…" with a pulsing `--primary` dot (honors `prefers-reduced-motion`) |
+| Run status badges | Pill per run: active = `--primary-soft`, needs-you = warning tint, done = success tint, error = danger tint |
+| Sources | `<details>` disclosure — item title · kind · similarity (Geist Mono) |
+
+When asked from the omnibox, the query is auto-sent as the first message once a client resolves; each ask starts a fresh conversation (past threads remain in History).
+
+**Confirm-first actions.** When the agent proposes a write (create / update a task), it renders a **proposal card** (`.krowe-agent-proposal`, a `--primary` 5% tint) listing each action with **Cancel** (Ghost) + **Confirm** (Primary). Nothing mutates until the builder confirms; on confirm the card resolves to a green ✓ result. This is the standard pattern for any agent-initiated write, and keeps the console to a single primary action (the send button) plus one contextual Confirm.
+
+**Answer widgets — task board.** When the builder asks to see, list, or review tasks, the agent renders a read-only **task board** (`.krowe-ah-tw*`) in the answer instead of a markdown list, and keeps its prose to a one-line lead. The board is a `--surface-subtle` container (`--radius-lg`) of status sections (active-first: In Progress · To-Do · Backlog · Done, each with a count and a status dot), each row a `--radius-md` link carrying the shared `krowe-prio-dot` + `TaskTypeBadge` and an optional milestone chip. Rows **never mutate** — each links to its real task page (`/b/tasks/[id]`) where the controls live, so the console stays read-focused (no competing primary action). Entrance is a staggered `transform`/`opacity` fade (`--ease-out-smooth`, honors `prefers-reduced-motion`); link rows carry the standard 4px orange focus halo explicitly (the global focus rule targets form controls, not `<a>`). This is the reusable **widget seam** — future document / timeline widgets follow the same shape (a discriminated `AgentWidget` union, rendered after the prose lead).
+
+**Parallel agents — progress-ring dock.** A builder can run several agent turns at once (same or different clients); each surfaces as a small circular **phase ring** in a fixed bottom-right stack (`.krowe-rundock` / `.krowe-rundock-ring`, structure cloned from the New Task FAB dock, raised above it). The ring reuses `.krowe-progress-ring`'s SVG track/fill (`stroke-dashoffset` transition) and fills through the turn's real phases — reading `25%` → searching `60%` → composing `90%` → done `100%` — with the stroke colored by run status off the same `.krowe-agent-badge` mapping (`--primary` running · `--warning` "needs you" · `--success` done · `--danger` error). The center `Ember` glyph pulses (`krowe-agent-pulse`) only while running. Clicking a ring opens that conversation (`/b/agent/[runId]`); done rings linger a few seconds then fade out (`krowe-rundock-in` enter, `[data-leaving]` exit). Animates `transform` / `opacity` / `stroke-dashoffset` only, single `--ease-out-smooth`, with a `prefers-reduced-motion` off-switch. Streaming is owned by a global provider above the ⌘K palette, so a run keeps going — and its ring keeps advancing — after the palette closes or the builder navigates, and rehydrates after a refresh.
+
+**Agents Hub (`/b/agent`).** The full-page, cross-client home the queue dock's "View all" lands on and the sidebar's **Agents** tab (`Sparkles`) opens. Two stacked sections in the standard `.krowe-page` shell (`.krowe-ah-hub`, one large `Ember` in the `.krowe-page-head` — Ember is the hub's single motif):
+> - **Launchpad** (`.krowe-ah-lp`) — a responsive `auto-fill minmax(240px, …)` grid of **agent cards** (`.krowe-ah-lp-card`), one per catalog entry (Context Chat, PRD Writer, Task Manager, Client Summary). Each card is a `--surface-subtle` **Selection-Card** surface (`--radius-lg`, `--shadow-1` → `--shadow-2` + `--primary` border tint on hover, `scale(0.99)` press) with a 40px icon tile that warms to `--primary-soft` on hover, a name, a blurb, and a **ghost** "Start" cue (`.krowe-ah-lp-start`) — never a filled primary, so a grid of N agents is not N primary actions. The whole card is the target. Clicking opens the **launch sheet** (the shared Radix `Dialog`, focus-trapped): a client/project scope picker (reuses `.krowe-ah-switch`) plus, for chat agents, the hero composer (`.krowe-ah-hero-row`) seeded from the agent's opener; the **sole Primary** is the sheet's send / "Start draft" button. Chat launch reuses `createAgentRun → startRun`; PRD launch hands off to the PRD wizard.
+> - **Activity feed** (`.krowe-af`, capped `max-width: 920px`) — every run across all clients, **Active** over **Recent** groups (`.krowe-af-group`), filtered by client / kind / status (`.krowe-filter-chip`). Rows are the **shared `<AgentRunRow>`** (the same `.krowe-aq-job*` markup the dock uses, via `lib/agent/run-presentation.ts`) with a leading determinate ring (`.krowe-aq-job-ring`, status stroke off the `.krowe-aq-chip-ring` mapping); live rows show an elapsed timer + dismiss/cancel, history rows a relative time + delete (44px tap target via an `::after` overlay on the 28px `.krowe-aq-job-x`). The feed merges server history with the live run store (`useAgentRunsSummary`) and refetches history when a run finishes so it survives the ring's ~55s linger.
+
+> The semantic light backgrounds here use `color-mix(in srgb, var(--success|warning|danger) …%, white)` because the `--success-light` / `--warning-light` / `--danger-light` tokens named in the palette tables above are not yet defined in `app/globals.css`. When those tokens are added, reconcile these tints to use them.
+
+---
+
 ## Patterns
 
 Each screen pattern names its motif, layout structure, and key component composition. Motifs are assigned per pattern — do not substitute.

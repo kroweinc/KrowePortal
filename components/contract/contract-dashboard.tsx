@@ -25,6 +25,7 @@ import type {
   ContractPaymentMilestone,
 } from "@/lib/types";
 import { ContractDocument } from "@/components/contract/contract-document";
+import { useAgentDocEdit } from "@/lib/agent/doc-events";
 import { useTodayISODate } from "@/lib/contract/use-today";
 import { formatEffectiveDate } from "@/lib/contract/effective-date";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
@@ -145,6 +146,21 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, saveState]);
 
+  // Live agent edits: reflect the agent's confirmed change to THIS contract in
+  // real time. The server already holds this exact content (a signed contract is
+  // locked, so no edit arrives), so rebaseline autosave to it — reads "Saved",
+  // never re-writes — and pulse the document.
+  const [livePulse, setLivePulse] = useState(false);
+  useAgentDocEdit({ kind: "contract", id: contract.id }, (incoming, incomingTitle) => {
+    const next = incoming as ContractContent;
+    setContent(next);
+    setTitle(incomingTitle);
+    lastSavedRef.current = serializeContract(incomingTitle, next);
+    setSaveState("saved");
+    setLivePulse(true);
+    toast.success("Krowe updated this contract");
+  });
+
   function saveNow() {
     startTransition(async () => {
       const result = await writeContract();
@@ -249,7 +265,12 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
 
   return (
     <>
-      <div className="prd-dashboard">
+      <div
+        className={`prd-dashboard${livePulse ? " krowe-doc-live" : ""}`}
+        onAnimationEnd={(e) => {
+          if (e.currentTarget === e.target) setLivePulse(false);
+        }}
+      >
         <div className="dash">
           <a
             href={backHref}

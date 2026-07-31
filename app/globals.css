@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+/* agent-console styles added (Agents Control Center) v4 */
+
 /* ── Urgent-pulse (existing animation kept for compatibility) ── */
 @theme {
   --animate-urgent-pulse: urgent-pulse 1.8s ease-in-out infinite;
@@ -170,6 +172,16 @@ button:focus-visible {
 @keyframes breathe         { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 @keyframes panel-in        { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes toast-in        { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+/* Live agent edit — the document body settles in when the agent's change lands,
+   so the update reads as happening in real time. Opacity + transform only. */
+@keyframes krowe-doc-live-in { from { opacity: 0.35; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Applied for one animation cycle to a doc view the agent just edited. The class
+   is toggled off on animationend so it can re-fire on the next live edit. */
+.krowe-doc-live { animation: krowe-doc-live-in var(--duration-normal, 240ms) var(--ease-out-smooth); }
+@media (prefers-reduced-motion: reduce) {
+  .krowe-doc-live { animation: none; }
+}
 
 /* ============================================================
    KROWE COMPONENT CLASSES
@@ -198,7 +210,19 @@ button:focus-visible {
   background: color-mix(in srgb, var(--background) 88%, transparent);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  /* Pin to the top as the page scrolls. The scroll owner is the window (the
+     sidebar sticks the same way), so top:0 sticks within .krowe-main. The
+     translucent background gets a frosted backdrop so content reads cleanly
+     underneath; z-index keeps it above page content but below modals (40+). */
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
+/* Left cluster: the search bar plus the running-agent ring dock beside it, kept
+   together against the topbar's space-between so the rings hug the search. */
+.krowe-topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .krowe-brand { display: flex; align-items: center; gap: 10px; }
 .krowe-brand-wordmark {
   font-family: var(--font-serif);
@@ -246,12 +270,93 @@ button:focus-visible {
   font-size: 13.5px; color: var(--faint-foreground);
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
+/* Typewriter caret for the rotating "Krowe can…" placeholder. Opacity-only
+   pulse on the design easing; hidden entirely under reduced motion (the label
+   also stops typing there). */
+.krowe-tb-caret {
+  color: var(--primary); margin-left: 1px;
+  animation: krowe-tb-caret-blink 1.1s var(--ease-out-smooth) infinite;
+}
+@keyframes krowe-tb-caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .krowe-tb-caret { animation: none; }
+}
 .krowe-kbd {
   display: inline-flex; align-items: center; justify-content: center;
   font-family: var(--font-mono); font-size: 11px; line-height: 1;
   padding: 3px 6px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: white;
   color: var(--muted-foreground); flex-shrink: 0;
+}
+
+/* ── Attached search dropdown (builder minimal view — Agent Hub direction E)
+   The dropdown grows straight out of the topbar "Search anything" bar: same left
+   edge, flush at the bar's top, its first row IS the live search field and the
+   results are one continuous surface below. No dimming overlay, no scroll lock —
+   the page stays live. The relative wrapper anchors it to the bar regardless of
+   the sidebar's width. Expand opens the full palette (.krowe-cmd) one step away. */
+.krowe-tb-searchwrap { position: relative; display: flex; }
+.krowe-ah-attached {
+  position: absolute; top: 0; left: 0; z-index: 55;
+  width: 100%; min-width: min(360px, calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
+  display: flex; flex-direction: column;
+  background: white;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  transform-origin: top left;
+  animation: krowe-attached-in 170ms var(--ease-out-smooth);
+}
+/* Search row — echoes .krowe-tb-search's height & fill so it reads as the same
+   bar, now opened. The ember/search glyph leads in primary to mark it live. */
+.krowe-ah-att-search {
+  display: flex; align-items: center; gap: 9px; flex-shrink: 0;
+  height: 36px; padding: 0 6px 0 13px;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border);
+}
+.krowe-ah-att-search .krowe-ah-att-glyph { color: var(--primary); display: inline-flex; flex-shrink: 0; }
+.krowe-ah-att-input {
+  flex: 1; min-width: 0; height: 100%;
+  border: none; outline: none; background: none;
+  font-family: var(--font-sans); font-size: 13.5px; color: var(--foreground);
+}
+.krowe-ah-att-input::placeholder { color: var(--faint-foreground); }
+.krowe-ah-att-tools { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.krowe-pk-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; flex-shrink: 0;
+  border: none; border-radius: var(--radius-md);
+  background: none; color: var(--muted-foreground); cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-pk-btn:hover { background: white; color: var(--foreground); }
+/* Results surface — reuses the full palette's row/label styles (.krowe-cmd-*). */
+.krowe-ah-att-body { max-height: min(52vh, 440px); overflow-y: auto; padding: 6px; }
+.krowe-ah-att-body .krowe-cmd-item { padding: 8px 10px; }
+/* The capability + Ask-Krowe rows sit outside the arrow-key list, so they carry
+   no data-selected state — give them the same highlight on hover. */
+.krowe-ah-att-body .krowe-cmd-item:hover {
+  background: var(--surface-subtle);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+/* Ask-Krowe row — the agent escape hatch sitting under the matches. Built on the
+   shared .krowe-cmd-item so it selects/hovers identically; the ember replaces the
+   lucide glyph and a kbd hint trails it. */
+.krowe-ah-att-ask .krowe-cmd-item-title { color: var(--foreground); }
+.krowe-ah-att-ask .krowe-ah-att-ember {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; flex-shrink: 0;
+}
+@keyframes krowe-attached-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-ah-attached { animation: none; }
 }
 
 /* ── Command palette (⌘K global search) ───────────────────────────── */
@@ -287,6 +392,9 @@ button:focus-visible {
 /* Search inputs opt out of the global orange focus ring (they sit inside their
    own styled containers). Plain CSS so it wins over the unlayered global rule. */
 .krowe-cmd-input:focus-visible,
+.krowe-ah-att-input:focus-visible,
+.krowe-ah-input:focus-visible,
+.krowe-ah-follow-input:focus-visible,
 .krowe-search-input:focus-visible { outline: none; box-shadow: none; border-color: transparent; }
 .krowe-cmd-input::placeholder { color: var(--faint-foreground); }
 .krowe-cmd-list { max-height: 56vh; overflow-y: auto; padding: 6px; }
@@ -335,6 +443,1241 @@ button:focus-visible {
 @keyframes krowe-cmd-pop {
   from { opacity: 0; transform: translateX(-50%) translateY(-6px) scale(0.985); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+/* The dialog container is a focus target on open (Radix focus trap); it's a
+   surface, not a control, so suppress the default UA outline. Inner controls
+   keep their own focus treatment. */
+.krowe-cmd:focus, .krowe-cmd:focus-visible { outline: none; }
+
+/* The typed query echoed inside the agent's interpret banner (.krowe-ah-*). */
+.krowe-cmd-ask-q { color: var(--primary-hover); font-weight: 600; }
+
+/* ── Promoted "Ask the agent" card (empty palette, builder-only) ──────
+   The lead action when nothing's typed: agent-first, with the "Go to…"
+   destinations trimmed to three below it. */
+.krowe-cmd-agent-card {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px; margin-bottom: 8px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--primary-soft); color: var(--foreground);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-cmd-agent-card:hover, .krowe-cmd-agent-card:focus-visible {
+  background: color-mix(in srgb, var(--primary) 18%, white);
+}
+.krowe-cmd-agent-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.krowe-cmd-agent-card-t { font-size: 13px; font-weight: 600; color: var(--primary-hover); }
+.krowe-cmd-agent-card-s {
+  font-size: 11.5px; line-height: 1.35; color: var(--muted-foreground);
+}
+
+/* ── Agents Control Center (⌘K "Ask agent" mode) ────────────────────
+   The shell, hub, and thread live in the Agent Hub block (.krowe-ah-*) below;
+   what remains here is the chrome both share — history, run rows, the
+   confirm-gate card, and the errors. */
+
+/* Back to the hub/search; ghost icon button sized to match the other 30px
+   header controls (History / New). */
+.krowe-agent-back {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex-shrink: 0;
+  border: none; border-radius: var(--radius-full);
+  background: transparent; color: var(--muted-foreground); cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-agent-back:hover { background: var(--surface-subtle); color: var(--foreground); }
+.krowe-agent-head-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.krowe-agent-runsbtn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 30px; padding: 0 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white;
+  color: var(--muted-foreground); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-agent-runsbtn:hover:not(:disabled) { background: var(--surface-subtle); }
+.krowe-agent-runsbtn:disabled { opacity: 0.4; cursor: default; }
+.krowe-agent-new {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 30px; padding: 0 14px; border-radius: var(--radius-full);
+  border: none; background: var(--primary-soft); color: var(--primary-hover);
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background var(--duration-normal) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-agent-new:hover:not(:disabled) { background: color-mix(in srgb, var(--primary) 20%, white); }
+.krowe-agent-new:active:not(:disabled) { transform: scale(0.97); }
+.krowe-agent-new:disabled { opacity: 0.4; cursor: default; }
+
+.krowe-agent-runs-wrap { position: relative; }
+.krowe-agent-runs-scrim { position: fixed; inset: 0; z-index: 1; }
+.krowe-agent-runs {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 2;
+  width: 260px; max-height: 300px; overflow-y: auto; padding: 6px;
+  background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-3);
+  animation: krowe-cmd-fade 140ms var(--ease-out-smooth);
+}
+.krowe-agent-runs-empty { padding: 16px; text-align: center; font-size: 12.5px; color: var(--muted-foreground); }
+.krowe-agent-run {
+  display: flex; align-items: center; width: 100%;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-agent-run:hover, .krowe-agent-run[data-active="true"] { background: var(--surface-subtle); }
+.krowe-agent-run-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: none; background: transparent; cursor: pointer; text-align: left;
+}
+.krowe-agent-run-title {
+  flex: 1; min-width: 0; font-size: 13px; color: var(--foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-agent-run-del {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; margin-right: 5px; border: none; background: transparent;
+  color: var(--faint-foreground); border-radius: var(--radius-full); cursor: pointer; opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-agent-run:hover .krowe-agent-run-del, .krowe-agent-run-del:focus-visible { opacity: 1; }
+.krowe-agent-run-del:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.krowe-agent-badge {
+  flex-shrink: 0; font-size: 10.5px; font-weight: 600;
+  padding: 2px 7px; border-radius: var(--radius-full);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  background: var(--surface-subtle); color: var(--muted-foreground);
+}
+.krowe-agent-badge[data-status="thinking"],
+.krowe-agent-badge[data-status="running_tool"] { background: var(--primary-soft); color: var(--primary-hover); }
+.krowe-agent-badge[data-status="awaiting_input"] { background: color-mix(in srgb, var(--warning) 14%, white); color: var(--warning); }
+.krowe-agent-badge[data-status="done"] { background: color-mix(in srgb, var(--success) 12%, white); color: var(--success); }
+.krowe-agent-badge[data-status="error"] { background: color-mix(in srgb, var(--danger) 12%, white); color: var(--danger); }
+
+/* Null state — no clients yet (app/b/agent/page.tsx). */
+.krowe-agent-empty {
+  margin: auto; max-width: 340px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.krowe-agent-empty-t { font-size: 15px; font-weight: 600; color: var(--foreground); }
+.krowe-agent-empty-s { font-size: 13px; line-height: 1.55; color: var(--muted-foreground); }
+
+/* Rendered markdown inside an agent answer (react-markdown). */
+.krowe-agent-md { white-space: normal; }
+.krowe-agent-md > :first-child { margin-top: 0; }
+.krowe-agent-md > :last-child { margin-bottom: 0; }
+.krowe-agent-md p { margin: 0 0 8px; }
+.krowe-agent-md ul, .krowe-agent-md ol { margin: 6px 0; padding-left: 20px; }
+.krowe-agent-md li { margin: 2px 0; }
+.krowe-agent-md li::marker { color: var(--faint-foreground); }
+.krowe-agent-md strong { font-weight: 600; }
+.krowe-agent-md a { color: var(--primary); text-decoration: underline; }
+.krowe-agent-md h1, .krowe-agent-md h2, .krowe-agent-md h3 { font-size: 14px; font-weight: 600; margin: 10px 0 4px; }
+.krowe-agent-md code {
+  font-family: var(--font-mono); font-size: 0.9em;
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  padding: 1px 5px; border-radius: var(--radius-sm);
+}
+.krowe-agent-md pre {
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  padding: 8px 10px; border-radius: var(--radius-md); overflow-x: auto; margin: 6px 0;
+}
+.krowe-agent-md pre code { background: none; padding: 0; }
+
+/* Drives the "now" step icon in the agent's working list (.krowe-ah-sic). */
+@keyframes krowe-agent-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* ── Parallel-agents queue ─────────────────────────────────────────────────
+   Direction A of the Agent Queue design (components/agent/agent-run-dock.tsx).
+   One calm chip in the topbar — a stack of determinate progress rings + a count
+   — collapses every in-flight (or just-finished) agent. Click it to open the
+   queue popover: each agent named, its live step, progress, elapsed, and a way
+   to act. Ring fill = the turn's real phase; stroke color = run status (reusing
+   the .krowe-agent-badge palette). Animates transform / opacity /
+   stroke-dashoffset only, and honors prefers-reduced-motion. */
+.krowe-aq { position: relative; display: flex; }
+
+/* ── Collapsed chip ── */
+.krowe-aq-chip {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 10px;
+  height: 38px; padding: 0 12px 0 9px;
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: white; box-shadow: var(--shadow-1);
+  cursor: pointer;
+  animation: krowe-rundock-in var(--duration-normal) var(--ease-out-smooth);
+  transition: box-shadow var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-aq-chip:hover {
+  box-shadow: var(--shadow-2);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+}
+.krowe-aq-chip:active { transform: scale(0.98); }
+.krowe-aq-chip[data-attention] { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+
+/* Quiet "a run just finished" signal — replaces the old completion toast. A small
+   success dot at the chip's top-right corner; the white halo lifts it off the
+   chip's border. Clears the moment the queue is opened (see AgentRunDock). */
+.krowe-aq-chip-dot {
+  position: absolute; top: 5px; right: 7px;
+  width: 8px; height: 8px; border-radius: var(--radius-full);
+  background: var(--success); box-shadow: 0 0 0 2px white;
+  animation: krowe-aq-dot-in var(--duration-normal) var(--ease-out-smooth);
+}
+@keyframes krowe-aq-dot-in {
+  from { opacity: 0; transform: scale(0.3); }
+}
+
+.krowe-aq-chip-stack { display: inline-flex; }
+.krowe-aq-chip-ring { display: inline-flex; box-shadow: 0 0 0 2px white; border-radius: var(--radius-full); }
+.krowe-aq-chip-ring + .krowe-aq-chip-ring { margin-left: -8px; }
+.krowe-aq-chip-ring[data-status="thinking"] .fill,
+.krowe-aq-chip-ring[data-status="running_tool"] .fill { stroke: var(--primary); }
+.krowe-aq-chip-ring[data-status="awaiting_input"] .fill { stroke: var(--warning); }
+.krowe-aq-chip-ring[data-status="done"] .fill { stroke: var(--success); }
+.krowe-aq-chip-ring[data-status="error"] .fill { stroke: var(--danger); }
+
+.krowe-aq-chip-lbl { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
+.krowe-aq-chip-lbl .t { font-size: 13px; font-weight: 600; color: var(--foreground); }
+.krowe-aq-chip-lbl .s { font-size: 11px; color: var(--muted-foreground); }
+.krowe-aq-chip[data-attention] .krowe-aq-chip-lbl .s { color: var(--warning); }
+.krowe-aq-chip-car { color: var(--faint-foreground); flex-shrink: 0; }
+
+/* ── Expanded queue popover ── */
+.krowe-aq-pop {
+  position: absolute; z-index: 60;
+  top: calc(100% + 8px); left: 0;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(70vh, 460px);
+  display: flex; flex-direction: column;
+  background: white;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  transform-origin: top left;
+  animation: krowe-attached-in 170ms var(--ease-out-smooth);
+}
+
+.krowe-aq-body { display: flex; flex-direction: column; overflow-y: auto; min-height: 0; }
+
+.krowe-aq-job { display: flex; align-items: center; }
+.krowe-aq-job + .krowe-aq-job { border-top: 1px solid var(--border); }
+.krowe-aq-job-main {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 6px 10px 12px;
+  border: none; background: none; cursor: pointer; text-align: left;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-aq-job-main:hover { background: var(--surface-subtle); }
+
+.krowe-aq-job-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.krowe-aq-job-client {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.01em;
+  color: var(--faint-foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-aq-job-title {
+  font-size: 13.5px; font-weight: 600; color: var(--foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-aq-job-step {
+  font-size: 12px; color: var(--muted-foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-aq-job[data-status="done"] .krowe-aq-job-step { color: var(--success); }
+.krowe-aq-job[data-status="error"] .krowe-aq-job-step { color: var(--danger); }
+.krowe-aq-job[data-status="awaiting_input"] .krowe-aq-job-step { color: var(--warning); }
+
+.krowe-aq-job-meta {
+  flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 2px;
+}
+.krowe-aq-job-pct { font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--foreground); }
+.krowe-aq-job[data-status="done"] .krowe-aq-job-pct { color: var(--success); }
+.krowe-aq-job[data-status="error"] .krowe-aq-job-pct { color: var(--danger); }
+.krowe-aq-job[data-status="awaiting_input"] .krowe-aq-job-pct { color: var(--warning); }
+.krowe-aq-job-el { font-family: var(--font-mono); font-size: 10.5px; color: var(--faint-foreground); }
+
+/* Trailing affordance — a dismiss on finished rows, an "opens in place" hint on
+   running ones (the whole row is the button). */
+.krowe-aq-job-x {
+  flex-shrink: 0; width: 28px; height: 28px; margin: 0 10px 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: white; color: var(--muted-foreground); cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-aq-job-x:hover { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+.krowe-aq-job-open {
+  flex-shrink: 0; margin: 0 12px 0 6px; color: var(--faint-foreground);
+  display: inline-flex; opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-aq-job:hover .krowe-aq-job-open { opacity: 1; }
+
+/* ── Inline "needs you" approval card ──
+   A run parked awaiting_input renders its top row (opens the thread) plus a
+   warning-tinted strip carrying the proposed action(s) and Approve / Cancel, so
+   the builder acts without leaving the queue. Its own container, so the separator
+   rules must reach across it (a plain .krowe-aq-job + .krowe-aq-job won't). */
+.krowe-aq-ask { display: flex; flex-direction: column; }
+.krowe-aq-ask + .krowe-aq-job,
+.krowe-aq-job + .krowe-aq-ask,
+.krowe-aq-ask + .krowe-aq-ask { border-top: 1px solid var(--border); }
+.krowe-aq-ask .krowe-aq-job { flex: 1; }
+
+.krowe-aq-ask-strip {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 12px 12px;
+  margin: 0 8px 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 22%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+}
+.krowe-aq-ask-list { display: flex; flex-direction: column; gap: 6px; }
+.krowe-aq-ask-item {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--foreground); min-width: 0;
+}
+.krowe-aq-ask-ic { color: var(--primary); flex-shrink: 0; display: inline-flex; }
+.krowe-aq-ask-desc { min-width: 0; word-break: break-word; }
+.krowe-aq-ask-err { font-size: 12px; color: var(--danger); }
+.krowe-aq-ask-load { font-size: 12.5px; color: var(--muted-foreground); }
+.krowe-aq-ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.krowe-aq-foot {
+  display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border); background: var(--surface-subtle);
+  font-size: 12px;
+}
+.krowe-aq-foot-link {
+  flex-shrink: 0;
+  font-weight: 600; color: var(--primary); text-decoration: none;
+}
+.krowe-aq-foot-link:hover { color: var(--primary-hover); }
+
+/* ── Agents Hub (/b/agent) ───────────────────────────────────────────────────
+   The cross-client hub: a launchpad of catalog agents over a cross-client activity
+   feed. Rows reuse the dock's .krowe-aq-job markup via the shared <AgentRunRow>; the
+   additions here are the leading ring, the hub/launchpad layout, and the feed
+   grouping. Spacing follows the file's raw-px convention (no --space-* tokens exist);
+   color / radius / shadow / motion use tokens per DESIGN.md. */
+.krowe-ah-hub { display: flex; flex-direction: column; gap: 40px; max-width: 1080px; margin: 0 auto; }
+.krowe-ah-hub .krowe-page-head { margin-bottom: 4px; }
+.krowe-ah-hub .krowe-ah-sec { padding-left: 0; padding-right: 0; }
+
+/* Page head — live "N running" pip + serif quip (reuses .krowe-page-sub .krowe-quip). */
+.krowe-ah-live {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--foreground); font-weight: 600;
+}
+.krowe-ah-live[data-quiet="true"] { color: var(--faint-foreground); font-weight: 600; }
+.krowe-ah-pip {
+  width: 7px; height: 7px; border-radius: var(--radius-full);
+  background: var(--success); box-shadow: 0 0 0 3px var(--success-soft);
+  animation: krowe-ah-pip-pulse 2s var(--ease-out-smooth) infinite;
+}
+@keyframes krowe-ah-pip-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* Launchpad — Selection-Card surfaces, no filled-primary grid. */
+.krowe-ah-lp-sec { display: flex; flex-direction: column; gap: 15px; }
+.krowe-ah-lp {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+}
+.krowe-ah-lp-card {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 20px 20px 16px; text-align: left; cursor: pointer;
+  background: white;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  transition: box-shadow var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+/* Left accent bar — fades in on hover (a card is one focus, not a filled primary). */
+.krowe-ah-lp-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: linear-gradient(var(--primary), var(--primary-accent));
+  opacity: 0; transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-lp-card:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2); border-color: var(--border-strong);
+}
+.krowe-ah-lp-card:hover:not(:disabled)::before { opacity: 1; }
+.krowe-ah-lp-card:active:not(:disabled) { transform: translateY(-2px) scale(0.99); }
+.krowe-ah-lp-card:disabled { opacity: 0.5; cursor: default; }
+.krowe-ah-lp-ic {
+  width: 40px; height: 40px; flex-shrink: 0; margin-bottom: 16px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-md); background: var(--surface-sunken); color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-lp-card:hover:not(:disabled) .krowe-ah-lp-ic {
+  background: var(--primary-soft); color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 30%, white);
+}
+.krowe-ah-lp-name { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--foreground); line-height: 1.3; }
+.krowe-ah-lp-blurb { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.45; margin-top: 5px; }
+.krowe-ah-lp-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+.krowe-ah-lp-tag {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.01em;
+  text-transform: uppercase; color: var(--faint-foreground);
+}
+.krowe-ah-lp-go {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 600; color: var(--muted-foreground);
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-lp-go-i { transition: transform var(--duration-fast) var(--ease-out-smooth); }
+.krowe-ah-lp-card:hover:not(:disabled) .krowe-ah-lp-go { color: var(--primary); }
+.krowe-ah-lp-card:hover:not(:disabled) .krowe-ah-lp-go-i { transform: translateX(3px); }
+@media (prefers-reduced-motion: reduce) {
+  .krowe-ah-lp-card:hover:not(:disabled) { transform: none; }
+  .krowe-ah-lp-card:hover:not(:disabled) .krowe-ah-lp-go-i { transform: none; }
+  .krowe-ah-pip { animation: none; }
+}
+
+/* Launch sheet body (inside the shared Radix dialog) */
+.krowe-ls { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+.krowe-ls-ic { display: inline-flex; color: var(--primary); }
+.krowe-ls-scope { display: flex; align-items: center; gap: 10px; }
+.krowe-ls-scope-lbl {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+.krowe-ls-composer { margin-top: 2px; }
+.krowe-ls-actions { display: flex; justify-content: flex-end; }
+
+/* Feed: leading ring on a shared row (still used by the topbar dock via AgentRunRow). */
+.krowe-aq-job-ring { flex-shrink: 0; display: inline-flex; align-items: center; padding-left: 14px; }
+.krowe-aq-job-ring[data-status="thinking"] .fill,
+.krowe-aq-job-ring[data-status="running_tool"] .fill { stroke: var(--primary); }
+.krowe-aq-job-ring[data-status="awaiting_input"] .fill { stroke: var(--warning); }
+.krowe-aq-job-ring[data-status="done"] .fill { stroke: var(--success); }
+.krowe-aq-job-ring[data-status="error"] .fill { stroke: var(--danger); }
+
+.krowe-af { display: flex; flex-direction: column; gap: 14px; }
+
+/* Toolbar: pill selects (client / type) left, status segmented control right. */
+.krowe-af-toolbar {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap; margin-bottom: 2px;
+}
+.krowe-af-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.krowe-fdrop { position: relative; display: inline-flex; }
+.krowe-fdrop select {
+  appearance: none; -webkit-appearance: none;
+  height: 34px; padding: 0 32px 0 13px;
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: white; box-shadow: var(--shadow-1);
+  font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; color: var(--foreground);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-fdrop select:hover { border-color: var(--border-strong); }
+.krowe-fdrop-caret {
+  position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+  pointer-events: none; color: var(--faint-foreground);
+}
+.krowe-seg {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+}
+.krowe-seg button {
+  height: 28px; padding: 0 14px;
+  border: none; background: none; border-radius: var(--radius-full);
+  font-family: var(--font-sans); font-size: 12.5px; font-weight: 600; color: var(--muted-foreground);
+  white-space: nowrap; cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-seg button:hover { color: var(--foreground); }
+.krowe-seg button.on { background: var(--foreground); color: var(--background); box-shadow: var(--shadow-1); }
+.krowe-seg-cnt { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.6; margin-left: 5px; }
+
+/* Day groups + connected run list. */
+.krowe-af-daygroup { display: flex; flex-direction: column; }
+.krowe-af-day {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--faint-foreground); margin: 22px 0 10px; padding-left: 2px;
+}
+.krowe-af-daygroup:first-of-type .krowe-af-day { margin-top: 0; }
+.krowe-af-runs { display: flex; flex-direction: column; }
+
+.krowe-af-run {
+  position: relative; display: flex; align-items: stretch;
+  border: 1px solid var(--border); background: white; box-shadow: var(--shadow-1);
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-af-run + .krowe-af-run { margin-top: -1px; }
+.krowe-af-run:first-child { border-top-left-radius: var(--radius-lg); border-top-right-radius: var(--radius-lg); }
+.krowe-af-run:last-child { border-bottom-left-radius: var(--radius-lg); border-bottom-right-radius: var(--radius-lg); }
+.krowe-af-run:hover, .krowe-af-run:focus-within { z-index: 2; border-color: var(--border-strong); box-shadow: var(--shadow-2); }
+.krowe-af-run[data-status="thinking"],
+.krowe-af-run[data-status="running_tool"] {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--primary) 4%, white), white 60%);
+}
+.krowe-af-run[data-status="awaiting_input"] {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--warning) 5%, white), white 60%);
+}
+
+.krowe-af-run-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 16px;
+  padding: 15px 16px; border: none; background: none; cursor: pointer; text-align: left;
+}
+.krowe-af-run-ic {
+  width: 38px; height: 38px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-md); background: var(--surface-subtle);
+  border: 1px solid var(--border); color: var(--muted-foreground);
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-af-run[data-status="thinking"] .krowe-af-run-ic,
+.krowe-af-run[data-status="running_tool"] .krowe-af-run-ic {
+  background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 30%, white); color: var(--primary);
+}
+
+.krowe-af-run-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.krowe-af-run-top { display: flex; align-items: center; gap: 9px; }
+.krowe-af-ctag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; color: var(--muted-foreground); flex-shrink: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-af-swatch {
+  width: 16px; height: 16px; flex-shrink: 0; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 700; color: #fff; letter-spacing: -0.02em;
+}
+.krowe-af-swatch[data-tone="ink"] { background: linear-gradient(155deg, oklch(32% 0.02 60), oklch(20% 0.012 60)); }
+.krowe-af-swatch[data-tone="clay"] { background: linear-gradient(155deg, #c2603a, #9a4424); }
+.krowe-af-swatch[data-tone="slate"] { background: linear-gradient(155deg, oklch(46% 0.03 250), oklch(32% 0.03 255)); }
+.krowe-af-dotsep { width: 3px; height: 3px; border-radius: var(--radius-full); background: var(--border-strong); flex-shrink: 0; }
+.krowe-af-kind {
+  font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--faint-foreground); flex-shrink: 0;
+}
+.krowe-af-run-title {
+  font-size: 14.5px; font-weight: 600; letter-spacing: -0.005em; color: var(--foreground);
+  margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-af-run-note {
+  font-size: 12.5px; color: var(--muted-foreground); margin-top: 3px;
+  display: flex; align-items: center; gap: 9px; overflow: hidden;
+}
+.krowe-af-miniprog {
+  flex: 0 0 130px; height: 4px; border-radius: var(--radius-full);
+  background: var(--surface-sunken); overflow: hidden;
+}
+.krowe-af-miniprog > span {
+  display: block; height: 100%; border-radius: var(--radius-full);
+  background: linear-gradient(90deg, var(--primary), var(--primary-accent));
+  animation: krowe-af-indet 1.8s var(--ease-out-smooth) infinite;
+}
+@keyframes krowe-af-indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(430%); } }
+
+.krowe-af-run-aside { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.krowe-af-badge {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 11px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.krowe-af-bd { width: 6px; height: 6px; border-radius: var(--radius-full); }
+.krowe-af-badge[data-kind="done"] { background: var(--success-soft); color: var(--success); }
+.krowe-af-badge[data-kind="done"] .krowe-af-bd { background: var(--success); }
+.krowe-af-badge[data-kind="active"] { background: var(--surface-sunken); color: var(--foreground); border: 1px solid var(--border); }
+.krowe-af-badge[data-kind="active"] .krowe-af-bd { background: var(--primary); animation: krowe-ah-pip-pulse 1.6s var(--ease-out-smooth) infinite; }
+.krowe-af-badge[data-kind="error"] { background: var(--danger-soft); color: var(--danger); }
+.krowe-af-badge[data-kind="error"] .krowe-af-bd { background: var(--danger); }
+.krowe-af-badge[data-kind="await"] { background: var(--warning-soft); color: var(--warning); }
+.krowe-af-badge[data-kind="await"] .krowe-af-bd { background: var(--warning); }
+.krowe-af-run-time { font-family: var(--font-mono); font-size: 11px; color: var(--faint-foreground); width: 66px; text-align: right; flex-shrink: 0; }
+.krowe-af-run-open {
+  display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end;
+  width: 64px; flex-shrink: 0;
+  font-size: 12px; font-weight: 600; color: var(--muted-foreground);
+  opacity: 0; transform: translateX(4px);
+  transition: opacity var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-af-run:hover .krowe-af-run-open, .krowe-af-run:focus-within .krowe-af-run-open { opacity: 1; transform: none; }
+.krowe-af-run[data-status="error"] .krowe-af-run-open { color: var(--danger); }
+
+.krowe-af-del {
+  position: relative; flex-shrink: 0; align-self: center;
+  width: 30px; height: 30px; margin-right: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: none; border-radius: var(--radius-full);
+  color: var(--faint-foreground); cursor: pointer; opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-af-run:hover .krowe-af-del, .krowe-af-run:focus-within .krowe-af-del { opacity: 1; }
+.krowe-af-del:hover { background: var(--danger-soft); color: var(--danger); }
+.krowe-af-del:focus-visible { opacity: 1; }
+/* Bigger touch target than the 30px visual. */
+.krowe-af-del::after { content: ""; position: absolute; inset: -7px; }
+
+/* Dashed empty state — the blessed large-scale ember use. */
+.krowe-af-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 56px 20px; text-align: center;
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+.krowe-af-empty > svg { opacity: 0.7; }
+.krowe-af-empty-t { font-family: var(--font-serif); font-size: 22px; color: var(--muted-foreground); }
+.krowe-af-empty-s { font-size: 13px; color: var(--faint-foreground); }
+
+@media (prefers-reduced-motion: reduce) {
+  .krowe-af-miniprog > span { animation: none; }
+  .krowe-af-badge[data-kind="active"] .krowe-af-bd { animation: none; }
+  .krowe-af-run-open { transition: opacity var(--duration-fast) var(--ease-out-smooth); }
+}
+
+@media (max-width: 1000px) {
+  .krowe-ah-lp { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .krowe-ah-lp { grid-template-columns: 1fr; }
+  .krowe-af-toolbar { align-items: flex-start; }
+  .krowe-af-run-open { display: none; }
+  .krowe-af-run-time { width: auto; }
+  .krowe-af-del { opacity: 1; }
+}
+
+/* ── In-place conversation (a queue row, opened) ── */
+.krowe-aq-thread-head {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 8px 8px 8px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.krowe-aq-thread-btn {
+  flex-shrink: 0; width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--radius-md);
+  background: none; color: var(--muted-foreground); cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-aq-thread-btn:hover { background: var(--surface-subtle); color: var(--foreground); }
+.krowe-aq-thread-client { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--foreground); }
+.krowe-aq-thread-title {
+  flex: 1; min-width: 0;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 12.5px; color: var(--muted-foreground);
+}
+/* The hosted thread fills the popover (grow-then-cap) instead of its own fixed
+   palette height; the "open full workspace" nudge is dropped — staying here is
+   the point. */
+.krowe-aq-pop .krowe-ah-thread[data-variant="palette"] {
+  flex: 1 1 auto; min-height: 0; height: auto; max-height: none;
+}
+.krowe-aq-pop .krowe-ah-route { display: none; }
+/* Thread peek: wider (opens further right) + shorter than the queue list, and
+   drop the keyboard-hint footer — the follow-up box carries the interaction. */
+.krowe-aq-pop[data-view="thread"] {
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(58vh, 400px);
+}
+.krowe-aq-pop .krowe-ah-foot { display: none; }
+
+/* PRD run panel — a PRD run's popover view (the document, not a chat). Grows to
+   fill the popover; the widget owns its own scroll. */
+.krowe-aq-prd-panel {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+.krowe-aq-prd-empty {
+  padding: 28px 12px; margin: 0;
+  text-align: center; font-size: 13px; color: var(--muted-foreground);
+}
+.krowe-aq-prd-err { display: flex; flex-direction: column; gap: 12px; padding: 16px 12px; }
+.krowe-aq-prd-err p { margin: 0; font-size: 13px; color: var(--foreground); }
+.krowe-aq-prd-retry {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  padding: 7px 14px;
+  font-size: 12.5px; font-weight: 600; color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-aq-prd-retry:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  box-shadow: var(--shadow-1);
+  transform: translateY(-1px);
+}
+.krowe-aq-prd-retry:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-aq-prd-retry:hover { transform: none; }
+}
+
+@keyframes krowe-rundock-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.96); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .krowe-aq-chip,
+  .krowe-aq-chip-dot,
+  .krowe-aq-pop,
+  .krowe-aq-chip-ring .fill { animation: none; transition: none; }
+}
+
+.krowe-agent-error {
+  padding: 10px 13px; border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 8%, white);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  color: var(--danger); font-size: 13px;
+}
+
+/* Proposed write action awaiting the builder's confirmation. */
+.krowe-agent-proposal {
+  max-width: 86%; margin-top: 6px; padding: 11px 13px;
+  display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  background: color-mix(in srgb, var(--primary) 5%, white);
+  border-radius: var(--radius-md);
+}
+.krowe-agent-proposal-list { display: flex; flex-direction: column; gap: 6px; }
+.krowe-agent-proposal-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--foreground); min-width: 0; }
+.krowe-agent-proposal-ic { color: var(--primary); flex-shrink: 0; display: inline-flex; }
+.krowe-agent-proposal-desc { min-width: 0; word-break: break-word; }
+.krowe-agent-proposal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.krowe-agent-btn {
+  height: 30px; padding: 0 15px; border-radius: var(--radius-full);
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background var(--duration-normal) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-agent-btn.primary { border: none; background: var(--primary); color: var(--primary-foreground); }
+.krowe-agent-btn.primary:hover:not(:disabled) { background: var(--primary-hover); }
+.krowe-agent-btn.ghost { border: 1px solid var(--border); background: white; color: var(--muted-foreground); }
+.krowe-agent-btn.ghost:hover:not(:disabled) { background: var(--surface-subtle); }
+.krowe-agent-btn:active:not(:disabled) { transform: scale(0.97); }
+.krowe-agent-btn:disabled { opacity: 0.5; cursor: default; }
+.krowe-agent-proposal-done { display: flex; flex-direction: column; gap: 3px; }
+.krowe-agent-proposal-result { font-size: 12.5px; color: var(--success); }
+.krowe-agent-proposal-cancelled { font-size: 12.5px; color: var(--muted-foreground); }
+
+/* ── Agent Hub (⌘K agent entry + the /b/agent workspace) ───────────────
+   Ported from the "Agent Hub" design's four directions: A the entry hub,
+   B the answer, C the working hand-off, D the type-ahead banner.
+
+   Two deliberate departures from the mock, both to stay inside DESIGN.md:
+   its --callout-bg/--callout-border pair is off-palette hex, so the route and
+   interpret callouts reuse the promoted-agent-card recipe (--primary-soft on a
+   22% primary border); and the working spinner pulses on the shared
+   --ease-out-smooth rather than rotating linearly. */
+
+.krowe-ah { display: flex; flex-direction: column; min-height: 0; max-height: 72vh; }
+
+/* The same shell, framed as a card on its own page. A definite height is what
+   lets the thread's scroll area bound itself. */
+.krowe-ah-page {
+  max-height: none; height: 72vh; min-height: 420px;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: white; box-shadow: var(--shadow-1); overflow: hidden;
+}
+
+.krowe-ah-ember {
+  flex-shrink: 0; width: 23px; height: 23px; border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary-soft);
+}
+.krowe-ah-ember[data-size="lg"] { width: 28px; height: 28px; }
+.krowe-ah-ember[data-size="sm"] { width: 19px; height: 19px; }
+
+/* ── A · the hub ─────────────────────────────────────────────────────── */
+.krowe-ah-hero {
+  padding: 16px 16px 14px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary) 4%, white), white);
+}
+.krowe-ah-hero-row { display: flex; align-items: center; gap: 12px; }
+/* Hero input + its rotating "Krowe can…" typewriter hint */
+.krowe-ah-input-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.krowe-ah-input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: none;
+  font: inherit; font-size: 18px; color: var(--foreground);
+}
+.krowe-ah-input::placeholder { color: var(--faint-foreground); }
+.krowe-ah-input:disabled { color: var(--faint-foreground); }
+/* Typewriter hint over the empty hero input — clicks fall through to the input
+   beneath it (pointer-events:none). Matches the input's 18px text metrics so
+   the rotating "Krowe can…" line sits exactly where a placeholder would. */
+.krowe-ah-input-hint {
+  position: absolute; inset: 0;
+  display: flex; align-items: center;
+  pointer-events: none;
+  font-size: 18px; line-height: 1; color: var(--faint-foreground);
+  white-space: nowrap; overflow: hidden;
+}
+
+.krowe-ah-send {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  width: 31px; height: 31px; border-radius: var(--radius-full);
+  border: none; background: var(--primary); color: var(--primary-foreground); cursor: pointer;
+  box-shadow: var(--shadow-4);
+  transition: background var(--duration-normal) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-send:hover:not(:disabled) { background: var(--primary-hover); }
+.krowe-ah-send:active:not(:disabled) { transform: scale(0.94); }
+.krowe-ah-send:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+
+/* The chips never wrap to a second line — the row between the label and "Edit"
+   is an <OverflowPills>, which fits what it can and collapses the rest. */
+.krowe-ah-ctx { display: flex; align-items: center; flex-wrap: nowrap; gap: 7px; margin-top: 14px; }
+.krowe-ah-ctx-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--faint-foreground); margin-right: 3px;
+  flex-shrink: 0;
+}
+.krowe-ah-chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px;
+  max-width: 240px; flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-full); background: white;
+  font-size: 11.5px; color: var(--foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-ah-chip svg { color: var(--faint-foreground); flex-shrink: 0; }
+.krowe-ah-chip-edit {
+  color: var(--muted-foreground); border-style: dashed; cursor: pointer; font: inherit; font-size: 12px;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-chip-edit:hover:not(:disabled) { background: var(--surface-subtle); color: var(--foreground); }
+.krowe-ah-chip-edit:disabled { opacity: 0.5; cursor: default; }
+
+/* ───────── Overflow pill row (shared) ─────────
+   Styles <OverflowPills> (components/ui/overflow-pills.tsx) — the self-fitting
+   pill row used anywhere chips can outgrow their container. Sizing mirrors
+   .krowe-ah-chip so a collapsed row reads as one continuous set of pills.
+   `flex: 1 1 0%` is load-bearing, not cosmetic: the row measures its own
+   clientWidth to decide the fit, so it has to occupy a width that doesn't
+   depend on how many pills it's currently showing. */
+.krowe-op {
+  position: relative;
+  display: flex; align-items: center; justify-content: flex-start;
+  flex: 1 1 0%; min-width: 0;
+}
+/* Zero-size clipped host for the probe. The probe has to lay out at its full
+   natural width to be measurable, but a row of pills wider than the viewport
+   would otherwise extend an ancestor's scrollable overflow — and we can't clip
+   on .krowe-op itself, which has to stay overflow-visible so the "+X more" and
+   "Edit" dropdowns can escape it. */
+.krowe-op-probe-clip {
+  position: absolute; top: 0; left: 0; width: 0; height: 0;
+  overflow: hidden; visibility: hidden; pointer-events: none;
+}
+.krowe-op-probe {
+  width: max-content;
+  display: flex; align-items: center;
+}
+.krowe-op-pinned { display: inline-flex; flex-shrink: 0; }
+.krowe-op-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+.krowe-op-more {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px;
+  flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: var(--surface-subtle);
+  font: inherit; font-size: 12px; color: var(--muted-foreground);
+  white-space: nowrap; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-op-more:hover { background: var(--surface-sunken); color: var(--foreground); }
+.krowe-op-chev { color: var(--faint-foreground); flex-shrink: 0; }
+.krowe-op-scrim { position: fixed; inset: 0; z-index: 1; }
+.krowe-op-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  width: max-content; max-width: 280px; padding: 8px;
+  background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-3);
+  animation: krowe-cmd-fade 140ms var(--ease-out-smooth);
+}
+
+.krowe-ah-switch-wrap { position: relative; display: inline-flex; flex-shrink: 0; }
+.krowe-ah-switch {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 2;
+  width: 240px; max-height: 280px; overflow-y: auto; padding: 6px;
+  background: white; border: 1px solid var(--border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-3);
+  animation: krowe-cmd-fade 140ms var(--ease-out-smooth);
+}
+.krowe-ah-switch-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border: none; background: none; cursor: pointer;
+  border-radius: var(--radius-md); font: inherit; font-size: 13px;
+  color: var(--foreground); text-align: left;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-switch-item:hover, .krowe-ah-switch-item[data-active="true"] { background: var(--surface-subtle); }
+.krowe-ah-switch-item svg { color: var(--faint-foreground); flex-shrink: 0; }
+
+.krowe-ah-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 8px 6px; }
+.krowe-ah-sec {
+  padding: 12px 12px 6px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground);
+}
+
+/* "Krowe can" — each card starts the work it names. */
+.krowe-ah-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.krowe-ah-cap {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left;
+  padding: 11px 12px; border: none; background: none; border-radius: var(--radius-md);
+  font: inherit; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-cap:hover:not(:disabled) { background: var(--surface-subtle); box-shadow: inset 2px 0 0 var(--primary); }
+.krowe-ah-cap:disabled { opacity: 0.5; cursor: default; }
+.krowe-ah-cap-ic {
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: var(--radius-md);
+  background: var(--surface-sunken); color: var(--muted-foreground);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-cap:hover:not(:disabled) .krowe-ah-cap-ic { background: var(--primary-soft); color: var(--primary); }
+.krowe-ah-cap-tx { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.krowe-ah-cap-t { font-size: 13.5px; font-weight: 600; color: var(--foreground); line-height: 1.3; }
+.krowe-ah-cap-d { font-size: 12px; color: var(--muted-foreground); line-height: 1.35; }
+
+.krowe-ah-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 9px 12px; border: none; background: none; border-radius: var(--radius-md);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-row:hover:not(:disabled) { background: var(--surface-subtle); box-shadow: inset 2px 0 0 var(--primary); }
+.krowe-ah-row:disabled { opacity: 0.5; cursor: default; }
+.krowe-ah-row-ic { flex-shrink: 0; width: 26px; color: var(--faint-foreground); display: inline-flex; justify-content: center; }
+.krowe-ah-row:hover:not(:disabled) .krowe-ah-row-ic { color: var(--primary); }
+.krowe-ah-row-t {
+  flex: 1; min-width: 0; font-size: 13.5px; color: var(--foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-ah-row-meta { flex-shrink: 0; font-size: 11.5px; color: var(--faint-foreground); }
+
+.krowe-ah-jump { display: flex; flex-wrap: wrap; gap: 7px; padding: 4px 12px 12px; }
+.krowe-ah-pill {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 13px;
+  border: 1px solid var(--border); border-radius: var(--radius-full); background: white;
+  font: inherit; font-size: 12.5px; color: var(--muted-foreground); cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-pill:hover { background: var(--surface-subtle); color: var(--foreground); }
+.krowe-ah-pill svg { color: var(--faint-foreground); flex-shrink: 0; }
+
+.krowe-ah-foot {
+  display: flex; align-items: center; gap: 16px; padding: 7px 16px; flex-shrink: 0;
+  border-top: 1px solid var(--border); font-size: 10.5px; color: var(--faint-foreground);
+  background: var(--surface-subtle);
+}
+.krowe-ah-foot .k { font-family: var(--font-mono); margin-right: 5px; color: var(--muted-foreground); }
+.krowe-ah-foot .sp { margin-left: auto; }
+
+/* ── Thread header (active palette thread + the page) ─────────────────── */
+.krowe-ah-head {
+  display: flex; align-items: center; gap: 9px; flex-shrink: 0;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.krowe-ah-head-client {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  font-size: 13px; font-weight: 600; color: var(--foreground);
+}
+.krowe-ah-head-client svg { color: var(--faint-foreground); }
+.krowe-ah-head-title {
+  min-width: 0; margin-left: auto; font-size: 12.5px; color: var(--muted-foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+
+/* ── B + C · the conversation ─────────────────────────────────────────── */
+.krowe-ah-thread { display: flex; flex-direction: column; min-height: 0; }
+.krowe-ah-thread[data-variant="palette"] { height: 58vh; max-height: 500px; }
+.krowe-ah-thread[data-variant="page"] { flex: 1; }
+.krowe-ah-scroll {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 14px 16px 6px; display: flex; flex-direction: column; gap: 12px;
+}
+
+.krowe-ah-q { display: flex; align-items: center; gap: 10px; }
+.krowe-ah-q-t { min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--foreground); line-height: 1.4; }
+
+.krowe-ah-a { display: flex; flex-direction: column; gap: 8px; }
+.krowe-ah-answer { font-size: 13px; line-height: 1.55; color: var(--foreground); }
+/* B's editorial lead: the answer's opening line, set in the display serif. */
+.krowe-ah-answer > :is(p, h1, h2, h3):first-child {
+  font-family: var(--font-serif); font-weight: 400;
+  font-size: 16px; line-height: 1.3; letter-spacing: -0.01em;
+  color: var(--foreground); margin: 0 0 10px;
+}
+.krowe-ah-answer p { margin: 0 0 10px; }
+.krowe-ah-answer > :last-child { margin-bottom: 0; }
+
+.krowe-ah-src { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.krowe-ah-src-lbl {
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--faint-foreground); margin-right: 3px;
+}
+
+.krowe-ah-work { display: flex; flex-direction: column; gap: 10px; }
+.krowe-ah-work-lead { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted-foreground); }
+.krowe-ah-steps { display: flex; flex-direction: column; gap: 2px; }
+.krowe-ah-step { display: flex; align-items: center; gap: 10px; padding: 5px 2px; font-size: 12.5px; color: var(--foreground); }
+.krowe-ah-step[data-state="wait"] { color: var(--faint-foreground); }
+.krowe-ah-step-t { min-width: 0; }
+.krowe-ah-step-meta { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; color: var(--faint-foreground); }
+.krowe-ah-sic {
+  flex-shrink: 0; width: 18px; height: 18px; border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.krowe-ah-sic[data-state="done"] { background: color-mix(in srgb, var(--success) 12%, white); color: var(--success); }
+.krowe-ah-sic[data-state="now"] { background: var(--primary-soft); color: var(--primary); }
+.krowe-ah-sic[data-state="now"] svg { animation: krowe-agent-pulse 1s var(--ease-out-smooth) infinite; }
+.krowe-ah-sic[data-state="wait"] { border: 1.5px dashed var(--border-strong); }
+
+.krowe-ah-route {
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  background: var(--primary-soft); border-radius: var(--radius-lg);
+}
+.krowe-ah-route-ic { color: var(--primary); flex-shrink: 0; }
+.krowe-ah-route-tx { flex: 1; min-width: 0; }
+.krowe-ah-route-h { font-size: 14px; font-weight: 600; color: var(--foreground); }
+.krowe-ah-route-s { font-size: 13px; color: var(--muted-foreground); margin-top: 2px; line-height: 1.4; }
+
+.krowe-ah-btn {
+  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px;
+  border: none; border-radius: var(--radius-full); background: var(--primary);
+  color: var(--primary-foreground); font: inherit; font-size: 13.5px; font-weight: 600;
+  box-shadow: var(--shadow-4); white-space: nowrap; cursor: pointer; text-decoration: none;
+  transition: background var(--duration-normal) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-btn:hover { background: var(--primary-hover); color: var(--primary-foreground); }
+.krowe-ah-btn:active { transform: scale(0.97); }
+
+.krowe-ah-followbar {
+  display: flex; align-items: center; gap: 7px; flex-shrink: 0;
+  margin: 4px 10px 9px; padding: 3px 4px 3px 11px;
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  background: var(--surface-subtle);
+}
+.krowe-ah-follow-ic { color: var(--faint-foreground); flex-shrink: 0; }
+.krowe-ah-follow-input {
+  flex: 1; min-width: 0; resize: none; max-height: 80px; padding: 3px 0;
+  border: none; outline: none; background: none;
+  font: inherit; font-size: 12.5px; line-height: 1.45; color: var(--foreground);
+}
+/* The follow-up composer's send button is more compact than the hero's. */
+.krowe-ah-followbar .krowe-ah-send { width: 26px; height: 26px; box-shadow: var(--shadow-2); }
+.krowe-ah-follow-input::placeholder { color: var(--faint-foreground); }
+.krowe-ah-follow-input:disabled { color: var(--muted-foreground); }
+
+/* ── D · agent over search (pinned atop the omnibox results) ──────────── */
+.krowe-ah-interpret {
+  display: flex; align-items: center; gap: 13px; width: 100%;
+  margin-bottom: 8px; padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--primary-soft);
+  box-shadow: inset 2px 0 0 var(--primary);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-interpret:hover { background: color-mix(in srgb, var(--primary) 18%, white); }
+.krowe-ah-interpret-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.krowe-ah-interpret-t {
+  font-size: 13.5px; font-weight: 600; color: var(--foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-ah-interpret-d { font-size: 12.5px; line-height: 1.35; color: var(--muted-foreground); }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The ember's breathe is an inline style (components/design-atoms.tsx), so
+     stopping it here needs the override. */
+  .krowe-ah-ember svg { animation: none !important; }
+  .krowe-ah-sic[data-state="now"] svg { animation: none; }
+}
+
+/* ── Task board widget (agent list_tasks result) — krowe-ah-tw* ─────────────
+   The read-only, status-grouped board the agent renders in place of a flat
+   markdown task list. Reuses the card token language (krowe-prio-dot,
+   TaskTypeBadge) at slim sizes; every row links to the real /b/tasks page. */
+.krowe-ah-tw {
+  display: flex; flex-direction: column; gap: 14px;
+  margin-top: 2px; padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+.krowe-ah-tw-title {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--faint-foreground);
+}
+.krowe-ah-tw-grp { display: flex; flex-direction: column; gap: 6px; }
+.krowe-ah-tw-ghead { display: flex; align-items: center; gap: 8px; padding: 0 4px; }
+.krowe-ah-tw-gdot {
+  width: 7px; height: 7px; flex-shrink: 0;
+  border-radius: var(--radius-full); background: var(--faint-foreground);
+}
+.krowe-ah-tw-ghead[data-status="in_progress"] .krowe-ah-tw-gdot { background: var(--primary); }
+.krowe-ah-tw-ghead[data-status="todo"] .krowe-ah-tw-gdot { background: var(--primary-accent); }
+.krowe-ah-tw-ghead[data-status="backlog"] .krowe-ah-tw-gdot { background: var(--faint-foreground); }
+.krowe-ah-tw-ghead[data-status="done"] .krowe-ah-tw-gdot { background: var(--success); }
+.krowe-ah-tw-glbl { font-size: 12px; font-weight: 600; color: var(--foreground); }
+.krowe-ah-tw-gcount {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 6px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  color: var(--faint-foreground);
+  background: var(--surface-sunken); border-radius: var(--radius-full);
+}
+.krowe-ah-tw-rows { display: flex; flex-direction: column; gap: 4px; }
+.krowe-ah-tw-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px; text-decoration: none;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  animation: krowe-ah-tw-in var(--duration-normal) var(--ease-out-smooth) both;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-tw-row:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  box-shadow: var(--shadow-1);
+  transform: translateY(-1px);
+}
+.krowe-ah-tw-row:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+.krowe-ah-tw-rt {
+  flex: 1; min-width: 0;
+  font-size: 13.5px; font-weight: 500; color: var(--foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-ah-tw-ms {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  max-width: 140px; padding: 2px 8px;
+  font-size: 10.5px; font-weight: 500; color: var(--muted-foreground);
+  background: var(--surface-sunken); border-radius: var(--radius-full);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-ah-tw-ms svg { flex-shrink: 0; color: var(--faint-foreground); }
+
+@keyframes krowe-ah-tw-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-ah-tw-row { animation: none; }
+  .krowe-ah-tw-row:hover { transform: none; }
+}
+
+/* ── PRD run widget (durable PRD generation) — krowe-ah-prd* ────────────────
+   The assembling (or finished) PRD inside a bordered, scrollable card. The doc
+   itself is the read-only <PrdDocument> (prd-document.css); this only frames it
+   and offers the "Open PRD" link. */
+.krowe-ah-prd {
+  display: flex; flex-direction: column;
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+  overflow: hidden;
+}
+.krowe-ah-prd-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.krowe-ah-prd-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+  color: var(--primary);
+  background: var(--surface-sunken); border-radius: var(--radius-full);
+}
+.krowe-ah-prd-title {
+  flex: 1; min-width: 0;
+  font-size: 13px; font-weight: 600; color: var(--foreground);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.krowe-ah-prd-meta {
+  flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  color: var(--faint-foreground);
+}
+.krowe-ah-prd-doc {
+  max-height: 340px; overflow: auto;
+  padding: 12px; background: var(--background);
+}
+.krowe-ah-prd-open {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  margin: 10px 12px; padding: 7px 14px;
+  font-size: 12.5px; font-weight: 600; text-decoration: none;
+  color: var(--primary);
+  border: 1px solid var(--border); border-radius: var(--radius-full);
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-ah-prd-open:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  box-shadow: var(--shadow-1);
+  transform: translateY(-1px);
+}
+.krowe-ah-prd-open:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-ah-prd-open:hover { transform: none; }
 }
 
 .krowe-topbar-right { display: flex; align-items: center; gap: 4px; font-size: 13px; }
@@ -3283,6 +4626,13 @@ button.krowe-desc-inline-text:hover {
 
 .docov { max-width: 660px; margin: 0 auto; padding: 40px 32px 96px; }
 
+/* Bare scope: reuse the .docov row/chip/add-button/empty styles inside another
+   container (e.g. the client-context panel embedded in an engagement section)
+   without the page-level box — so it sits flush-left and full-width like its
+   sibling sections, not as a centered 660px column. Higher specificity than the
+   @media .docov rule below, so the reset holds at every breakpoint. */
+.docov.docov-bare { max-width: none; margin: 0; padding: 0; width: 100%; }
+
 /* breadcrumb */
 .docov .crumb {
   display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
@@ -5387,3 +6737,5 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-set-empty-title { font-size: 13.5px; font-weight: 600; color: var(--foreground); }
 .krowe-set-empty-body { font-size: 12.5px; color: var(--muted-foreground); line-height: 1.5; max-width: 360px; }
+
+

@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
+import { syncTaskContext } from "@/lib/context/sync-entity";
 import {
   generateBuildPrompt,
   type BuildPromptResult,
@@ -113,6 +114,9 @@ export async function generateBuildPromptAction(
     if (upsertError) {
       console.error("[generateBuildPromptAction] upsert failed:", upsertError.message);
       // Non-fatal — still return the generated result so the user can copy it.
+    } else {
+      // Mirror the refreshed build prompt into the task's context item.
+      await syncTaskContext(parsed.data.taskId);
     }
 
     return {

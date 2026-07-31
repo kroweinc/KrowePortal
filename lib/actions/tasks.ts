@@ -9,6 +9,7 @@ import { z } from "zod";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { classifyAndSaveTask } from "@/lib/actions/classify-task";
 import { writeAuditEntry, writeAuditEntries, type AuditEntryInput } from "@/lib/actions/audit-log";
+import { syncTaskContext, removeEntityContext } from "@/lib/context/sync-entity";
 import { isTaskMember } from "@/lib/actions/task-access";
 import { getMyEngagements } from "@/lib/actions/invitations";
 import { getEngagementRepoById } from "@/lib/github/engagement-repo";
@@ -152,8 +153,11 @@ export async function createTask(formData: FormData) {
   );
   // Type/tags are classified inline during AI draft generation and inserted above,
   // so a drafted task is already classified. Only manual entries (no type supplied)
-  // need the deferred classifier pass.
-  if (!parsed.data.type) {
+  // need classification. The new-task form drives it itself (client_classify) via
+  // classifyCreatedTask so the tag reaches the open board; other callers (agent
+  // tool, onboarding, imports) fall back to the deferred after() pass here.
+  const clientWillClassify = formData.get("client_classify") === "true";
+  if (!parsed.data.type && !clientWillClassify) {
     after(() =>
       classifyAndSaveTask({
         taskId,
@@ -164,8 +168,49 @@ export async function createTask(formData: FormData) {
     );
   }
 
+  await syncTaskContext(data.id as string);
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true, taskId };
+}
+
+/**
+ * Client-driven classifier for a freshly created manual task. The new-task form
+ * calls this in its own transition right after createTask: it runs the OpenAI
+ * classification, writes the type/tag, and revalidates — so the board repaints
+ * with the tag on its own (the same action-then-revalidate pattern the board's
+ * status/reorder moves use). This replaces the deferred after() classifier for
+ * form submissions (createTask skips it when the form sets client_classify), so
+ * the tag is delivered to the open board instead of only showing on next nav.
+ * No-op if the task is already classified (AI draft) or the caller can't see it.
+ */
+export async function classifyCreatedTask(taskId: string): Promise<{ ok: boolean }> {
+  const parsed = z.string().uuid().safeParse(taskId);
+  if (!parsed.success) return { ok: false };
+
+  const profile = await getCurrentProfile();
+  if (!profile) return { ok: false };
+
+  const supabase = await getClient(profile.id);
+  const { data: task } = await supabase
+    .from("tasks")
+    .select("title, description, type")
+    .eq("id", parsed.data)
+    .maybeSingle();
+  if (!task) return { ok: false };
+
+  // Already typed (AI draft, or a double-fired call) — just make sure the board
+  // reflects it, no second OpenAI round-trip.
+  if (!task.type) {
+    await classifyAndSaveTask({
+      taskId: parsed.data,
+      title: task.title as string,
+      description: (task.description as string | null) ?? null,
+      userId: profile.id,
+    });
+  }
+
+  revalidatePath(profile.role === "operator" ? "/o" : "/b");
+  return { ok: true };
 }
 
 const updateTaskSchema = z.object({
@@ -243,6 +288,7 @@ export async function updateTask(formData: FormData) {
     );
   }
 
+  await syncTaskContext(id);
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true };
 }
@@ -345,6 +391,7 @@ export async function markTaskDone(
     },
   });
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -630,6 +677,7 @@ export async function markTaskForApproval(
     metadata: parsed.data.note ? { note: parsed.data.note } : null,
   });
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -836,6 +884,7 @@ export async function updateTaskStatus(taskId: string, status: TaskStatus) {
     );
   }
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -1096,6 +1145,7 @@ export async function applyTaskRegeneration(
     })
   );
 
+  await syncTaskContext(taskId);
   revalidatePath("/b");
   revalidatePath("/o");
   return { success: true };
@@ -1127,6 +1177,7 @@ export async function deleteTask(taskId: string) {
     await createAdminClient().storage.from("task-attachments").remove(paths);
   }
 
+  await removeEntityContext("task", taskId);
   revalidatePath("/o");
   revalidatePath("/b");
   return { success: true };

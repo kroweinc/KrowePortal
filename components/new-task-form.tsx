@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { createTask } from "@/lib/actions/tasks";
+import { createTask, classifyCreatedTask } from "@/lib/actions/tasks";
 import { uploadAttachment } from "@/lib/actions/attachments";
 import { generateTaskDraft } from "@/lib/actions/ai-tasks";
 import type { TaskDraft } from "@/lib/ai/schemas";
@@ -382,11 +382,15 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
       fd.set("title", title.trim());
       if (description.trim()) fd.set("description", description.trim());
       fd.set("priority", priority);
-      // Carry the AI draft's classification so it persists on insert. Absent on
-      // manual entry, where createTask classifies after creation instead.
+      // Carry the AI draft's classification so it persists on insert. On manual
+      // entry there's none, so signal that this form will classify the new task
+      // itself (classifyCreatedTask below) — createTask then skips its deferred
+      // classifier, and the tag reaches the open board instead of only on nav.
       if (aiType) {
         fd.set("type", aiType);
         fd.set("tags", JSON.stringify(aiTags));
+      } else {
+        fd.set("client_classify", "true");
       }
       // Idempotency: same key across a retry / double-fire of this open form.
       requestIdRef.current ??= crypto.randomUUID();
@@ -408,8 +412,24 @@ export function NewTaskForm({ engagementId, engagements = [], placeholder, onSuc
         await uploadAllAttachments(result.taskId);
       }
 
+      // An AI draft is already tagged on insert; only manual entries need to be
+      // classified. Capture before handleClose() resets aiType.
+      const createdId = result?.taskId;
+      const wasManual = !aiType;
+
       handleClose();
       onSuccess?.();
+
+      // Classify the new task in its own transition: classifyCreatedTask writes
+      // the type/tag and revalidates, and the board repaints from that revalidate
+      // — the same action-then-revalidate refresh the board's status moves use.
+      // So the type badge + tag land on the open board on their own (~instant
+      // warm) instead of only when the card is next opened or navigated to.
+      if (createdId && wasManual) {
+        startTransition(async () => {
+          await classifyCreatedTask(createdId);
+        });
+      }
     });
   }
 

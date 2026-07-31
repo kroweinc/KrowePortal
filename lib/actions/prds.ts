@@ -14,6 +14,8 @@ import { assertAiBudget } from "@/lib/ai/usage";
 import { getCurrentProfile } from "@/lib/auth";
 import { refinePrdSection as runRefineSection } from "@/lib/ai/refine-prd-section";
 import { connectProjectToClientOnSend } from "@/lib/actions/connect-project";
+import { syncDocumentContext, removeDocumentContext } from "@/lib/context/sync-document";
+import { recordDocumentEvent } from "@/lib/context/document-events";
 import { fieldsForSection, refinableSection } from "@/lib/prd/section-fields";
 import type { Question } from "@/lib/ai/schemas";
 import { PrdContentSchema } from "@/lib/ai/schemas";
@@ -143,6 +145,15 @@ export async function regeneratePrd(
     .eq("id", id);
   if (error) return { error: error.message };
 
+  await syncDocumentContext({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content,
+    builderId: profile.id,
+  });
+
   revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true, content };
 }
@@ -250,7 +261,7 @@ export async function updatePrdContent(
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("prds")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -264,6 +275,15 @@ export async function updatePrdContent(
   const { error } = await supabase.from("prds").update(patch).eq("id", id);
   if (error) return { error: error.message };
 
+  await syncDocumentContext({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    title: parsed.data.title ?? (before.title as string),
+    content: (parsed.data.content ?? before.content) as PrdContent,
+    builderId: profile.id,
+  });
+
   revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true };
 }
@@ -276,7 +296,7 @@ export async function sendPrd(id: string): Promise<{ success: true } | { error: 
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("prds")
-    .select("status, created_by, project_id, token")
+    .select("status, created_by, project_id, token, title, content")
     .eq("id", id)
     .single();
 
@@ -295,6 +315,26 @@ export async function sendPrd(id: string): Promise<{ success: true } | { error: 
   // that client is (see connectProjectToClientOnSend).
   await connectProjectToClientOnSend(before.project_id as string, profile.id);
 
+  // Sending is when an orphan project often first gains an engagement, so this
+  // is frequently the first chance to mirror the PRD into the context layer.
+  await syncDocumentContext({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    title: before.title as string,
+    content: before.content as PrdContent,
+    builderId: profile.id,
+  });
+
+  await recordDocumentEvent({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "sent",
+    actorId: profile.id,
+    actorRole: "builder",
+  });
+
   revalidatePrd(before.project_id as string, id, before.token as string | null);
   return { success: true };
 }
@@ -307,16 +347,35 @@ export async function deletePrd(id: string): Promise<{ success: true } | { error
   const supabase = await getClient(profile.id);
   const { data: before } = await supabase
     .from("prds")
-    .select("status, created_by, project_id")
+    .select("status, created_by, project_id, title")
     .eq("id", id)
     .single();
 
   if (!before) return { error: "PRD not found." };
   if (before.created_by !== profile.id) return { error: "Not your PRD." };
-  if (before.status !== "draft") return { error: "Only drafts can be deleted." };
+  // PRDs can be deleted at any stage (draft or already sent) — unlike quotes /
+  // contracts, a sent PRD isn't a binding agreement, so the builder may remove
+  // it. Cleanup below (context + quotes.source_prd_id → null) covers a sent doc.
+
+  // A sent PRD was visible in the operator's portal — flag the delete so we can
+  // surface an "unsent" notice to them. A deleted draft never reached them, so
+  // wasSent stays false and no operator notice is shown.
+  const wasSent = before.status !== "draft";
 
   const { error } = await supabase.from("prds").delete().eq("id", id);
   if (error) return { error: error.message };
+
+  await recordDocumentEvent({
+    docKind: "prd",
+    docId: id,
+    projectId: before.project_id as string,
+    eventType: "deleted",
+    actorId: profile.id,
+    actorRole: "builder",
+    payload: { wasSent, title: before.title as string },
+  });
+
+  await removeDocumentContext("prd", id, before.project_id as string);
 
   revalidatePath(`/b/projects/${before.project_id as string}`);
   return { success: true };

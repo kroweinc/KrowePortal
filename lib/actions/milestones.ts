@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
+import { syncMilestoneContext } from "@/lib/context/sync-entity";
 import type { Milestone, Task, MilestoneStatus } from "@/lib/types";
 
 async function getClient(profileId: string) {
@@ -98,6 +99,7 @@ export async function recomputeMilestoneStatus(
       .from("milestones")
       .update({ status, updated_at: new Date().toISOString() })
       .eq("id", id);
+    await syncMilestoneContext(id);
     revalidatePath("/o/project");
   }
   return { success: true };

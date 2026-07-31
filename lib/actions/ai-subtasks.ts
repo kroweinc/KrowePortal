@@ -8,6 +8,7 @@ import { friendlyAiError } from "@/lib/ai/client";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import { recomputeTaskEstimate } from "@/lib/actions/recompute-task-estimate";
+import { syncTaskContext } from "@/lib/context/sync-entity";
 import { isTaskMember } from "@/lib/actions/task-access";
 import type { Subtask } from "@/lib/types";
 
@@ -95,6 +96,7 @@ export async function generateSubtasksForTask(
   if (error) return { inserted: [], error: error.message };
 
   await recomputeTaskEstimate(taskId);
+  await syncTaskContext(taskId);
 
   return { inserted: (data ?? []) as Subtask[] };
 }
