@@ -16,10 +16,13 @@ interface UsageTokens {
 // 0 / unset = no cap. Rolling 24h window of total_tokens per user.
 const DAILY_TOKEN_CAP = Number(process.env.AI_DAILY_TOKEN_CAP ?? 0);
 
-// Per-user burst limit — independent of the daily spend cap. Stops a runaway
-// loop or scripted abuse from racking up generations (and token spend) before
-// the coarse daily cap notices. Defaults on; tune via AI_BURST_PER_MIN.
-const AI_BURST_PER_MIN = Number(process.env.AI_BURST_PER_MIN ?? 10);
+// Per-user burst limit — independent of the daily spend cap. Guards against a
+// runaway loop or scripted abuse racking up generations (and token spend)
+// before the coarse daily cap notices. 0 / unset = no cap (parity with
+// AI_DAILY_TOKEN_CAP): a single builder shares one bucket across every AI op
+// (agent, PRD, context search, embeddings…), so a low cap trips in normal use.
+// Opt in by setting AI_BURST_PER_MIN to a positive value.
+const AI_BURST_PER_MIN = Number(process.env.AI_BURST_PER_MIN ?? 0);
 
 /**
  * Append a row to the ai_usage ledger. Fire-and-forget: usage accounting must

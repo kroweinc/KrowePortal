@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Send, Sparkles, Check, Link2, Trash2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updateQuoteContent, sendQuote, deleteQuote } from "@/lib/actions/quote-docs";
+import { useAgentDocEdit } from "@/lib/agent/doc-events";
 import type { Quote, QuoteContent } from "@/lib/types";
 import { recomputeTotals, applyMilestonePercents } from "@/lib/quote/totals";
 import { QuoteDocument } from "@/components/quote/quote-document";
@@ -130,6 +131,21 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, saveState]);
 
+  // Live agent edits: reflect the agent's confirmed change to THIS quote in real
+  // time. Normalize incoming content through the same totals recompute used for
+  // initialContent (the server recomputes on persist too), rebaseline autosave to
+  // it — reads "Saved", never re-writes — and pulse the document.
+  const [livePulse, setLivePulse] = useState(false);
+  useAgentDocEdit({ kind: "quote", id: quote.id }, (incoming, incomingTitle) => {
+    const next = applyMilestonePercents(recomputeTotals(incoming as QuoteContent));
+    setContent(next);
+    setTitle(incomingTitle);
+    lastSavedRef.current = serializeQuote(incomingTitle, next);
+    setSaveState("saved");
+    setLivePulse(true);
+    toast.success("Krowe updated this quote");
+  });
+
   function saveNow() {
     startTransition(async () => {
       const result = await writeQuote();
@@ -232,7 +248,12 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
 
   return (
     <>
-      <div className="prd-dashboard">
+      <div
+        className={`prd-dashboard${livePulse ? " krowe-doc-live" : ""}`}
+        onAnimationEnd={(e) => {
+          if (e.currentTarget === e.target) setLivePulse(false);
+        }}
+      >
         <div className="dash">
           <a
             href={backHref}

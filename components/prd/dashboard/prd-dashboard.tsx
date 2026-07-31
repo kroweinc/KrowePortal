@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { Send, Sparkles, Check, Link2, Receipt, Trash2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updatePrdContent, sendPrd, deletePrd } from "@/lib/actions/prds";
+import { useAgentDocEdit } from "@/lib/agent/doc-events";
 import type { Prd, PrdContent } from "@/lib/types";
 import { PrdDocument } from "@/components/prd/prd-document";
 import { PrdDownloadButton } from "@/components/prd/prd-download-button";
@@ -131,6 +132,21 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
     return () => window.removeEventListener("beforeunload", handler);
   }, [dirty, saveState]);
 
+  // Live agent edits: when the agent's confirmed change to THIS PRD lands, reflect
+  // it here in real time. The server already holds this exact content (the write
+  // tool just persisted it), so rebaseline autosave to it — reads "Saved", never
+  // re-writes an identical body — and pulse the document so the change is visible.
+  const [livePulse, setLivePulse] = useState(false);
+  useAgentDocEdit({ kind: "prd", id: prd.id }, (incoming, incomingTitle) => {
+    const next = incoming as PrdContent;
+    setContent(next);
+    setTitle(incomingTitle);
+    lastSavedRef.current = serializePrd(incomingTitle, next);
+    setSaveState("saved");
+    setLivePulse(true);
+    toast.success("Krowe updated this PRD");
+  });
+
   /** Explicit "save now" — flush immediately and surface the outcome. */
   function saveNow() {
     startTransition(async () => {
@@ -234,7 +250,12 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
 
   return (
     <>
-    <div className="prd-dashboard">
+    <div
+      className={`prd-dashboard${livePulse ? " krowe-doc-live" : ""}`}
+      onAnimationEnd={(e) => {
+        if (e.currentTarget === e.target) setLivePulse(false);
+      }}
+    >
       <div className="dash">
         <a
           href={backHref}
@@ -338,6 +359,7 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
         <EditContext.Provider value={{ editing }}>
           <div className="dash-grid">
             <PrdRail
+              prdId={prd.id}
               content={content}
               patch={patch}
               onRefine={(sectionId) => setRefine({ open: true, sectionId })}

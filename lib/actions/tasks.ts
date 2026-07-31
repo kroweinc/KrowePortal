@@ -153,8 +153,11 @@ export async function createTask(formData: FormData) {
   );
   // Type/tags are classified inline during AI draft generation and inserted above,
   // so a drafted task is already classified. Only manual entries (no type supplied)
-  // need the deferred classifier pass.
-  if (!parsed.data.type) {
+  // need classification. The new-task form drives it itself (client_classify) via
+  // classifyCreatedTask so the tag reaches the open board; other callers (agent
+  // tool, onboarding, imports) fall back to the deferred after() pass here.
+  const clientWillClassify = formData.get("client_classify") === "true";
+  if (!parsed.data.type && !clientWillClassify) {
     after(() =>
       classifyAndSaveTask({
         taskId,
@@ -168,6 +171,46 @@ export async function createTask(formData: FormData) {
   await syncTaskContext(data.id as string);
   revalidatePath(profile.role === "operator" ? "/o" : "/b");
   return { success: true, taskId };
+}
+
+/**
+ * Client-driven classifier for a freshly created manual task. The new-task form
+ * calls this in its own transition right after createTask: it runs the OpenAI
+ * classification, writes the type/tag, and revalidates — so the board repaints
+ * with the tag on its own (the same action-then-revalidate pattern the board's
+ * status/reorder moves use). This replaces the deferred after() classifier for
+ * form submissions (createTask skips it when the form sets client_classify), so
+ * the tag is delivered to the open board instead of only showing on next nav.
+ * No-op if the task is already classified (AI draft) or the caller can't see it.
+ */
+export async function classifyCreatedTask(taskId: string): Promise<{ ok: boolean }> {
+  const parsed = z.string().uuid().safeParse(taskId);
+  if (!parsed.success) return { ok: false };
+
+  const profile = await getCurrentProfile();
+  if (!profile) return { ok: false };
+
+  const supabase = await getClient(profile.id);
+  const { data: task } = await supabase
+    .from("tasks")
+    .select("title, description, type")
+    .eq("id", parsed.data)
+    .maybeSingle();
+  if (!task) return { ok: false };
+
+  // Already typed (AI draft, or a double-fired call) — just make sure the board
+  // reflects it, no second OpenAI round-trip.
+  if (!task.type) {
+    await classifyAndSaveTask({
+      taskId: parsed.data,
+      title: task.title as string,
+      description: (task.description as string | null) ?? null,
+      userId: profile.id,
+    });
+  }
+
+  revalidatePath(profile.role === "operator" ? "/o" : "/b");
+  return { ok: true };
 }
 
 const updateTaskSchema = z.object({

@@ -12,6 +12,7 @@ import {
 } from "@/lib/actions/subtasks";
 import { generateSubtasksForTask } from "@/lib/actions/ai-subtasks";
 import { usePlainEnglish } from "@/components/plain-english-context";
+import { ProgressRing } from "@/components/ui/progress-ring";
 import type { Subtask, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatEstimate } from "@/lib/format-estimate";
@@ -239,7 +240,11 @@ export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) 
     <>
       <div className="krowe-subs-h">
         <div className="krowe-subs-progress">
-          <ProgressRing done={done} total={subtasks.length} />
+          <ProgressRing value={subtasks.length === 0 ? 0 : done / subtasks.length}>
+            <div className="pct">
+              {Math.round((subtasks.length === 0 ? 0 : done / subtasks.length) * 100)}
+            </div>
+          </ProgressRing>
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.09em] text-neutral-500">
               <ListTodo className="h-3 w-3" />
@@ -389,47 +394,6 @@ export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) 
         )}
       </ul>
     </>
-  );
-}
-
-function ProgressRing({
-  done,
-  total,
-  size = 32,
-}: {
-  done: number;
-  total: number;
-  size?: number;
-}) {
-  const r = size / 2 - 3;
-  const C = 2 * Math.PI * r;
-  const pct = total === 0 ? 0 : done / total;
-  const offset = C * (1 - pct);
-  return (
-    <div className="krowe-progress-ring" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
-        <circle
-          className="track"
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          strokeWidth={3}
-        />
-        <circle
-          className="fill"
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          strokeWidth={3}
-          strokeLinecap="round"
-          strokeDasharray={C}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div className="pct">{Math.round(pct * 100)}</div>
-    </div>
   );
 }
 

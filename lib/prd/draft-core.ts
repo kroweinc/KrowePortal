@@ -20,15 +20,10 @@ import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
 import { syncDocumentContext } from "@/lib/context/sync-document";
 import { recordDocumentEvent } from "@/lib/context/document-events";
 import type { PrdGenInput } from "@/lib/ai/generate-prd";
-import { SCOPE_STAGE_COUNT, deepStageIndex } from "@/lib/prd/scope-stages";
+import { deepStageIndex } from "@/lib/prd/scope-stages";
+import { MAX_PRD_ROUNDS, MAX_PRD_ROUNDS_DEEP } from "@/lib/prd/rounds";
 import type { Question } from "@/lib/ai/schemas";
 import type { PrdContent } from "@/lib/types";
-
-/** Hard cap on adaptive question rounds before a PRD is forced. */
-const MAX_PRD_ROUNDS = 5;
-/** No-notes "deep context" path: the opener round (round 0) plus one round per
-    fixed scope stage, then force the PRD. */
-const MAX_PRD_ROUNDS_DEEP = SCOPE_STAGE_COUNT + 1;
 
 export async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
@@ -201,7 +196,12 @@ export async function resolvePrdDraft(input: DraftPrdInput): Promise<PrdDraftRes
 export async function persistPrdDraft(
   save: PrdSaveContext,
   content: PrdContent,
-  contextSummary?: string
+  contextSummary?: string,
+  // Durable PRD runs persist inside `after()` — the request has closed and cookies
+  // are gone — so they force the admin client (ownership was already authorized in
+  // request scope by resolvePrdDraft). The inline paths leave this off and keep the
+  // RLS-bound client.
+  opts?: { admin?: boolean }
 ): Promise<{ prdId: string } | { error: string }> {
   const { profile, project, projectId, title, notes, answers, deepContext } = save;
 
@@ -225,7 +225,7 @@ export async function persistPrdDraft(
   // section shows "No free-tier analysis yet." until the page-load compute fills it
   // in; every consumer degrades gracefully when freeTierAnalysis is absent. The
   // regenerate action (lib/actions/prds.ts) still runs it inline, on purpose.
-  const supabase = await getClient(profile.id);
+  const supabase = opts?.admin ? createAdminClient() : await getClient(profile.id);
   const { data, error } = await supabase
     .from("prds")
     .insert({
@@ -278,6 +278,12 @@ export async function persistPrdDraft(
     }
   }
 
-  revalidatePath(`/b/projects/${projectId}`);
+  // Best-effort — never let a cache-revalidation hiccup (e.g. from a durable run's
+  // `after()` context, where the request has closed) fail an already-saved PRD.
+  try {
+    revalidatePath(`/b/projects/${projectId}`);
+  } catch {
+    // ignore — the project page reads fresh on next navigation anyway
+  }
   return { prdId };
 }

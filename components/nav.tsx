@@ -1,6 +1,7 @@
 import { Bell } from "lucide-react";
 import { DEV_TOGGLE_ENABLED } from "@/lib/auth";
 import { GlobalSearch } from "@/components/global-search";
+import { AgentRunDock } from "@/components/agent/agent-run-dock";
 import { TourHelpButton } from "@/components/tour/tour-help-button";
 import type { Profile } from "@/lib/types";
 
@@ -22,7 +23,13 @@ export function Nav({ profile }: NavProps) {
 
   return (
     <header className="krowe-topbar">
-      <GlobalSearch role={role} />
+      {/* Search leads; the running-agent rings sit right beside it. Builder-only
+          — operators have no agent, and their <Nav> is rendered outside the
+          AgentRunsProvider the dock's hooks require. */}
+      <div className="krowe-topbar-left">
+        <GlobalSearch role={role} />
+        {role === "builder" && <AgentRunDock variant="inline" />}
+      </div>
 
       <div className="krowe-topbar-right">
         {/* Dev role switcher — sits immediately left of the help (?) icon. */}

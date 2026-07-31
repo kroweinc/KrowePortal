@@ -12,7 +12,7 @@ import {
 } from "@/lib/context/lifecycle-analytics";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
 import type { RepoContext } from "@/lib/github/types";
-import type { ContextItem, TaskStatus } from "@/lib/types";
+import type { ContextItem, Profile, TaskPriority, TaskStatus } from "@/lib/types";
 
 // ============================================================
 // The Client Context Layer's LLM/agent-ready interface. Every future feature
@@ -44,6 +44,7 @@ export interface BundleTask {
   id: string;
   title: string;
   status: TaskStatus;
+  priority: TaskPriority | null;
   description: string | null;
   milestoneTitle: string | null;
 }
@@ -78,6 +79,7 @@ type TaskRow = {
   id: string;
   title: string;
   status: TaskStatus;
+  priority: TaskPriority | null;
   description: string | null;
   milestone: { title: string | null } | { title: string | null }[] | null;
 };
@@ -100,26 +102,53 @@ function milestoneTitle(milestone: TaskRow["milestone"]): string | null {
  */
 export async function buildClientContext(
   engagementId: string,
-  opts?: { query?: string; k?: number; includeFullText?: boolean; includeActivity?: boolean }
+  opts?: { query?: string; k?: number; includeFullText?: boolean; includeActivity?: boolean },
+  auth?: { profile: Profile }
 ): Promise<ClientContextBundle> {
-  const profile = await getCurrentProfile();
+  // The caller may pre-authorize (the agent route already gated the turn) to skip
+  // a redundant round trip. Ownership is still enforced below: the engagement
+  // select is scoped to builder_id, so a mismatched profile can't read a client.
+  const profile = auth?.profile ?? (await getCurrentProfile());
   if (!profile) throw new Error("Unauthorized");
   if (profile.role !== "builder") throw new Error("Builder only.");
-  if (!(await assertEngagementBuilder(engagementId, profile.id))) {
+  if (!auth && !(await assertEngagementBuilder(engagementId, profile.id))) {
     throw new Error("Not your client.");
   }
 
   const admin = createAdminClient();
+  const mode: "full" | "query" = opts?.query?.trim() ? "query" : "full";
 
-  // Engagement + business identity (same project join the detail page uses).
-  const { data: eng } = await admin
-    .from("engagements")
-    .select(
-      "id, title, started_at, github_repo_full_name, project:projects(name, prospect_name, website_url)"
-    )
-    .eq("id", engagementId)
-    .eq("builder_id", profile.id)
-    .maybeSingle();
+  // Fan out every independent read at once. These previously ran as ~6 sequential
+  // round trips (engagement → items → search → tasks → repo → timeline); the
+  // retrieval embed + hybrid RPC is the long pole, so tasks/repo/timeline/items
+  // now overlap under it instead of adding to it. Grounding wall-clock — the
+  // dominant slice of the agent's time-to-first-token — drops toward the slowest
+  // single read. `profile` is threaded into the search so it doesn't re-auth or
+  // re-check the AI budget the route already cleared.
+  const [engRes, rawItems, taskRes, repo, timeline, search] = await Promise.all([
+    admin
+      .from("engagements")
+      .select(
+        "id, title, started_at, github_repo_full_name, project:projects(name, prospect_name, website_url)"
+      )
+      .eq("id", engagementId)
+      .eq("builder_id", profile.id)
+      .maybeSingle(),
+    getContextItems(engagementId),
+    admin
+      .from("tasks")
+      .select("id, title, status, priority, description, milestone:milestones(title)")
+      .eq("engagement_id", engagementId)
+      .order("created_at", { ascending: true }),
+    resolveRepoForGeneration({ profileId: profile.id, engagementId }),
+    opts?.includeActivity !== false ? getEngagementTimeline(engagementId) : Promise.resolve(null),
+    mode === "query"
+      ? // k omitted → searchClientContext picks an adaptive top-k scaled to corpus size.
+        searchClientContext(engagementId, opts!.query!, opts?.k, { profile })
+      : Promise.resolve(null),
+  ]);
+
+  const eng = engRes.data;
   if (!eng) throw new Error("Engagement not found.");
 
   const project = Array.isArray(eng.project) ? eng.project[0] : eng.project;
@@ -131,8 +160,6 @@ export async function buildClientContext(
     websiteUrl: (project?.website_url as string | null) ?? null,
   };
 
-  // Context items (builder-only via getContextItems' own authorization).
-  const rawItems = await getContextItems(engagementId);
   const items: ContextItemSummary[] = rawItems.map((it) => ({
     id: it.id,
     kind: it.kind,
@@ -143,15 +170,12 @@ export async function buildClientContext(
     createdAt: it.created_at,
   }));
 
-  // Mode branch.
-  const mode: "full" | "query" = opts?.query?.trim() ? "query" : "full";
+  // Mode branch — shape the fanned-out search / full-text into the bundle.
   let snippets: ContextSnippet[] | undefined;
   let itemTexts: ClientContextBundle["itemTexts"];
 
   if (mode === "query") {
-    // k omitted → searchClientContext picks an adaptive top-k scaled to corpus size.
-    const { hits } = await searchClientContext(engagementId, opts!.query!, opts?.k);
-    snippets = (hits ?? []).map((h) => ({
+    snippets = (search?.hits ?? []).map((h) => ({
       itemId: h.contextItemId,
       itemTitle: h.item.title,
       itemKind: h.item.kind,
@@ -171,19 +195,14 @@ export async function buildClientContext(
   }
 
   // Tasks (+ milestone grouping), split open/done like the detail page's counter.
-  const { data: taskData } = await admin
-    .from("tasks")
-    .select("id, title, status, description, milestone:milestones(title)")
-    .eq("engagement_id", engagementId)
-    .order("created_at", { ascending: true });
-
   const open: BundleTask[] = [];
   const done: BundleTask[] = [];
-  for (const row of (taskData ?? []) as TaskRow[]) {
+  for (const row of (taskRes.data ?? []) as TaskRow[]) {
     const task: BundleTask = {
       id: row.id,
       title: row.title,
       status: row.status,
+      priority: row.priority,
       description: row.description,
       milestoneTitle: milestoneTitle(row.milestone),
     };
@@ -191,16 +210,13 @@ export async function buildClientContext(
     else open.push(task);
   }
 
-  // Linked GitHub repo context (LLM-ready already).
-  const { repoContext } = await resolveRepoForGeneration({ profileId: profile.id, engagementId });
+  const repoContext = repo.repoContext;
 
   // Interaction timeline + timing analytics (on by default; skip for the leanest
   // query-mode agent calls via opts.includeActivity === false).
-  let activity: ClientContextBundle["activity"];
-  if (opts?.includeActivity !== false) {
-    const timeline = await getEngagementTimeline(engagementId);
-    activity = { lifecycles: timeline.lifecycles, analytics: timeline.analytics };
-  }
+  const activity: ClientContextBundle["activity"] = timeline
+    ? { lifecycles: timeline.lifecycles, analytics: timeline.analytics }
+    : undefined;
 
   return {
     engagement,
@@ -263,7 +279,7 @@ export function serializeForPrompt(bundle: ClientContextBundle): string {
   if (tasks.open.length || tasks.done.length) {
     for (const t of [...tasks.open, ...tasks.done]) {
       const ms = t.milestoneTitle ? ` — milestone: ${t.milestoneTitle}` : "";
-      lines.push(`- [${t.status}] ${t.title}${ms}`);
+      lines.push(`- [${t.status}] (${t.priority ?? "medium"} priority) ${t.title}${ms}`);
     }
   } else {
     lines.push("(none)");

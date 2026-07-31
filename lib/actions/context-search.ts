@@ -5,7 +5,7 @@ import { getClient, assertEngagementBuilder } from "@/lib/context/access";
 import { embedQuery } from "@/lib/ai/embeddings";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { friendlyAiError } from "@/lib/ai/client";
-import type { ContextItemKind } from "@/lib/types";
+import type { ContextItemKind, Profile } from "@/lib/types";
 
 export interface ContextSearchHit {
   chunkId: string;
@@ -78,18 +78,26 @@ function rerankScore(row: HybridMatchRow): number {
 export async function searchClientContext(
   engagementId: string,
   query: string,
-  k?: number
+  k?: number,
+  auth?: { profile: Profile }
 ): Promise<{ hits?: ContextSearchHit[]; error?: string }> {
-  const profile = await getCurrentProfile();
+  // A server-side caller (buildClientContext on the agent turn) can pre-authorize
+  // to skip the re-auth + AI-budget round trips it already cleared upstream —
+  // which also avoids double-counting the per-minute burst bucket for one turn.
+  const profile = auth?.profile ?? (await getCurrentProfile());
   if (!profile) return { error: "Unauthorized" };
   if (profile.role !== "builder") return { error: "Builder only." };
-  if (!(await assertEngagementBuilder(engagementId, profile.id))) return { error: "Not your client." };
+  if (!auth && !(await assertEngagementBuilder(engagementId, profile.id))) {
+    return { error: "Not your client." };
+  }
 
   const q = query.trim();
   if (!q) return { hits: [] };
 
-  const budget = await assertAiBudget(profile.id);
-  if (!budget.ok) return { error: budget.error };
+  if (!auth) {
+    const budget = await assertAiBudget(profile.id);
+    if (!budget.ok) return { error: budget.error };
+  }
 
   let embedding: number[];
   try {
