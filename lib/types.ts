@@ -179,6 +179,13 @@ export interface Task {
   // joined so the read-only pill can render without the groups list.
   staging_group_id: string | null;
   staging_group?: { name: string } | null;
+  // The push this task went live in (migration 0084). Nullable and NOT
+  // redundant with shipped_at: the backfill can date a task from the audit log
+  // without being able to group it, so shipped_at set + release_id null is a
+  // legal state that the timeline renders as a per-day group.
+  release_id: string | null;
+  shipped_at: string | null;
+  release?: Release | null;
   engagement?: Engagement;
   // The person who submitted the task, joined on created_by. Surfaced in place of
   // the old operator/builder source badge. Absent unless the query selects it.
@@ -203,6 +210,42 @@ export interface StagingGroup {
   engagement_id: string;
   name: string;
   sort_order: number;
+  created_at: string;
+}
+
+// How a release came to exist (migration 0084).
+//   auto     — a merge into main detected by pollMainMerges; carries merge_sha.
+//              branch_name is the branch that carried the push (a label only —
+//              membership is "everything that was waiting", not the branch).
+//   manual   — the builder asserting "this is live" (bulk button / done dialog).
+//   combined — a builder-named umbrella over >= 2 other releases. Its children
+//              keep their own rows and tasks, so splitting it is lossless.
+export type ReleaseKind = "auto" | "manual" | "combined";
+
+// One push to main (migration 0084) — the durable record that replaced the
+// single mutable row per branch in branch_push_marks. Scoped to one engagement
+// (null = personal); a release never spans engagements.
+export interface Release {
+  id: string;
+  engagement_id: string | null;
+  kind: ReleaseKind;
+  // Null means the UI derives a label from the branch and date.
+  title: string | null;
+  notes: string | null;
+  repo_full_name: string | null;
+  branch_name: string | null;
+  merge_sha: string | null;
+  // First line of the merge/push commit (0085) — the push's display label, and
+  // often the only thing that names it: a plain push to main leaves branch_name
+  // null. Null on manual releases and on rows predating 0085.
+  merge_subject: string | null;
+  shipped_at: string;
+  // Set on a child that has been folded into a kind="combined" parent.
+  combined_into_id: string | null;
+  // When this push was scanned for work that shipped without a task (0086).
+  // Null means "never looked", NOT "nothing found" — the scan stamps this even
+  // when it proposes nothing, which is what keeps it from re-billing.
+  gaps_scanned_at?: string | null;
   created_at: string;
 }
 

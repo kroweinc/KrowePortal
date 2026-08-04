@@ -8,7 +8,9 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/server";
 import { getCurrentProfile } from "@/lib/auth";
 import { getEngagementRepoById, type EngagementRepo } from "@/lib/github/engagement-repo";
-import { getRecentDefaultBranchCommits } from "@/lib/github/recent-commits";
+import { getRecentCommitsForBranches } from "@/lib/github/recent-commits";
+import { getMainMergeHeads } from "@/lib/github/merged-prs";
+import { pickIntegrationBranches } from "@/lib/github/merge-subject";
 import {
   matchCommitsToTasks,
   type CommitMatchCandidate,
@@ -23,14 +25,26 @@ import type { TaskType } from "@/lib/types";
 /**
  * The safeguard for work that shipped but was never marked done.
  *
- * Builders push to the default branch and leave the task sitting in In Progress.
- * On board load we scan that branch's recent commits, ask the model whether any
- * of them plainly finish an open task, and record high-confidence hits. The
- * board strikes those tasks through and asks the builder to confirm — nothing
- * here ever marks a task done on its own.
+ * Builders finish something and leave the task sitting in In Progress. On board
+ * load we scan recent commits, ask the model whether any of them plainly finish
+ * an open task, and record high-confidence hits. The board strikes those tasks
+ * through and asks the builder to confirm — nothing here ever marks a task done
+ * on its own.
+ *
+ * Scans the default branch *and* the branches recently merged into it, because
+ * under a feature → dev → main flow the work is finished on `dev` and only
+ * reaches main on the next release. Waiting for that is waiting weeks, by which
+ * point the builder has noticed themselves and the safeguard is useless. Which
+ * branch a commit was found on decides what confirming may do: only a
+ * default-branch commit is provably live, so only that one ships the task.
  */
 
 const pollSchema = z.array(z.string().uuid()).max(50);
+
+/** How many integration branches to scan beside the default one. Each costs a
+ *  cached GitHub request; the branches come from recent merges into main, so in
+ *  practice this is `dev` plus whatever hotfix branch went out last. */
+const MAX_INTEGRATION_BRANCHES = 3;
 
 type OpenTaskRow = {
   id: string;
@@ -108,7 +122,32 @@ export async function pollCommitTaskMatches(
     }));
     if (candidates.length === 0) continue;
 
-    const commits = await getRecentDefaultBranchCommits(repo);
+    // Find the integration branches two ways, because neither alone is reliable:
+    // merge commits already on the default branch name their target ("Merge
+    // branch 'X' into dev"), which works for a repo that never opens PRs, and
+    // merged-PR heads cover a repo that always does. Both read from listings we
+    // already fetch and cache.
+    const defaultCommits = await getRecentCommitsForBranches(repo, [
+      repo.defaultBranch,
+    ]);
+    const [fromMerges, fromPrs] = [
+      pickIntegrationBranches(
+        defaultCommits.map((c) => c.message),
+        repo.defaultBranch,
+        MAX_INTEGRATION_BRANCHES
+      ),
+      await getMainMergeHeads(repo, MAX_INTEGRATION_BRANCHES),
+    ];
+    const integration = [...new Set([...fromMerges, ...fromPrs])]
+      .filter((b) => b !== repo.defaultBranch)
+      .slice(0, MAX_INTEGRATION_BRANCHES);
+
+    // Default branch first so anything already on main keeps the `main` label —
+    // getRecentCommitsForBranches dedupes by sha and first branch listed wins.
+    const commits = await getRecentCommitsForBranches(repo, [
+      repo.defaultBranch,
+      ...integration,
+    ]);
     if (commits.length === 0) continue;
 
     const { data: seen } = await admin
@@ -158,7 +197,7 @@ export async function pollCommitTaskMatches(
         commit_author_name: c.authorName,
         commit_author_login: c.authorLogin,
         commit_committed_at: c.committedAt,
-        branch_name: repo.defaultBranch,
+        branch_name: c.branch,
         state: "pending",
         model,
         generated_at: now,
@@ -201,11 +240,16 @@ type PendingRow = {
 /**
  * Confirm the suggestion: the task really was finished by that commit.
  *
- * Goes straight to Done and skips the approval flow entirely. That's the point
- * of the safeguard — the commit was read off the DEFAULT branch, so the work is
- * provably on main already and there is nothing left for an operator to gate.
- * markTaskDone resolves any approval that was still open, so a task sitting in
- * the operator's review queue drops out of it rather than stranding there.
+ * Goes straight to Done and skips the approval flow — markTaskDone resolves any
+ * approval that was still open, so a task sitting in the operator's review queue
+ * drops out of it rather than stranding there.
+ *
+ * Whether it also ships depends on where the commit was found. A default-branch
+ * commit is provably live, so it names the push and the task goes straight to
+ * Shipped. A commit found only on an integration branch is finished but *not*
+ * live, so the task lands in Next push tagged with that branch, and the ordinary
+ * merge poll ships it when the branch actually reaches main. Claiming otherwise
+ * would put a sha that isn't on main into the release ledger.
  */
 export async function confirmMatchedTaskDone(
   taskId: string
@@ -233,11 +277,39 @@ export async function confirmMatchedTaskDone(
   const match = data as PendingRow | null;
   if (!match) return { error: "That suggestion is no longer available." };
 
+  // Only the scan knows which branch it read the commit off, and only a
+  // default-branch commit may ship. Re-resolve the repo to learn what "default"
+  // is; if it can't be resolved, fail closed and treat the work as not yet live.
+  const { data: taskRow } = await admin
+    .from("tasks")
+    .select("engagement_id")
+    .eq("id", taskId)
+    .single();
+  const engagementId = (taskRow?.engagement_id as string | null) ?? null;
+  const repo = engagementId
+    ? await getEngagementRepoById(engagementId, profile.id)
+    : null;
+  const isLive =
+    repo !== null &&
+    match.branch_name !== null &&
+    match.branch_name === repo.defaultBranch;
+
   // The done write gates everything else — if it fails, nothing else should land.
   const done = await markTaskDone(taskId, {
-    pushed_to_main: true,
+    pushed_to_main: isLive,
     completion_note: null,
     branch_name: match.branch_name,
+    // A default-branch commit names the push this went live in, so two tasks
+    // confirmed against one commit share a release.
+    ship: isLive
+      ? {
+          repo_full_name: match.repo_full_name,
+          merge_sha: match.commit_sha,
+          // Names the release after the commit that shipped it, the same way
+          // the push poll names one after the tip it detected.
+          message: match.commit_message,
+        }
+      : null,
   });
   if ("error" in done) return done;
 

@@ -13,7 +13,8 @@ import { isTaskMember } from "@/lib/actions/task-access";
 import { notifyTaskEvent } from "@/lib/email/task-notify";
 import { getMyEngagements } from "@/lib/actions/invitations";
 import { getEngagementRepoById } from "@/lib/github/engagement-repo";
-import { getMergedPrSha, isNewMerge } from "@/lib/github/merged-prs";
+import { getDefaultBranchTip } from "@/lib/github/recent-commits";
+import { parseMergedBranch, mergeSubject } from "@/lib/github/merge-subject";
 import { isUniqueViolation } from "@/lib/supabase/errors";
 import { findSimilarTitles } from "@/lib/tasks/dedupe";
 import { TASK_TAGS, type TaskStatus, type TaskTag } from "@/lib/types";
@@ -248,6 +249,158 @@ export async function updateTask(formData: FormData) {
   return { success: true };
 }
 
+type DbClient = Awaited<ReturnType<typeof getClient>>;
+
+/** The push a task shipped in, when we can name it: a repo + the sha that put
+ *  the work on the default branch, plus that commit's message when the caller
+ *  has it (the release stores its subject line as the push's label). */
+type ShipRef = {
+  repo_full_name: string;
+  merge_sha: string;
+  message?: string | null;
+};
+
+/**
+ * The release a just-shipped task attaches to (migration 0084).
+ *
+ * With a merge sha this is the *auto* release for that push, found-or-created —
+ * so two tasks confirmed against the same commit land in one release rather
+ * than each spawning its own. Without one it's a fresh *manual* release: the
+ * builder asserting that this specific thing is live.
+ *
+ * Awaited inline, never deferred into after(): a task that claims it shipped
+ * has to point at a real release, so a failure here must stop the flip.
+ */
+async function resolveShipRelease(
+  supabase: DbClient,
+  opts: {
+    profileId: string;
+    engagementId: string | null;
+    branchName: string | null;
+    title: string | null;
+    shippedAt: string;
+    ship?: ShipRef | null;
+  }
+): Promise<{ id: string } | { error: string }> {
+  // An auto release must be engagement-scoped (releases_auto_has_engagement),
+  // so a personal task falls back to a manual one even with a sha in hand.
+  const ship = opts.engagementId !== null ? opts.ship : null;
+
+  if (ship) {
+    const findExisting = async () => {
+      const { data } = await supabase
+        .from("releases")
+        .select("id")
+        .eq("engagement_id", opts.engagementId)
+        .eq("repo_full_name", ship.repo_full_name)
+        .eq("merge_sha", ship.merge_sha)
+        .maybeSingle();
+      return (data?.id as string | undefined) ?? null;
+    };
+
+    const existing = await findExisting();
+    if (existing) return { id: existing };
+
+    const { data, error } = await supabase
+      .from("releases")
+      .insert({
+        engagement_id: opts.engagementId,
+        created_by: opts.profileId,
+        kind: "auto",
+        title: opts.title,
+        repo_full_name: ship.repo_full_name,
+        branch_name: opts.branchName,
+        merge_sha: ship.merge_sha,
+        merge_subject: ship.message ? mergeSubject(ship.message) : null,
+        shipped_at: opts.shippedAt,
+      })
+      .select("id")
+      .single();
+    if (!error && data) return { id: data.id as string };
+
+    // Lost the race with a concurrent poll — releases_merge_sha_key is the
+    // backstop, so re-read the winner rather than failing the ship.
+    if (isUniqueViolation(error)) {
+      const raced = await findExisting();
+      if (raced) return { id: raced };
+    }
+    return { error: error?.message ?? "Couldn't record the release." };
+  }
+
+  const { data, error } = await supabase
+    .from("releases")
+    .insert({
+      engagement_id: opts.engagementId,
+      created_by: opts.profileId,
+      kind: "manual",
+      title: opts.title,
+      branch_name: opts.branchName,
+      shipped_at: opts.shippedAt,
+    })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Couldn't record the release." };
+  return { id: data.id as string };
+}
+
+/**
+ * The staging group name shared by *every* one of these tasks, or null when
+ * they're split across groups or any is ungrouped. Seeds a release title, so a
+ * batch the builder planned as "Release 1.2" ships under that name instead of a
+ * bare branch label.
+ */
+async function unanimousGroupName(
+  supabase: DbClient,
+  groupIds: (string | null)[]
+): Promise<string | null> {
+  if (groupIds.length === 0 || groupIds.some((g) => !g)) return null;
+  const unique = Array.from(new Set(groupIds as string[]));
+  if (unique.length !== 1) return null;
+
+  const { data } = await supabase
+    .from("staging_groups")
+    .select("name")
+    .eq("id", unique[0])
+    .maybeSingle();
+  return (data?.name as string | undefined) ?? null;
+}
+
+/**
+ * Drop releases that an Undo just emptied. Deliberately narrow: only manual
+ * releases the app created, and only when nothing points at them any more.
+ *
+ * An emptied *auto* release must survive — it is the idempotency tombstone that
+ * stops the next pollMainMerges from re-shipping the very work the builder
+ * just undid.
+ */
+async function gcEmptyManualReleases(
+  supabase: DbClient,
+  releaseIds: string[]
+): Promise<void> {
+  for (const id of releaseIds) {
+    const { data: release } = await supabase
+      .from("releases")
+      .select("id, kind, source")
+      .eq("id", id)
+      .maybeSingle();
+    if (!release || release.kind !== "manual" || release.source !== "app") continue;
+
+    const { count: taskCount } = await supabase
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("release_id", id);
+    if ((taskCount ?? 0) > 0) continue;
+
+    const { count: childCount } = await supabase
+      .from("releases")
+      .select("id", { count: "exact", head: true })
+      .eq("combined_into_id", id);
+    if ((childCount ?? 0) > 0) continue;
+
+    await supabase.from("releases").delete().eq("id", id);
+  }
+}
+
 const markDoneSchema = z.object({
   taskId: z.string().uuid(),
   pushed_to_main: z.boolean().default(false),
@@ -264,6 +417,10 @@ export async function markTaskDone(
     pushed_to_main: boolean;
     completion_note: string | null;
     branch_name?: string | null;
+    // The push this went live in, when the caller knows it — set by
+    // confirmMatchedTaskDone, which has the default-branch commit in hand. Two
+    // tasks confirmed against the same commit then share one release.
+    ship?: ShipRef | null;
   }
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
@@ -280,11 +437,38 @@ export async function markTaskDone(
 
   const { data: before } = await supabase
     .from("tasks")
-    .select("status, approval_sent_at, approval_approved_at")
+    .select(
+      "status, approval_sent_at, approval_approved_at, engagement_id, pushed_to_main, release_id, staging_group_id"
+    )
     .eq("id", taskId)
     .single();
 
   const now = new Date().toISOString();
+
+  // Attach the task to the push it went live in. Re-marking an already-shipped
+  // task keeps its existing release rather than spawning a duplicate; un-marking
+  // detaches it so it falls back into "Next push".
+  let releaseId: string | null = null;
+  if (parsed.data.pushed_to_main) {
+    if (before?.pushed_to_main && before.release_id) {
+      releaseId = before.release_id as string;
+    } else {
+      const title = await unanimousGroupName(supabase, [
+        (before?.staging_group_id as string | null) ?? null,
+      ]);
+      const release = await resolveShipRelease(supabase, {
+        profileId: profile.id,
+        engagementId: (before?.engagement_id as string | null) ?? null,
+        branchName,
+        title,
+        shippedAt: now,
+        ship: payload.ship ?? null,
+      });
+      if ("error" in release) return { error: release.error };
+      releaseId = release.id;
+    }
+  }
+
   const updates: {
     status: "done";
     pushed_to_main: boolean;
@@ -292,6 +476,8 @@ export async function markTaskDone(
     branch_name: string | null;
     completed_at: string;
     updated_at: string;
+    release_id: string | null;
+    shipped_at: string | null;
     approval_approved_at?: string;
   } = {
     status: "done",
@@ -300,6 +486,8 @@ export async function markTaskDone(
     branch_name: branchName,
     completed_at: now,
     updated_at: now,
+    release_id: releaseId,
+    shipped_at: parsed.data.pushed_to_main ? now : null,
   };
 
   // Shipping a task resolves any open approval gate. A task can be sent for
@@ -462,28 +650,85 @@ export async function setTasksPushedToMain(
 
   const { data: rows } = await supabase
     .from("tasks")
-    .select("id, engagement_id, created_by, status, pushed_to_main")
+    .select("id, engagement_id, created_by, status, pushed_to_main, release_id, staging_group_id")
     .in("id", parsed.data.taskIds);
   if (!rows || rows.length === 0) return { success: true, movedIds: [] };
 
   const myEngagementIds = new Set((await getMyEngagements()).map((e) => e.id));
-  const allowedIds = rows
-    .filter(
-      (t) =>
-        t.status === "done" &&
-        t.pushed_to_main !== parsed.data.pushed &&
-        (t.engagement_id
-          ? myEngagementIds.has(t.engagement_id)
-          : t.created_by === profile.id)
-    )
-    .map((t) => t.id);
+  const allowed = rows.filter(
+    (t) =>
+      t.status === "done" &&
+      t.pushed_to_main !== parsed.data.pushed &&
+      (t.engagement_id
+        ? myEngagementIds.has(t.engagement_id)
+        : t.created_by === profile.id)
+  );
+  const allowedIds = allowed.map((t) => t.id);
   if (allowedIds.length === 0) return { success: true, movedIds: [] };
 
-  const { error } = await supabase
-    .from("tasks")
-    .update({ pushed_to_main: parsed.data.pushed, updated_at: new Date().toISOString() })
-    .in("id", allowedIds);
-  if (error) return { error: error.message };
+  const now = new Date().toISOString();
+
+  if (!parsed.data.pushed) {
+    // Undo: detach from the release as well, or the task would keep claiming a
+    // ship date while sitting back in "Next push".
+    const { error } = await supabase
+      .from("tasks")
+      .update({
+        pushed_to_main: false,
+        release_id: null,
+        shipped_at: null,
+        updated_at: now,
+      })
+      .in("id", allowedIds);
+    if (error) return { error: error.message };
+
+    // Sweep up releases this emptied — manual ones only; an emptied auto
+    // release is the tombstone that stops the poll re-shipping this work.
+    const detached = Array.from(
+      new Set(allowed.map((t) => t.release_id as string | null).filter((r): r is string => !!r))
+    );
+    if (detached.length > 0) after(() => gcEmptyManualReleases(supabase, detached));
+  } else {
+    // A branch bucket can span engagements under the "All" filter, but a release
+    // never does — so ship one manual release per engagement (personal tasks
+    // forming their own partition).
+    const partitions = new Map<string, typeof allowed>();
+    for (const t of allowed) {
+      const key = (t.engagement_id as string | null) ?? "personal";
+      const bucket = partitions.get(key);
+      if (bucket) bucket.push(t);
+      else partitions.set(key, [t]);
+    }
+
+    for (const [, group] of partitions) {
+      const title = await unanimousGroupName(
+        supabase,
+        group.map((t) => (t.staging_group_id as string | null) ?? null)
+      );
+      const release = await resolveShipRelease(supabase, {
+        profileId: profile.id,
+        engagementId: (group[0].engagement_id as string | null) ?? null,
+        branchName: null,
+        title,
+        shippedAt: now,
+      });
+      if ("error" in release) return { error: release.error };
+
+      const { error } = await supabase
+        .from("tasks")
+        .update({
+          pushed_to_main: true,
+          release_id: release.id,
+          shipped_at: now,
+          updated_at: now,
+        })
+        .in(
+          "id",
+          group.map((t) => t.id)
+        );
+      if (error) return { error: error.message };
+    }
+  }
 
   // Audit isn't needed to render the move — defer it past the response like the
   // status-change path.
@@ -505,106 +750,200 @@ export async function setTasksPushedToMain(
   return { success: true, movedIds: allowedIds };
 }
 
-const pollBranchMergesSchema = z.array(z.string().uuid()).max(50);
+const pollMainMergesSchema = z.array(z.string().uuid()).max(50);
 
-/** Auto-detect which staged feature branches have been merged into their repo's
- *  default branch and move their done tasks to Shipped. Runs on staging-board
- *  load and the "Check for pushes" button. Idempotent and undo-safe via the
- *  branch_push_marks table: a given merge sha ships once; undoing it leaves the
- *  recorded sha in place so the next poll won't re-ship. Returns the branches it
- *  just shipped so the client can toast (with Undo). */
-export async function pollBranchMerges(
+type ShippedPush = { branch: string | null; taskIds: string[]; releaseId: string };
+
+/** Detect that a new push reached each engagement's default branch and move
+ *  every task waiting in Next push into that one release.
+ *
+ *  A release is one push to main, not one branch. Work reaches main through
+ *  whatever integration branch the builder uses (feature → dev → main), so
+ *  keying membership on `branch_name` stranded every task tagged with a branch
+ *  that merges somewhere other than main. The branch is a label now; the tip
+ *  sha is the identity. Idempotent and undo-safe: a sha already on the ledger
+ *  ships once, and an emptied release stays behind as its tombstone.
+ *
+ *  Takes a resolved profile id rather than reading auth, so the background sweep
+ *  can share it — `redirect()` is not callable from `after()`. */
+async function shipPushedTasks(
+  profileId: string,
   engagementIds: string[]
-): Promise<{ branch: string; taskIds: string[] }[]> {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
-
-  const parsed = pollBranchMergesSchema.safeParse(engagementIds);
-  if (!parsed.success || parsed.data.length === 0) return [];
-
+): Promise<ShippedPush[]> {
   const admin = createAdminClient();
-  const shipped: { branch: string; taskIds: string[] }[] = [];
+  const shipped: ShippedPush[] = [];
 
-  for (const engagementId of parsed.data) {
+  for (const engagementId of engagementIds) {
     // getEngagementRepoById gates membership (null for non-members) and yields
     // the repo coords + a usable OAuth token.
-    const repo = await getEngagementRepoById(engagementId, profile.id);
+    const repo = await getEngagementRepoById(engagementId, profileId);
     if (!repo) continue;
 
-    const { data: staged } = await admin
+    // Every push gets a row, whether or not anything was waiting for it. This
+    // used to short-circuit on "nothing queued" to skip the GitHub round-trip,
+    // but that is exactly the push where the builder tracked nothing at all —
+    // and with no release row there is nowhere to hang the untracked-work scan
+    // (0086). The read is cached for 300s and already shared with the commit
+    // scan, so an unchanged repo costs one indexed lookup.
+    const tip = await getDefaultBranchTip(repo);
+    if (!tip) continue;
+
+    // Claim the push on the releases ledger. This is set membership over every
+    // sha we've ever shipped: an emptied release stays behind as a tombstone, so
+    // an undone auto-move is never re-shipped and a force-push back to an older
+    // tip is a permanent no-op rather than a second release.
+    const { data: seen } = await admin
+      .from("releases")
+      .select("id")
+      .eq("engagement_id", engagementId)
+      .eq("repo_full_name", repo.fullName)
+      .eq("merge_sha", tip.sha)
+      .maybeSingle();
+    if (seen) continue;
+
+    const now = new Date().toISOString();
+    // Date the release by the PUSH, not by whenever someone happened to open the
+    // board. Detection is lazy — it runs on a page visit — so using `now` would
+    // stamp a push from last Friday with today's date and quietly corrupt the
+    // timeline every time nobody looked for a while.
+    const shippedAt = tip.committedAt ?? now;
+
+    const { data: release, error: releaseError } = await admin
+      .from("releases")
+      .insert({
+        engagement_id: engagementId,
+        created_by: profileId,
+        kind: "auto",
+        repo_full_name: repo.fullName,
+        // Only a merge commit names a branch; a plain push to main leaves this
+        // null. The subject line always says something, which is why the
+        // timeline labels by it first and only then falls back to branch/date.
+        branch_name: parseMergedBranch(tip.message),
+        merge_subject: mergeSubject(tip.message),
+        merge_sha: tip.sha,
+        shipped_at: shippedAt,
+      })
+      .select("id")
+      .single();
+    // A concurrent poll won the claim and is shipping this batch itself.
+    if (releaseError || !release) continue;
+
+    let flip = admin
       .from("tasks")
-      .select("branch_name")
+      .update({
+        pushed_to_main: true,
+        release_id: release.id,
+        shipped_at: shippedAt,
+        updated_at: now,
+      })
       .eq("engagement_id", engagementId)
       .eq("status", "done")
-      .eq("pushed_to_main", false)
-      .not("branch_name", "is", null);
+      .eq("pushed_to_main", false);
+    // A push cannot have carried work that was finished after it. Without this,
+    // a task completed this morning joins last Friday's release and the timeline
+    // claims it shipped before it was done. An unknown completion date can't
+    // disprove anything, so it stays in — same rule the commit matcher uses.
+    if (tip.committedAt) {
+      flip = flip.or(`completed_at.is.null,completed_at.lte.${tip.committedAt}`);
+    }
+    const { data: flipped } = await flip.select("id, staging_group_id");
 
-    const branches = Array.from(
-      new Set(
-        (staged ?? [])
-          .map((r) => (r.branch_name as string | null)?.trim() || null)
-          .filter(
-            (b): b is string => b !== null && b !== repo.defaultBranch
-          )
-      )
+    // Name the push after the batch the builder planned, when they all agree.
+    const title = await unanimousGroupName(
+      admin,
+      (flipped ?? []).map((t) => (t.staging_group_id as string | null) ?? null)
     );
+    if (title) {
+      await admin
+        .from("releases")
+        .update({ title, updated_at: now })
+        .eq("id", release.id);
+    }
 
-    for (const branch of branches) {
-      const sha = await getMergedPrSha(repo, branch);
-      if (!sha) continue;
-
-      const { data: mark } = await admin
-        .from("branch_push_marks")
-        .select("merge_sha")
-        .eq("repo_full_name", repo.fullName)
-        .eq("branch_name", branch)
-        .maybeSingle();
-      if (!isNewMerge(mark?.merge_sha, sha)) continue; // already actioned or undone
-
-      const { data: flipped } = await admin
-        .from("tasks")
-        .update({ pushed_to_main: true, updated_at: new Date().toISOString() })
-        .eq("engagement_id", engagementId)
-        .eq("status", "done")
-        .eq("pushed_to_main", false)
-        .eq("branch_name", branch)
-        .select("id");
-
-      await admin.from("branch_push_marks").upsert(
-        {
-          repo_full_name: repo.fullName,
-          branch_name: branch,
-          merge_sha: sha,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "repo_full_name,branch_name" }
+    const taskIds = (flipped ?? []).map((t) => t.id);
+    if (taskIds.length > 0) {
+      after(() =>
+        writeAuditEntries(
+          taskIds.map((id) => ({
+            taskId: id,
+            actorId: profileId,
+            action: "task.pushed_to_main_changed",
+            field: "pushed_to_main",
+            oldValue: false,
+            newValue: true,
+            metadata: {
+              via: "main_push_poll",
+              branch: parseMergedBranch(tip.message),
+              merge_sha: tip.sha,
+            },
+          }))
+        )
       );
-
-      const taskIds = (flipped ?? []).map((t) => t.id);
-      if (taskIds.length > 0) {
-        after(() =>
-          writeAuditEntries(
-            taskIds.map((id) => ({
-              taskId: id,
-              actorId: profile.id,
-              action: "task.pushed_to_main_changed",
-              field: "pushed_to_main",
-              oldValue: false,
-              newValue: true,
-              metadata: { via: "pr_merge_poll", branch, merge_sha: sha },
-            }))
-          )
-        );
-        shipped.push({ branch, taskIds });
-      }
+      shipped.push({
+        branch: parseMergedBranch(tip.message),
+        taskIds,
+        releaseId: release.id as string,
+      });
     }
   }
 
+  return shipped;
+}
+
+/** Staging-board load and the "Check for pushes" button. Returns what it shipped
+ *  so the client can toast (with Undo). */
+export async function pollMainMerges(
+  engagementIds: string[]
+): Promise<ShippedPush[]> {
+  const profile = await getCurrentProfile();
+  if (!profile) redirect("/login");
+
+  const parsed = pollMainMergesSchema.safeParse(engagementIds);
+  if (!parsed.success || parsed.data.length === 0) return [];
+
+  const shipped = await shipPushedTasks(profile.id, parsed.data);
   if (shipped.length > 0) {
     revalidatePath("/b");
     revalidatePath("/b/staging");
   }
   return shipped;
+}
+
+/**
+ * The same detection, run in the background from the builder layout — safe to
+ * call from `after()`.
+ *
+ * Detection used to happen only when someone opened `/b/staging`, so a push
+ * went unrecorded for as long as that page went unvisited. Now any builder page
+ * catches it. Idempotent against the ledger, so the extra calls are free: the
+ * GitHub read is cached and shared with the commit scan, and a sha already
+ * recorded costs one indexed lookup. Silent by design — the toast belongs to the
+ * staging board, and this must never take a page down, so everything is
+ * swallowed.
+ */
+export async function sweepMainPushes(): Promise<void> {
+  const profile = await getCurrentProfile();
+  if (!profile || profile.role !== "builder") return;
+
+  try {
+    const admin = createAdminClient();
+    const { data } = await admin
+      .from("engagements")
+      .select("id")
+      .eq("builder_id", profile.id)
+      .not("started_at", "is", null);
+
+    const ids = (data ?? []).map((e) => e.id as string);
+    if (ids.length === 0) return;
+
+    const shipped = await shipPushedTasks(profile.id, ids);
+    if (shipped.length > 0) {
+      revalidatePath("/b");
+      revalidatePath("/b/staging");
+    }
+  } catch {
+    // A background catch-up that throws would surface as a failed page render.
+  }
 }
 
 const markForApprovalSchema = z.object({
