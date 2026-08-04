@@ -570,6 +570,78 @@ textarea:focus-visible {
   .krowe-sidebar.collapsed .krowe-sidebar-toggle { transition: none; }
 }
 
+/* ── Mobile: the rail becomes an off-canvas drawer ──
+   A 216px rail against a 390px viewport left the board ~170px wide: the page
+   measured 708px in a 390px window and scrolled sideways, with the heading
+   clipped and the stat line breaking one word per line. Below 768px the rail
+   leaves the flow entirely and slides in over the content from a topbar
+   trigger, so .krowe-main gets the whole viewport. 768px matches the breakpoint
+   the product tour already treats as "not a phone". */
+.krowe-sidebar-scrim,
+.krowe-sidebar-mobile-toggle { display: none; }
+
+@media (max-width: 767px) {
+  .krowe-sidebar-mobile-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: fixed; top: 8px; left: 10px; z-index: 40;
+    width: 44px; height: 44px; border-radius: var(--radius-full);
+    border: 1px solid transparent; background: none; cursor: pointer;
+    color: var(--muted-foreground);
+    transition: background 150ms var(--ease-out-smooth), color 150ms var(--ease-out-smooth);
+  }
+  .krowe-sidebar-mobile-toggle:hover {
+    background: color-mix(in srgb, var(--foreground) 5%, transparent); color: var(--foreground);
+  }
+  .krowe-sidebar-mobile-toggle:focus-visible {
+    outline: none; border-color: var(--primary);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+  }
+
+  .krowe-sidebar {
+    position: fixed; top: 0; left: 0; z-index: 50;
+    width: min(280px, 82vw);
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-3);
+  }
+  .krowe-sidebar.ready { transition: transform var(--duration-normal) var(--ease-out-smooth); }
+  .krowe-sidebar.open { transform: translateX(0); }
+  /* Collapsing to an icon rail is a desktop affordance; the drawer replaces it. */
+  .krowe-sidebar-toggle { display: none; }
+
+  /* Give the trigger its own room rather than letting it sit on the search pill.
+     The right slot's `flex: 1 1 var(--sidebar-width)` + fit-content basis exists
+     to centre the search pill against a rail that no longer occupies the row —
+     here it just refuses to shrink, holding the topbar at 542px. The name/role
+     text is the part with no room; the avatar still identifies the account. */
+  .krowe-topbar { padding-left: 62px; padding-right: 14px; gap: 10px; }
+  .krowe-topbar-right { flex: 0 0 auto; min-width: 0; }
+  .krowe-tb-profile .who { display: none; }
+  /* The left slot is an empty spacer whose only job is centring the pill against
+     the rail — with the rail gone it is just width the row can't spare. */
+  .krowe-topbar-left { display: none; }
+  /* Fixed 440px/42vw stops the pill giving ground; on a phone it should take
+     whatever is left. The ⌘K hint goes with it — there's no keyboard. */
+  .krowe-tb-search { width: auto; max-width: none; flex: 1 1 auto; min-width: 0; }
+  .krowe-tb-search .krowe-kbd { display: none; }
+  /* Dev-only role switcher — never part of the phone surface. */
+  .krowe-view-switch { display: none; }
+
+  /* Title and its controls stack rather than forcing one unbreakable row. */
+  .krowe-board-head { flex-direction: column; align-items: stretch; gap: 14px; }
+  .krowe-board-title { white-space: normal; }
+  .krowe-board-actions { flex-wrap: wrap; flex-shrink: 1; }
+
+  .krowe-sidebar-scrim {
+    display: block; position: fixed; inset: 0; z-index: 45;
+    border: 0; padding: 0; cursor: pointer;
+    background: color-mix(in srgb, var(--foreground) 45%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .krowe-sidebar.ready { transition: none; }
+}
+
 /* ── Settings (top-tab sub-route layout) ── */
 .krowe-settings-shell {
   display: flex;

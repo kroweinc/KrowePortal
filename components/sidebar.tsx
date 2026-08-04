@@ -15,6 +15,7 @@ import {
   FolderKanban,
   LogOut,
   ChevronLeft,
+  Menu,
   type LucideIcon,
 } from "lucide-react";
 
@@ -64,6 +65,29 @@ export function Sidebar({ tabs, basePath }: SidebarProps) {
       /* private mode / storage disabled — stay expanded */
     }
   }, []);
+  // Below 768px the rail is an off-canvas drawer instead (see globals.css), so
+  // the persisted icon-rail state must not apply — a collapsed drawer would
+  // slide in 64px wide with no labels. Resolved after mount for the same reason
+  // `collapsed` is: the server can't know the viewport.
+  const [isMobile, setIsMobile] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const sync = () => setIsMobile(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
+
   const toggleCollapsed = () =>
     setCollapsed((c) => {
       const next = !c;
@@ -93,6 +117,9 @@ export function Sidebar({ tabs, basePath }: SidebarProps) {
         href={tab.href}
         data-tour={tab.tour}
         title={tab.label}
+        // Following a link out of the mobile drawer should leave it behind,
+        // not stack the next page under an open menu.
+        onClick={() => setDrawerOpen(false)}
         className={`krowe-sidebar-link ${isActive ? "active" : ""}`}
       >
         <span className="krowe-sidebar-ic">
@@ -104,47 +131,73 @@ export function Sidebar({ tabs, basePath }: SidebarProps) {
   };
 
   return (
-    <aside
-      className={`krowe-sidebar ${collapsed ? "collapsed" : ""} ${mounted ? "ready" : ""}`}
-    >
-      <div className="krowe-sidebar-brand">
-        {/* Intrinsic dimensions (493×506) reserve the logo's space before load to
-            avoid CLS; CSS (.krowe-sidebar-brand img) scales it to height:26px. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={assetUrl("/KroweIcon.png")} alt="Krowe" width={493} height={506} />
-        <span className="krowe-sidebar-word">Krowe</span>
+    <>
+      <button
+        type="button"
+        className="krowe-sidebar-mobile-toggle"
+        onClick={() => setDrawerOpen((o) => !o)}
+        aria-expanded={drawerOpen}
+        aria-controls="krowe-sidebar"
+        aria-label={drawerOpen ? "Close menu" : "Open menu"}
+      >
+        <Menu size={20} strokeWidth={1.9} />
+      </button>
+
+      {isMobile && drawerOpen && (
         <button
           type="button"
-          className="krowe-sidebar-toggle"
-          onClick={toggleCollapsed}
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <ChevronLeft size={16} strokeWidth={2} />
-        </button>
-      </div>
+          className="krowe-sidebar-scrim"
+          onClick={() => setDrawerOpen(false)}
+          aria-label="Close menu"
+        />
+      )}
 
-      <div className="krowe-sidebar-cap">Workspace</div>
-
-      <nav className="krowe-sidebar-nav">{navTabs.map(renderLink)}</nav>
-
-      <div className="krowe-sidebar-foot">
-        <FeedbackDialog />
-        {settingsTab && renderLink(settingsTab)}
-        <form action="/api/auth/logout" method="POST">
+      <aside
+        id="krowe-sidebar"
+        // Off-canvas but still in the DOM: without this its links stay tabbable
+        // and reachable by a screen reader while the drawer is shut.
+        inert={isMobile && !drawerOpen}
+        className={`krowe-sidebar ${!isMobile && collapsed ? "collapsed" : ""} ${drawerOpen ? "open" : ""} ${mounted ? "ready" : ""}`}
+      >
+        <div className="krowe-sidebar-brand">
+          {/* Intrinsic dimensions (493×506) reserve the logo's space before load to
+              avoid CLS; CSS (.krowe-sidebar-brand img) scales it to height:26px. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={assetUrl("/KroweIcon.png")} alt="Krowe" width={493} height={506} />
+          <span className="krowe-sidebar-word">Krowe</span>
           <button
-            type="submit"
-            className="krowe-sidebar-link krowe-sidebar-signout"
-            title="Sign out"
+            type="button"
+            className="krowe-sidebar-toggle"
+            onClick={toggleCollapsed}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <span className="krowe-sidebar-ic">
-              <LogOut size={17} strokeWidth={1.9} />
-            </span>
-            <span className="krowe-sidebar-label">Sign out</span>
+            <ChevronLeft size={16} strokeWidth={2} />
           </button>
-        </form>
-      </div>
-    </aside>
+        </div>
+
+        <div className="krowe-sidebar-cap">Workspace</div>
+
+        <nav className="krowe-sidebar-nav">{navTabs.map(renderLink)}</nav>
+
+        <div className="krowe-sidebar-foot">
+          <FeedbackDialog />
+          {settingsTab && renderLink(settingsTab)}
+          <form action="/api/auth/logout" method="POST">
+            <button
+              type="submit"
+              className="krowe-sidebar-link krowe-sidebar-signout"
+              title="Sign out"
+            >
+              <span className="krowe-sidebar-ic">
+                <LogOut size={17} strokeWidth={1.9} />
+              </span>
+              <span className="krowe-sidebar-label">Sign out</span>
+            </button>
+          </form>
+        </div>
+      </aside>
+    </>
   );
 }
