@@ -13,6 +13,7 @@ import {
   UserRound,
   Settings,
   FolderKanban,
+  Rocket,
   LogOut,
   ChevronLeft,
   Menu,
@@ -31,6 +32,7 @@ const ICONS: Record<string, LucideIcon> = {
   "user-round": UserRound,
   settings: Settings,
   "folder-kanban": FolderKanban,
+  rocket: Rocket,
 };
 
 interface SidebarTab {

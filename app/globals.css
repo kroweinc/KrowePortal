@@ -1066,6 +1066,55 @@ textarea:focus-visible {
   border-radius: var(--radius-full); padding: 1px 8px; line-height: 1.5;
 }
 
+/* Operator changelog (/o/changelog) — the client-facing read of the same
+   releases the builder manages on /b/staging. Read-only by design. */
+.krowe-chg-list {
+  display: flex; flex-direction: column; gap: 26px;
+  margin: 0; padding: 0; list-style: none;
+}
+.krowe-chg-entry {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--background); padding: 18px 20px 20px;
+}
+.krowe-chg-head {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.krowe-chg-title {
+  margin: 0; font-size: 16px; font-weight: 600;
+  color: var(--foreground); letter-spacing: -0.01em;
+}
+.krowe-chg-date {
+  margin-left: auto; flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 11px; color: var(--muted-foreground);
+}
+.krowe-chg-notes {
+  margin: 8px 0 0; font-size: 13.5px; line-height: 1.6;
+  color: var(--muted-foreground);
+}
+.krowe-chg-meta {
+  margin: 2px 0 0;
+  font-family: var(--font-serif); font-style: italic; font-size: 13px;
+  color: var(--faint-foreground);
+}
+.krowe-chg-tasks {
+  display: flex; flex-direction: column; gap: 8px;
+  margin: 14px 0 0; padding: 0; list-style: none;
+}
+.krowe-chg-task {
+  display: flex; align-items: baseline; gap: 9px;
+  font-size: 13.5px; line-height: 1.5; color: var(--foreground);
+}
+.krowe-chg-task-title { min-width: 0; }
+.krowe-chg-type {
+  flex-shrink: 0; font-size: 10.5px; font-weight: 500;
+  text-transform: capitalize; padding: 2px 8px;
+  border-radius: var(--radius-full); line-height: 1.5;
+}
+.krowe-chg-type.feature { background: var(--success-soft); color: var(--success); }
+.krowe-chg-type.bug     { background: var(--danger-soft);  color: var(--danger);  }
+.krowe-chg-type.change  { background: color-mix(in srgb, #3b82f6 12%, white); color: #1d4ed8; }
+
 /* Branch field in the task-detail deliverable section */
 .krowe-branch-field {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px;

@@ -9,6 +9,7 @@ const OPERATOR_TABS = [
   { label: "Tasks", href: "/o", icon: "list-checks" },
   { label: "Builder", href: "/o/engagement", icon: "briefcase" },
   { label: "Project", href: "/o/project", icon: "folder-kanban" },
+  { label: "Shipped", href: "/o/changelog", icon: "rocket" },
   { label: "Settings", href: "/o/settings", icon: "settings" },
 ];
 
