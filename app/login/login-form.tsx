@@ -109,8 +109,18 @@ export function LoginForm() {
     formError ??
     (urlError ? (ERROR_MESSAGES[urlError] ?? "Something went wrong. Please try again.") : null);
 
+  /**
+   * Where to land after a successful sign-in. Only an in-app path is honored:
+   * this value is handed straight to window.location.assign below, so an
+   * absolute URL ("https://elsewhere/") or a protocol-relative one ("//host")
+   * would walk a *freshly authenticated* user off the platform on a link that
+   * legitimately begins at our own domain. Mirrors the guard the OAuth callback
+   * already applies server-side (app/auth/callback/route.ts).
+   */
   function nextPath() {
-    return searchParams.get("next") ?? "/portal";
+    const requested = searchParams.get("next");
+    if (!requested) return "/portal";
+    return requested.startsWith("/") && !requested.startsWith("//") ? requested : "/portal";
   }
 
   function switchMode(next: Mode) {
