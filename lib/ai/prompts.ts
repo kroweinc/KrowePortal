@@ -11,6 +11,11 @@ import type {
   CommitMatchCandidate,
   TaskMatchCandidate,
 } from "@/lib/tasks/commit-match-filter";
+// A compile-time constant, so interpolating it leaves the untracked-work system
+// prompt a fixed string computed once at import — the static prefix
+// prompt_cache_key: "untracked-work-v1" depends on. Imported rather than
+// retyped so the prompt can't promise a cap the filter doesn't enforce.
+import { MAX_GAPS_PER_PUSH } from "@/lib/tasks/untracked-filter";
 
 // One-line gloss per area label, used only to steer the classifier. Typed as a
 // Record<TaskTag, …> so adding a tag to TASK_TAGS forces a description here.
@@ -455,6 +460,117 @@ export function buildMatchCommitsUserPrompt(input: {
     commitBlock,
     ``,
     `=== Open tasks ===`,
+    taskBlock,
+  ].join("\n");
+}
+
+// ── Push → work that was never tracked ───────────────────────────────────────
+
+// Same Record<> derivation as everywhere else in this file: adding a value to
+// DRAFT_CONFIDENCE fails to compile until its gloss is written here. Separate
+// from DRAFT_CONFIDENCE_DESCRIPTIONS above because that one is phrased for a
+// call transcript ("assigned in plain terms on the call") and means nothing
+// when the evidence is a diff.
+const UNTRACKED_CONFIDENCE_DESCRIPTIONS: Record<DraftConfidence, string> = {
+  high: "the commits and paths name one clear deliverable, and no listed task covers it",
+  medium: "clearly separate work, but its scope or boundary took interpretation",
+  low: "you suspect it but cannot point to what it delivers",
+};
+
+/** Changed paths shown per push. Enough to characterise the work; past this it
+ *  reads as a directory listing and buries the paths that carry meaning. */
+const PUSH_FILE_CAP = 60;
+
+export function buildUntrackedWorkSystemPrompt(): string {
+  const typeList = glossedValues(TASK_TYPES, TASK_TYPE_DESCRIPTIONS);
+  const tagList = glossedValues(TASK_TAGS, TASK_TAG_DESCRIPTIONS);
+  const confidenceList = glossedValues(DRAFT_CONFIDENCE, UNTRACKED_CONFIDENCE_DESCRIPTIONS);
+
+  return `You are a senior engineer auditing one push to a repository's main branch against the tasks a solo builder logged for it. You are looking for one thing: work that SHIPPED in this push and that no task describes.
+
+You have the push's commit subjects and the paths it changed, plus every task the builder attributed to this push. You do not have the diff contents or the repo source, so a path is your strongest evidence of what was built — "app/api/agent/pdf/route.ts" tells you a PDF endpoint shipped, and a subject reading "wip" tells you nothing.
+
+The builder writes tasks for deliverables: a capability, a fix, a visible change someone asked for. They do not write tasks for the housekeeping that surrounds them. Your job is to find the former hiding among the latter.
+
+These ARE untracked work:
+  • Six commits touching "lib/pdf/", "app/api/report/pdf/route.ts" and "components/download-button.tsx", and no listed task mentions PDFs or exports — one proposal: the PDF export.
+  • A new "supabase/migrations/0091_referrals.sql" plus "app/referrals/page.tsx", with the listed tasks all about billing — one proposal: the referrals feature.
+
+These are NOT untracked work:
+  • Anything the listed tasks already describe, even loosely. A task called "Speed up the client list" covers commits about query caching on that list.
+  • Dependency bumps, lockfile churn, lint and formatting passes, comment and typo fixes, CI config, version tags, the merge commit itself.
+  • Refactors, extractions, and renames with no behavior change — real work, but not a deliverable anyone tracks.
+  • A push where every subject is uninformative ("wip", "stuff", "fixes") and the paths are scattered. You cannot name what shipped, so there is nothing to propose.
+
+Rules:
+1. Work from the paths first, then the subjects. Ask what a user or client would say this push delivered, then check whether a listed task already says it.
+2. Group every commit belonging to one deliverable into ONE proposal. Six commits building a PDF export are one forgotten task, not six. Two unrelated deliverables in one push are two proposals.
+3. Propose at most ${MAX_GAPS_PER_PUSH}. If more than that look plausible you are proposing individual commits rather than deliverables — go back to rule 2.
+4. Set shas to the commits that back the proposal, copied exactly from the input. Set files to at most 10 of the input paths that make the case. A proposal you cannot back with at least one commit from the list is not a proposal.
+5. Write title as an imperative verb phrase of at most 80 characters, naming the deliverable the way the builder would have if they had written the task first ("Add PDF export to the agent report"). Write description as at least one full sentence, at least 20 characters, saying what shipped and what it does for the user — grounded in the paths you were given, never in what you assume the codebase looks like elsewhere.
+6. Set priority to one of ${TASK_PRIORITIES.map((p) => `"${p}"`).join(", ")}. The work is already done, so this is only how it would have been ranked: use "medium" unless the push plainly fixes something broken.
+7. Set type to the single value that fits:
+${typeList}
+8. Set tags to exactly ONE area label:
+${tagList}
+9. Set confidence:
+${confidenceList}
+10. Prefer proposing nothing, because the cost is lopsided. A missed gap costs the builder nothing — the work shipped either way. A wrong one invents a task for work that was already tracked and puts it on a client's changelog.
+
+Off-schema behavior: propose only work evidenced by the commits and paths in this push, and copy shas and file paths exactly as given — never invent a path to strengthen a case. When every deliverable in the push is already covered by a listed task, which is the common and expected outcome, return an empty items array. Never stretch to fill it.`;
+}
+
+export interface UntrackedWorkInput {
+  repoFullName: string;
+  /** The merge/push subject — often names the branch that landed. */
+  pushSubject: string;
+  branch: string | null;
+  commits: { sha: string; subject: string }[];
+  files: { path: string; status: string }[];
+  filesTruncated: boolean;
+  /** Tasks the builder attributed to this push — the "already accounted for" set. */
+  trackedTasks: { title: string; description: string | null }[];
+}
+
+export function buildUntrackedWorkUserPrompt(input: UntrackedWorkInput): string {
+  const commitBlock =
+    input.commits.length > 0
+      ? input.commits.map((c) => `${c.sha} ${c.subject || "(no subject)"}`).join("\n")
+      : "(none reported)";
+
+  const shown = input.files.slice(0, PUSH_FILE_CAP);
+  const remainder = input.files.length - shown.length;
+  const fileBlock =
+    shown.length > 0
+      ? shown.map((f) => `${f.status.padEnd(8)} ${f.path}`).join("\n") +
+        (remainder > 0 || input.filesTruncated
+          ? `\n…and more files not shown${remainder > 0 ? ` (${remainder})` : ""}. Judge only what is listed.`
+          : "")
+      : "(none reported)";
+
+  const taskBlock =
+    input.trackedTasks.length > 0
+      ? input.trackedTasks
+          .map((t) =>
+            t.description?.trim()
+              ? `- ${t.title}\n  ${truncate(t.description, TASK_DESCRIPTION_CAP)}`
+              : `- ${t.title}`
+          )
+          .join("\n")
+      : "(none — this push was recorded with no tasks against it at all)";
+
+  return [
+    `Repository: ${input.repoFullName}`,
+    `Push: ${input.pushSubject || "(no subject)"}`,
+    `Branch merged: ${input.branch ?? "(none — a direct push to main)"}`,
+    ``,
+    `=== Commits in this push ===`,
+    commitBlock,
+    ``,
+    `=== Files this push changed ===`,
+    fileBlock,
+    ``,
+    `=== Tasks already logged against this push ===`,
     taskBlock,
   ].join("\n");
 }

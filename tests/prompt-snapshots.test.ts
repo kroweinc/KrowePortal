@@ -3,6 +3,7 @@ import {
   buildClassifyTaskSystemPrompt,
   buildEstimateTaskSystemPrompt,
   buildExtractTasksSystemPrompt,
+  buildUntrackedWorkSystemPrompt,
 } from "@/lib/ai/prompts";
 import {
   buildRefineSectionSystemPrompt,
@@ -25,6 +26,15 @@ test("classify task system prompt is unchanged", async () => {
 test("estimate task system prompt is unchanged", async () => {
   await expect(buildEstimateTaskSystemPrompt()).toMatchFileSnapshot(
     "./__snapshots__/estimate-task-system.md"
+  );
+});
+
+// A pure function of nothing, so it is also the assertion that it STAYS one:
+// every per-push value belongs in the user prompt, or the static prefix
+// prompt_cache_key: "untracked-work-v1" is caching stops being static.
+test("untracked work system prompt is unchanged", async () => {
+  await expect(buildUntrackedWorkSystemPrompt()).toMatchFileSnapshot(
+    "./__snapshots__/untracked-work-system.md"
   );
 });
 

@@ -249,6 +249,34 @@ export interface Release {
   created_at: string;
 }
 
+// One commit backing a release gap, snapshotted at scan time so the card renders
+// and the accept path links commits without a second GitHub call.
+export interface ReleaseGapCommit {
+  sha: string;
+  subject: string;
+  url: string;
+}
+
+// A proposed task for work that shipped in a push with nothing tracking it
+// (migration 0086) — the "you forgot to create a task" safeguard. Rendered under
+// its push on the Shipped timeline; accepting creates the task, dismissing
+// retires the suggestion for good. Never creates anything on its own.
+export interface ReleaseGap {
+  id: string;
+  release_id: string;
+  engagement_id: string | null;
+  repo_full_name: string;
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  type: TaskType;
+  tags: TaskTag[];
+  confidence: "high" | "medium" | "low";
+  evidence: ReleaseGapCommit[];
+  files: string[];
+  created_at: string;
+}
+
 // A task.changes_requested audit entry projected for builder-facing UI.
 // metadata.note carries the operator's message (null when they sent it back
 // without a note).

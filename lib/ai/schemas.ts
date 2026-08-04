@@ -271,6 +271,44 @@ export const CommitTaskMatchResult = z.object({
     .default([]),
 });
 
+// Work that shipped in one push to main with no task behind it — the "you
+// forgot to create a task" safeguard (lib/actions/release-gaps.ts). Built on
+// TaskDraft so an accepted proposal is a straight field copy into tasks, the
+// same way every other draft in this file is. assumptions/followUp are omitted
+// for the ExtractedTaskDraft reason: strict mode forces every key into
+// `required`, so keeping them would make the model emit both on every item.
+export const UntrackedWorkItem = TaskDraft.omit({
+  assumptions: true,
+  followUp: true,
+}).extend({
+  // Commits backing the claim. Plain strings, not .uuid()-style validation, for
+  // the CommitTaskMatchResult reason: a hallucinated sha is filtered against the
+  // caller's whitelist anyway, and failing safeParse would throw away the real
+  // proposals alongside it (lib/tasks/untracked-filter.ts).
+  shas: z.preprocess(
+    (v) => (Array.isArray(v) ? v.slice(0, 20) : v),
+    z.array(z.string().min(7).max(64)).max(20)
+  ).default([]),
+  // The paths that make the case, echoed back on the card so the builder can
+  // see what the claim rests on without opening GitHub.
+  files: z.preprocess(
+    (v) => (Array.isArray(v) ? v.slice(0, 10) : v),
+    z.array(z.string().min(1).max(200)).max(10)
+  ).default([]),
+  // How sure the model is that this was a real, separate piece of work nobody
+  // tracked. "low" never reaches the builder — the filter drops it.
+  confidence: z.enum(DRAFT_CONFIDENCE).default("medium"),
+});
+
+export const UntrackedWorkResult = z.object({
+  // Soft-truncate rather than relying on .max() alone (strict mode strips
+  // maxItems), same posture as ExtractTasksResult. The filter cuts this to
+  // MAX_GAPS_PER_PUSH afterwards; the cap here only stops a runaway response.
+  items: z
+    .preprocess((v) => (Array.isArray(v) ? v.slice(0, 6) : v), z.array(UntrackedWorkItem).max(6))
+    .default([]),
+});
+
 export const ProjectProfileResult = z.object({
   summary: z.string().min(20).max(600),
   audience: z.string().min(10).max(400),
