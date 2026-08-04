@@ -74,6 +74,14 @@ export default async function OnboardingPage() {
     avatarUrl = signed?.signedUrl ?? null;
   }
 
+  // default_hourly_rate is NOT NULL with a column default of 45 (0058), so a
+  // builder who has never reached the charging step still reads a number back —
+  // and the wizard presented it as their own answer, pre-filled and badged "Set".
+  // Clicking straight through then seeded every future quote with a rate nobody
+  // typed. pricing_model is the other half of that same question and starts
+  // null, so it tells a schema default apart from a real answer.
+  const pricingModel = (bp?.pricing_model as PricingModel | null) ?? null;
+
   const builderProfile: OnboardingBuilderProfile = {
     displayName: profile.display_name ?? "",
     agencyName: (bp?.agency_name as string | null) ?? null,
@@ -81,8 +89,8 @@ export default async function OnboardingPage() {
     agencyWebsite: (bp?.agency_website as string | null) ?? null,
     agencyType: (bp?.agency_type as AgencyType | null) ?? null,
     agencySize: (bp?.agency_size as AgencySize | null) ?? null,
-    pricingModel: (bp?.pricing_model as PricingModel | null) ?? null,
-    hourlyRate: (bp?.default_hourly_rate as number | null) ?? null,
+    pricingModel,
+    hourlyRate: pricingModel ? ((bp?.default_hourly_rate as number | null) ?? null) : null,
     avatarUrl,
   };
 
