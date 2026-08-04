@@ -8,6 +8,8 @@ import {
   getBranchesByEngagement,
   warmEngagementBranches,
 } from "@/lib/actions/get-engagement-branches";
+import { getReleasesByEngagement } from "@/lib/actions/releases";
+import { getPendingReleaseGaps } from "@/lib/actions/get-release-gaps";
 import { StagingBoard } from "@/components/staging-board";
 import type { Task, StagingGroup } from "@/lib/types";
 
@@ -58,6 +60,11 @@ export default async function StagingPage() {
           .order("created_at", { ascending: true })
       : { data: [] };
   const stagingGroups = (groupRows ?? []) as StagingGroup[];
+  // The pushes those done tasks went live in — drives the Shipped timeline.
+  const releases = await getReleasesByEngagement(engagementIds);
+  // Work those pushes shipped with no task behind it. Scoped to releases the
+  // read above already authorized, which is what lets it use the admin client.
+  const gapsByRelease = await getPendingReleaseGaps(releases.map((r) => r.id));
   // Unlike the other boards, this page *renders* a bucket per live branch — a
   // branch deleted on GitHub would show up as an empty group. So freshen before
   // reading rather than in `after()`: the check is two queries when the cache is
@@ -84,9 +91,9 @@ export default async function StagingPage() {
           <div className="krowe-board-titlewrap">
             <h1 className="krowe-board-title">Staging</h1>
             <div className="krowe-board-sub">
-              <span>Done work, grouped by branch.</span>
+              <span>Where done work is waiting, by branch.</span>
               <span className="sep">·</span>
-              <span>See what&apos;s queued for the next push.</span>
+              <span>And every push to main, with what went out in it.</span>
             </div>
           </div>
         </div>
@@ -97,6 +104,8 @@ export default async function StagingPage() {
           currentUserId={profile.id}
           stagingGroups={stagingGroups}
           branchesByEngagement={branchesByEngagement}
+          releases={releases}
+          gapsByRelease={gapsByRelease}
         />
       </div>
     </main>

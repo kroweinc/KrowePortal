@@ -843,6 +843,79 @@ textarea:focus-visible {
   color: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
 }
 
+/* Shipped timeline, grouped by the day work went live. Several pushes a day is
+   normal, and as a flat list they were indistinguishable — every row showed the
+   same date. The date sits on the header now; each push below names its merge. */
+.krowe-stage-days { display: flex; flex-direction: column; gap: 26px; }
+.krowe-stage-day { display: flex; flex-direction: column; gap: 13px; }
+.krowe-stage-day-head {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 3px 6px; margin-left: -6px;
+  background: none; border: none; border-radius: var(--radius-md);
+  color: var(--muted-foreground); text-align: left; cursor: pointer;
+}
+.krowe-stage-day-head:hover .krowe-stage-day-label { color: var(--primary); }
+.krowe-stage-day-chevron {
+  flex-shrink: 0; color: var(--faint-foreground);
+  transition: transform 170ms var(--ease-out-smooth);
+}
+.krowe-stage-day-chevron.is-collapsed { transform: rotate(-90deg); }
+.krowe-stage-day-label {
+  font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em;
+  color: var(--foreground); white-space: nowrap;
+  transition: color 170ms var(--ease-out-smooth);
+}
+.krowe-stage-day-count {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--muted-foreground); white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .krowe-stage-day-chevron { transition: none; }
+}
+
+/* One entry per push (migration 0084). Reuses the branch group shell; what's
+   added here is the select checkbox, the merge line, and the folded-in child
+   merges shown under a combined release. */
+.krowe-stage-release.is-selected {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 4%, white);
+}
+/* Dated-but-ungrouped work, and the undated tail — real history, but no push
+   was ever recorded for it, so it reads quieter than a true release. */
+.krowe-stage-release.is-derived {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-subtle) 30%, white);
+}
+.krowe-stage-rel-check {
+  flex-shrink: 0; margin: 0; cursor: pointer;
+  accent-color: var(--primary);
+}
+.krowe-stage-rel-name {
+  font-size: 13.5px; font-weight: 600; color: var(--foreground);
+  letter-spacing: -0.01em; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Which merge this was: the branch it carried, the sha, the time it landed.
+   Mono because every part of it is an identifier, not prose. */
+.krowe-stage-rel-meta {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--faint-foreground); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-stage-rel-kids {
+  display: flex; flex-direction: column; gap: 3px;
+  margin: 0 0 12px; padding: 0 0 0 11px; list-style: none;
+  border-left: 1px solid var(--border);
+}
+.krowe-stage-rel-kid {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--muted-foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-stage-rel-kid .sha { color: var(--faint-foreground); }
+/* Sits in the section head; appears once two or more releases are selected. */
+.krowe-stage-combinebar { display: inline-flex; align-items: center; gap: 6px; }
+
 /* Untracked work (0086) — a proposed task for something this push shipped with
    nothing tracking it. One cell in the push's card grid, on the same metrics as
    .krowe-card so it sits in the row rather than interrupting it. What keeps it

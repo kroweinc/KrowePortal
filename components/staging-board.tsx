@@ -2,7 +2,20 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import { GitBranch, Layers, Plus, Pencil, Trash2, Check, X, Rocket, RefreshCw } from "lucide-react";
+import {
+  GitBranch,
+  Layers,
+  Plus,
+  Pencil,
+  Trash2,
+  Check,
+  X,
+  Rocket,
+  RefreshCw,
+  Merge,
+  Ungroup,
+  ChevronDown,
+} from "lucide-react";
 import { toast } from "sonner";
 import { TaskCard } from "@/components/task-card";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
@@ -11,14 +24,22 @@ import {
   renameStagingGroup,
   deleteStagingGroup,
 } from "@/lib/actions/staging-groups";
-import { setTasksPushedToMain, pollBranchMerges } from "@/lib/actions/tasks";
+import { combineReleases, splitRelease, renameRelease } from "@/lib/actions/releases";
+import { parseMergedBranch } from "@/lib/github/merge-subject";
+import { setTasksPushedToMain, pollMainMerges } from "@/lib/actions/tasks";
+import { pollReleaseGaps } from "@/lib/actions/release-gaps";
+import { ReleaseGapCard } from "@/components/release-gap-card";
 import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 import {
   groupTasksByBranch,
   groupTasksByStagingGroup,
+  groupTasksByRelease,
+  groupReleasesByDay,
   type TaskBucket,
+  type ReleaseBucket,
+  type ReleaseDay,
 } from "@/lib/tasks/staging-grouping";
-import type { Task, Engagement, StagingGroup } from "@/lib/types";
+import type { Task, Engagement, StagingGroup, Release, ReleaseGap } from "@/lib/types";
 
 interface StagingBoardProps {
   tasks: Task[];
@@ -30,12 +51,70 @@ interface StagingBoardProps {
   stagingGroups: StagingGroup[];
   // Cached repo branches keyed by engagement id, for the detail sheet chips.
   branchesByEngagement: Record<string, PreloadedBranches>;
+  // Every push these tasks went live in — drives the Shipped timeline.
+  releases: Release[];
+  // Proposed tasks for work a push shipped with nothing tracking it, by release.
+  gapsByRelease: Record<string, ReleaseGap[]>;
 }
 
 type GroupMode = "branch" | "staging";
 
 function plural(n: number, one: string, many: string = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
+}
+
+// UTC everywhere, matching how groupTasksByRelease buckets days — a local-time
+// format would render differently on the server and the client.
+const SHIP_DATE = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+// Weekday too on a day header: it's the row a builder scans to find "the Friday
+// push", and it has the width for it where a per-release chip did not.
+const SHIP_DAY = new Intl.DateTimeFormat("en-US", {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+const SHIP_TIME = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC",
+});
+
+function shipDate(iso: string): string {
+  return SHIP_DATE.format(new Date(iso));
+}
+
+/**
+ * The branch a push carried, for the meta line.
+ *
+ * `branch_name` is the recorded answer but it is often null when one exists:
+ * the Phase 9 reconstruction left it unset, and the column only ever held what
+ * a merge subject already says. So fall back to re-reading the subject — saying
+ * "direct push to main" above a row titled "Merge branch 'dev' into main" is
+ * worse than saying nothing. Null means genuinely no branch to name.
+ */
+function mergedBranch(release: Release): string | null {
+  if (release.branch_name) return release.branch_name;
+  return release.merge_subject ? parseMergedBranch(release.merge_subject) : null;
+}
+
+function shipDayLabel(iso: string): string {
+  return SHIP_DAY.format(new Date(iso));
+}
+
+// The clock time a push landed — what separates two pushes on the same day now
+// that the date has moved up to the header. Suffixed so it can't be misread as
+// the viewer's local time, since the whole timeline is bucketed in UTC.
+function shipTime(iso: string): string {
+  return `${SHIP_TIME.format(new Date(iso))} UTC`;
 }
 
 export function StagingBoard({
@@ -45,6 +124,8 @@ export function StagingBoard({
   currentUserId,
   stagingGroups,
   branchesByEngagement,
+  releases,
+  gapsByRelease,
 }: StagingBoardProps) {
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const router = useRouter();
@@ -60,33 +141,145 @@ export function StagingBoard({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // PR-merge auto-detect: on mount and whenever "Check for pushes" bumps the
-  // tick, ask the server which staged branches were merged into main and move
-  // their tasks to Shipped, toasting (with Undo) for each.
+  // Shipped timeline: pick two or more pushes and fold them into one named
+  // release. Only real releases are selectable — a per-day bucket has no row to
+  // combine. Renaming reuses the same inline-edit shape as staging groups.
+  const [selectedReleases, setSelectedReleases] = useState<Set<string>>(new Set());
+  const [combineTitle, setCombineTitle] = useState("");
+  const [namingCombine, setNamingCombine] = useState(false);
+  const [renamingReleaseId, setRenamingReleaseId] = useState<string | null>(null);
+  const [releaseName, setReleaseName] = useState("");
+
+  // Days start open — the timeline is the point of the page. Collapsing is for
+  // getting a long history out of the way, so only what's shut is tracked.
+  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
+
+  function toggleDay(key: string) {
+    setCollapsedDays((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleRelease(id: string) {
+    setSelectedReleases((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function resetCombine() {
+    setSelectedReleases(new Set());
+    setCombineTitle("");
+    setNamingCombine(false);
+  }
+
+  function doCombine() {
+    const ids = Array.from(selectedReleases);
+    const title = combineTitle.trim();
+    if (ids.length < 2 || !title) return;
+    startTransition(async () => {
+      const res = await combineReleases(ids, title);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Combined ${plural(ids.length, "push", "pushes")} into “${title}”`);
+      resetCombine();
+      router.refresh();
+    });
+  }
+
+  function doSplit(releaseId: string, label: string) {
+    startTransition(async () => {
+      const res = await splitRelease(releaseId);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(`Split “${label}” back into its own pushes`);
+      resetCombine();
+      router.refresh();
+    });
+  }
+
+  function doRenameRelease(releaseId: string) {
+    const title = releaseName.trim();
+    if (!title) {
+      setRenamingReleaseId(null);
+      return;
+    }
+    startTransition(async () => {
+      const res = await renameRelease(releaseId, title);
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      setRenamingReleaseId(null);
+      router.refresh();
+    });
+  }
+
+  // Push auto-detect: on mount and whenever "Check for pushes" bumps the tick,
+  // ask the server whether a new merge reached main and move everything waiting
+  // in Next push to Shipped, toasting (with Undo) for each push.
   const [pollTick, setPollTick] = useState(0);
   const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     const ids = engagements.map((e) => e.id);
-    // Nothing to detect unless some done task is queued for the next push on a
-    // real branch — skip the GitHub/DB round-trips otherwise.
-    const hasStaged = tasks.some((t) => !t.pushed_to_main && t.branch_name);
-    if (ids.length === 0 || !hasStaged) return;
+    if (ids.length === 0) return;
     let cancelled = false;
     setChecking(true);
-    pollBranchMerges(ids)
+
+    // Nothing to MOVE unless something is queued for the next push — the branch
+    // is a label, so an untagged task counts just the same. The gap scan below
+    // runs either way: a push where the builder queued nothing at all is
+    // precisely the one it exists to catch.
+    const hasStaged = tasks.some((t) => !t.pushed_to_main);
+    const detect = hasStaged
+      ? pollMainMerges(ids)
+      : Promise.resolve([] as Awaited<ReturnType<typeof pollMainMerges>>);
+
+    detect
       .then((results) => {
-        if (cancelled) return;
+        if (cancelled) return [];
         for (const r of results) {
-          toast.success(`Moved ${plural(r.taskIds.length, "task")} on ${r.branch} to Shipped`, {
-            action: {
-              label: "Undo",
-              onClick: () =>
-                setTasksPushedToMain(r.taskIds, false).then(() => router.refresh()),
-            },
-          });
+          toast.success(
+            `Shipped ${plural(r.taskIds.length, "task")} to main${
+              r.branch ? ` via ${r.branch}` : ""
+            }`,
+            {
+              action: {
+                label: "Undo",
+                onClick: () =>
+                  setTasksPushedToMain(r.taskIds, false).then(() => router.refresh()),
+              },
+            }
+          );
         }
+        return results;
+      })
+      .catch(() => [])
+      .then(async (results) => {
+        // The fast half is done; release the button before the scan, which is an
+        // AI call and takes seconds.
+        if (!cancelled) setChecking(false);
         if (results.length > 0) router.refresh();
+
+        // Strictly after the merge poll — that call is what records the releases
+        // this reads, so a push detected a moment ago is scannable in this pass.
+        const gaps = await pollReleaseGaps(ids).catch(() => ({ found: 0 }));
+        if (cancelled || gaps.found === 0) return;
+        toast.message(
+          `Found ${plural(gaps.found, "thing")} that shipped without a task`,
+          { description: "Look under the push it went out in." }
+        );
+        router.refresh();
       })
       .catch(() => {})
       .finally(() => {
@@ -363,24 +556,296 @@ export function StagingBoard({
     );
   }
 
-  function renderSection(
-    kind: "staged" | "shipped",
-    title: string,
-    empty: string,
-    groups: TaskBucket[]
-  ) {
+  // One entry on the Shipped timeline. A real release is selectable and
+  // nameable; the per-day and undated buckets are reconstructed history with no
+  // row behind them, so they render quieter and carry no actions.
+  function renderRelease(b: ReleaseBucket) {
+    const release = b.release;
+    const selected = release !== null && selectedReleases.has(release.id);
+    const renaming = release !== null && renamingReleaseId === release.id;
+
+    // The day header owns the date now, so the row says what the push *was*:
+    // the builder's name for it, else the merge commit's subject, else the
+    // branch it brought in — and only as a last resort the bare sha.
+    const label =
+      b.label ??
+      (b.kind === "day"
+        ? "Marked live individually"
+        : b.kind === "unknown"
+          ? "Earlier · date unknown"
+          : release?.merge_sha
+            ? `Push ${release.merge_sha.slice(0, 7)}`
+            : "Marked live");
+
+    // Which merge this was. A merge commit names the branch it brought in; a
+    // plain push to main names none, and saying so beats an empty gap.
+    const metaParts =
+      b.kind === "day"
+        ? ["No push recorded — marked live one by one"]
+        : b.kind === "unknown"
+          ? ["Shipped before pushes were tracked"]
+          : release?.kind === "combined"
+            ? [`${plural(b.children.length, "push", "pushes")} folded together`]
+            : [
+                release?.kind === "auto"
+                  ? (mergedBranch(release) ?? "direct push to main")
+                  : (release?.branch_name ?? "marked live by hand"),
+                release?.merge_sha?.slice(0, 7),
+                b.shippedAt ? shipTime(b.shippedAt) : null,
+              ];
+    // Drop anything the label already says, so a branch-named push doesn't read
+    // "dev · dev · 4:19 PM".
+    const meta = metaParts
+      .filter((p): p is string => Boolean(p) && p !== label)
+      .join(" · ");
+
+    return (
+      <div
+        key={b.key}
+        className={`krowe-stage-group krowe-stage-release${
+          selected ? " is-selected" : ""
+        }${b.kind === "release" ? "" : " is-derived"}`}
+      >
+        <div className="krowe-stage-group-head">
+          {release && (
+            <input
+              type="checkbox"
+              className="krowe-stage-rel-check"
+              checked={selected}
+              disabled={isPending}
+              aria-label={`Select ${label} to combine`}
+              onChange={() => toggleRelease(release.id)}
+            />
+          )}
+          {release?.kind === "combined" ? (
+            <Layers width={14} height={14} strokeWidth={2} />
+          ) : (
+            <Rocket width={14} height={14} strokeWidth={2} />
+          )}
+          {renaming && release ? (
+            <input
+              aria-label="Rename release"
+              className="krowe-stage-newgroup-input"
+              value={releaseName}
+              onChange={(e) => setReleaseName(e.target.value)}
+              maxLength={120}
+              disabled={isPending}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  doRenameRelease(release.id);
+                } else if (e.key === "Escape") {
+                  setRenamingReleaseId(null);
+                }
+              }}
+            />
+          ) : (
+            <span className="krowe-stage-rel-name">{label}</span>
+          )}
+          {meta && <span className="krowe-stage-rel-meta">{meta}</span>}
+          <span className="krowe-stage-count">{b.tasks.length}</span>
+          {release && !renaming && (
+            <div className="krowe-stage-group-actions">
+              <button
+                type="button"
+                className="krowe-stage-group-action"
+                aria-label={`Rename ${label}`}
+                disabled={isPending}
+                onClick={() => {
+                  setRenamingReleaseId(release.id);
+                  setReleaseName(release.title ?? "");
+                }}
+              >
+                <Pencil width={13} height={13} />
+              </button>
+              {release.kind === "combined" && (
+                <button
+                  type="button"
+                  className="krowe-stage-group-action"
+                  aria-label={`Split ${label}`}
+                  title="Split back into separate pushes"
+                  disabled={isPending}
+                  onClick={() => doSplit(release.id, label)}
+                >
+                  <Ungroup width={13} height={13} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        {b.children.length > 0 && (
+          <ul className="krowe-stage-rel-kids">
+            {b.children.map((c) => (
+              <li key={c.id} className="krowe-stage-rel-kid">
+                {c.merge_subject ?? c.branch_name ?? "push"}
+                {c.merge_sha && <span className="sha"> · {c.merge_sha.slice(0, 7)}</span>}
+                <span className="sha"> · {shipDate(c.shipped_at)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="krowe-stage-cards">
+          {b.tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              role="builder"
+              engagementTitle={engagementMap.get(task.engagement_id)}
+              onSelect={(t) => syncSelected(t.id)}
+            />
+          ))}
+          {/* Work this push carried that no task describes. One more cell in the
+              same grid, on task-card metrics, so it reads as part of the push
+              rather than as a notice bolted underneath. */}
+          {b.gaps.map((gap) => (
+            <ReleaseGapCard key={gap.id} gap={gap} pushLabel={label} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // A calendar day, with every push that landed on it nested underneath. Two
+  // pushes on one date used to render as two identical-looking rows; the date
+  // lives here now, and each push below identifies itself by its merge.
+  function renderDay(day: ReleaseDay) {
+    const collapsed = collapsedDays.has(day.key);
+    const heading = day.shippedAt ? shipDayLabel(day.shippedAt) : "Date unknown";
+    return (
+      <section key={day.key} className="krowe-stage-day">
+        <button
+          type="button"
+          className="krowe-stage-day-head"
+          aria-expanded={!collapsed}
+          onClick={() => toggleDay(day.key)}
+        >
+          <ChevronDown
+            className={`krowe-stage-day-chevron${collapsed ? " is-collapsed" : ""}`}
+            width={14}
+            height={14}
+            strokeWidth={2.2}
+            aria-hidden="true"
+          />
+          <span className="krowe-stage-day-label">{heading}</span>
+          <span className="krowe-stage-day-count">
+            {plural(day.pushes.length, "push", "pushes")} ·{" "}
+            {plural(day.taskCount, "task")}
+          </span>
+          {/* A collapsed day still says there is something to look at inside. */}
+          {day.gapCount > 0 && (
+            <span className="krowe-stage-day-gaps">
+              {day.gapCount} not tracked
+            </span>
+          )}
+          <span className="krowe-stage-rule" />
+        </button>
+        {!collapsed && (
+          <div className="krowe-stage-groups">{day.pushes.map(renderRelease)}</div>
+        )}
+      </section>
+    );
+  }
+
+  function renderShippedSection(buckets: ReleaseBucket[]) {
+    const total = buckets.reduce((n, b) => n + b.tasks.length, 0);
+    const days = groupReleasesByDay(buckets);
+    const selectedCount = selectedReleases.size;
+    return (
+      <section className="krowe-stage-section">
+        <div className="krowe-stage-section-head">
+          <span className="krowe-stage-badge shipped">Shipped</span>
+          {buckets.length > 0 && (
+            <span className="krowe-stage-section-count">
+              {plural(days.length, "day")} · {plural(buckets.length, "push", "pushes")}{" "}
+              · {plural(total, "task")}
+            </span>
+          )}
+          <span className="krowe-stage-rule" />
+          {selectedCount >= 2 &&
+            (namingCombine ? (
+              <div className="krowe-stage-newgroup-edit">
+                <input
+                  aria-label="Name for the combined release"
+                  value={combineTitle}
+                  onChange={(e) => setCombineTitle(e.target.value)}
+                  placeholder="e.g. Security + staging UI"
+                  maxLength={120}
+                  disabled={isPending}
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      doCombine();
+                    } else if (e.key === "Escape") {
+                      setNamingCombine(false);
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="krowe-stage-groupby-btn active"
+                  disabled={isPending || !combineTitle.trim()}
+                  onClick={doCombine}
+                >
+                  Combine
+                </button>
+                <button
+                  type="button"
+                  className="krowe-staging-cancel"
+                  disabled={isPending}
+                  onClick={() => setNamingCombine(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="krowe-stage-combinebar">
+                <button
+                  type="button"
+                  className="krowe-stage-check"
+                  disabled={isPending}
+                  onClick={() => setNamingCombine(true)}
+                >
+                  <Merge width={13} height={13} />
+                  Combine {selectedCount} into one release
+                </button>
+                <button
+                  type="button"
+                  className="krowe-staging-cancel"
+                  disabled={isPending}
+                  onClick={resetCombine}
+                >
+                  Clear
+                </button>
+              </div>
+            ))}
+        </div>
+        {buckets.length === 0 ? (
+          <div className="krowe-stage-empty">
+            Nothing shipped yet — once a branch lands on main, the push and everything
+            in it show up here.
+          </div>
+        ) : (
+          <div className="krowe-stage-days">{days.map(renderDay)}</div>
+        )}
+      </section>
+    );
+  }
+
+  function renderStagedSection(groups: TaskBucket[]) {
     const total = groups.reduce((n, g) => n + g.tasks.length, 0);
     return (
       <section className="krowe-stage-section">
         <div className="krowe-stage-section-head">
-          <span className={`krowe-stage-badge ${kind}`}>{title}</span>
+          <span className="krowe-stage-badge staged">Next push</span>
           {groups.length > 0 && (
             <span className="krowe-stage-section-count">
               {plural(groups.length, "branch", "branches")} · {plural(total, "task")}
             </span>
           )}
           <span className="krowe-stage-rule" />
-          {kind === "staged" && engagements.length > 0 && (
+          {engagements.length > 0 && (
             <button
               type="button"
               className="krowe-stage-check"
@@ -394,10 +859,12 @@ export function StagingBoard({
           )}
         </div>
         {groups.length === 0 ? (
-          <div className="krowe-stage-empty">{empty}</div>
+          <div className="krowe-stage-empty">
+            Nothing queued — completed work that isn&apos;t pushed to main shows up here.
+          </div>
         ) : (
           <div className="krowe-stage-groups">
-            {groups.map((g) => renderGroup(g, kind))}
+            {groups.map((g) => renderGroup(g, "staged"))}
           </div>
         )}
       </section>
@@ -433,14 +900,30 @@ export function StagingBoard({
     liveBranchNames,
     excludeFromEmpty
   );
-  const shippedGroups = groupTasksByBranch(visibleTasks.filter((t) => t.pushed_to_main));
+  // Shipped work is grouped by the push it went live in, not by branch — that's
+  // the whole point of the timeline. Releases are scoped to the same filter as
+  // the tasks so an "All"-only release can't leak into a single-client view.
+  const visibleReleases =
+    engagementFilter === null
+      ? releases
+      : engagementFilter === "personal"
+        ? releases.filter((r) => r.engagement_id === null)
+        : releases.filter((r) => r.engagement_id === engagementFilter);
+  const shippedBuckets = groupTasksByRelease(
+    visibleTasks.filter((t) => t.pushed_to_main),
+    visibleReleases,
+    gapsByRelease
+  );
   const groups = groupTasksByStagingGroup(visibleTasks, visibleGroupDefs);
 
   // Flat, on-screen order of task ids for the sheet's prev/next stepping. Empty
   // branch rows contribute nothing, so navigation walks only real tasks.
   const orderedIds =
     mode === "branch"
-      ? [...stagedGroups, ...shippedGroups].flatMap((g) => g.tasks.map((t) => t.id))
+      ? [
+          ...stagedGroups.flatMap((g) => g.tasks.map((t) => t.id)),
+          ...shippedBuckets.flatMap((b) => b.tasks.map((t) => t.id)),
+        ]
       : groups.flatMap((g) => g.tasks.map((t) => t.id));
 
   return (
@@ -561,24 +1044,14 @@ export function StagingBoard({
       )}
 
       {mode === "branch" ? (
-        stagedGroups.length === 0 && shippedGroups.length === 0 ? (
+        stagedGroups.length === 0 && shippedBuckets.length === 0 ? (
           <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
             Nothing here yet — finish a task and it lands in staging, ready to group by branch.
           </div>
         ) : (
           <div className="krowe-stage-wrap">
-            {renderSection(
-              "staged",
-              "Next push",
-              "Nothing queued — completed work that isn't pushed to main shows up here.",
-              stagedGroups
-            )}
-            {renderSection(
-              "shipped",
-              "Shipped",
-              "Nothing shipped yet — tasks marked “pushed to main” land here once they go live.",
-              shippedGroups
-            )}
+            {renderStagedSection(stagedGroups)}
+            {renderShippedSection(shippedBuckets)}
           </div>
         )
       ) : groups.length === 0 ? (
