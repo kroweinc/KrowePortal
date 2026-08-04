@@ -18,12 +18,25 @@ import { getPublicAppOrigin } from "@/lib/app-origin";
  * dev (no RESEND_API_KEY) sendEmail is a silent no-op.
  */
 
-export type NotifyType = "doc_signed" | "change_order" | "invite_accepted";
+export type NotifyType =
+  | "doc_signed"
+  | "change_order"
+  | "invite_accepted"
+  | "task_approval_requested"
+  | "task_approved"
+  | "task_changes_requested"
+  | "task_delivered"
+  | "task_comment";
 
 const PREF_COLUMN: Record<NotifyType, string> = {
   doc_signed: "notify_doc_signed",
   change_order: "notify_change_order",
   invite_accepted: "notify_invite_accepted",
+  task_approval_requested: "notify_task_approval_requested",
+  task_approved: "notify_task_approved",
+  task_changes_requested: "notify_task_changes_requested",
+  task_delivered: "notify_task_delivered",
+  task_comment: "notify_task_comment",
 };
 
 export function escapeHtml(value: string): string {
@@ -145,6 +158,120 @@ export function inviteAcceptedEmail(opts: {
       body: `<p><strong>${escapeHtml(opts.operatorName)}</strong> accepted your invite and now has access to <strong>${escapeHtml(opts.engagementTitle)}</strong>.</p>`,
       ctaLabel: "Open client",
       ctaPath: `/b/engagements/${opts.engagementId}`,
+    }),
+  };
+}
+
+// ── Task-lifecycle builders ──────────────────────────────────────────────────
+// The builder<->operator handoff emails. Note text (a builder's submission note
+// or an operator's send-back message) is rendered in a quoted block when present.
+
+/** Renders a person's note as a quoted block, or nothing when absent/blank. */
+function noteBlock(note: string | null | undefined): string {
+  const trimmed = note?.trim();
+  if (!trimmed) return "";
+  return `<div style="margin-top:16px;padding:12px 14px;background:#fafaf9;border-left:3px solid #f97316;border-radius:8px;font-size:14px;line-height:1.5;color:#44403c;white-space:pre-wrap;">${escapeHtml(trimmed)}</div>`;
+}
+
+export function taskApprovalRequestedEmail(opts: {
+  taskTitle: string;
+  builderName: string;
+  note: string | null;
+}): { subject: string; html: string } {
+  return {
+    subject: `Review requested — ${opts.taskTitle}`,
+    html: renderEmail({
+      heading: "A task is ready for your review",
+      body: `<p><strong>${escapeHtml(opts.builderName)}</strong> sent <strong>${escapeHtml(opts.taskTitle)}</strong> for your approval.</p>${noteBlock(opts.note)}`,
+      ctaLabel: "Review task",
+      ctaPath: `/o`,
+    }),
+  };
+}
+
+export function taskApprovedEmail(opts: {
+  taskTitle: string;
+  operatorName: string;
+}): { subject: string; html: string } {
+  return {
+    subject: `Approved — ${opts.taskTitle}`,
+    html: renderEmail({
+      heading: "Task approved",
+      body: `<p><strong>${escapeHtml(opts.operatorName)}</strong> approved <strong>${escapeHtml(opts.taskTitle)}</strong>. You're clear to ship it.</p>`,
+      ctaLabel: "Open board",
+      ctaPath: `/b`,
+    }),
+  };
+}
+
+export function taskChangesRequestedEmail(opts: {
+  taskTitle: string;
+  operatorName: string;
+  note: string | null;
+}): { subject: string; html: string } {
+  return {
+    subject: `Changes requested — ${opts.taskTitle}`,
+    html: renderEmail({
+      heading: "Changes requested",
+      body: `<p><strong>${escapeHtml(opts.operatorName)}</strong> sent <strong>${escapeHtml(opts.taskTitle)}</strong> back for changes.</p>${noteBlock(opts.note)}`,
+      ctaLabel: "Open task",
+      ctaPath: `/b`,
+    }),
+  };
+}
+
+export function taskDeliveredEmail(opts: {
+  taskTitle: string;
+  builderName: string;
+  note: string | null;
+}): { subject: string; html: string } {
+  return {
+    subject: `Delivered — ${opts.taskTitle}`,
+    html: renderEmail({
+      heading: "Task delivered",
+      body: `<p><strong>${escapeHtml(opts.builderName)}</strong> marked <strong>${escapeHtml(opts.taskTitle)}</strong> as done.</p>${noteBlock(opts.note)}`,
+      ctaLabel: "View delivery",
+      ctaPath: `/o`,
+    }),
+  };
+}
+
+/** Someone commented on a task the recipient is on (migration 0082). The CTA
+    goes to the recipient's own board, which is the opposite of the author's —
+    a builder's comment reaches the operator, and vice versa. A comment posted
+    with "Request a change" doesn't come through here: it sends
+    taskChangesRequestedEmail instead, so the recipient gets one mail, not two. */
+export function taskCommentEmail(opts: {
+  taskTitle: string;
+  authorName: string;
+  authorRole: "operator" | "builder";
+  body: string;
+}): { subject: string; html: string } {
+  return {
+    subject: `New comment — ${opts.taskTitle}`,
+    html: renderEmail({
+      heading: "New comment on a task",
+      body: `<p><strong>${escapeHtml(opts.authorName)}</strong> commented on <strong>${escapeHtml(opts.taskTitle)}</strong>.</p>${noteBlock(opts.body)}`,
+      ctaLabel: "Read and reply",
+      ctaPath: opts.authorRole === "builder" ? `/o` : `/b`,
+    }),
+  };
+}
+
+/** Cold email to a prospect who is not yet a Krowe user — sent directly via
+    sendEmail (no notifyUser / preference row exists for a non-account). */
+export function inviteLinkEmail(opts: {
+  builderName: string;
+  engagementTitle: string;
+  token: string;
+}): { subject: string; html: string } {
+  return {
+    subject: `${opts.builderName} invited you to Krowe`,
+    html: renderEmail({
+      heading: "You've been invited",
+      body: `<p><strong>${escapeHtml(opts.builderName)}</strong> invited you to collaborate on <strong>${escapeHtml(opts.engagementTitle)}</strong> in Krowe Portal.</p><p>Accept the invite to follow progress, review work, and approve deliverables.</p>`,
+      ctaLabel: "Accept invite",
+      ctaPath: `/join/${opts.token}`,
     }),
   };
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, CornerUpLeft, Pin, RotateCcw, Trash2 } from "lucide-react";
+import { CalendarDays, Check, CheckCheck, CornerUpLeft, Pin, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateTaskStatus } from "@/lib/actions/tasks";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -22,6 +22,7 @@ import {
   isAwaitingApproval,
   relativeTime,
 } from "@/lib/utils";
+import type { PendingCommitMatch } from "@/lib/actions/get-commit-task-matches";
 import type { Task, Role, TaskStatus } from "@/lib/types";
 
 interface TaskCardProps {
@@ -35,15 +36,43 @@ interface TaskCardProps {
   onStatusMove?: (taskId: string, status: TaskStatus) => void;
   onDragStart?: (task: Task) => void;
   onDragEnd?: () => void;
+  // Multi-select: when onToggleSelect is provided the card grows a checkbox
+  // (revealed on hover, and pinned open once any card is selected). `selected`
+  // is this card's state; `selectionMode` = at least one card is selected.
+  selected?: boolean;
+  selectionMode?: boolean;
+  onToggleSelect?: (task: Task) => void;
+  // A commit on the default branch that looks like it finished this task. The
+  // card strikes the title through and asks the builder to confirm — the task is
+  // never marked done off the back of a match alone.
+  commitMatch?: PendingCommitMatch;
+  onConfirmMatch?: (task: Task) => void;
+  onDismissMatch?: (task: Task) => void;
 }
 
-export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDragEnd }: TaskCardProps) {
+export function TaskCard({
+  task,
+  role,
+  onSelect,
+  onStatusMove,
+  onDragStart,
+  onDragEnd,
+  selected = false,
+  selectionMode = false,
+  onToggleSelect,
+  commitMatch,
+  onConfirmMatch,
+  onDismissMatch,
+}: TaskCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [confirm, confirmDialog] = useConfirm();
   const requestDone = useRequestDone();
   const requestApproval = useRequestApproval();
   const advance = getTaskAdvance(task);
   const changeRequest = getActiveChangeRequest(task);
+  // Builder-only, and never on a card that's already done — completion authority
+  // stays with whoever wrote the code, and a done task has nothing to confirm.
+  const showMatch = !!commitMatch && role === "builder" && task.status !== "done";
   const taskMenu = useTaskMenu({
     task,
     role,
@@ -51,12 +80,17 @@ export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDr
     onStatusMove,
     requestDone,
     requestApproval,
+    selected,
+    onToggleSelect: onToggleSelect ? () => onToggleSelect(task) : undefined,
   });
 
   async function handleAdvance() {
     if (!advance) return;
     if (advance.kind === "done") {
-      requestDone({ task });
+      // Prefer the board's optimistic mover so the card flips to Done instantly;
+      // fall back to the dialog directly where there's no board (staging board).
+      if (onStatusMove) onStatusMove(task.id, "done");
+      else requestDone({ task });
     } else if (advance.kind === "approval") {
       requestApproval({ task });
     } else if (onStatusMove) {
@@ -69,7 +103,7 @@ export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDr
   return (
     <>
     <div
-      className={`krowe-card priority-${task.priority} status-${task.status} ${isAwaitingApproval(task) ? "approval-pending" : ""} ${isDragging ? "dragging" : ""}`}
+      className={`krowe-card priority-${task.priority} status-${task.status} ${isAwaitingApproval(task) ? "approval-pending" : ""} ${showMatch ? "likely-done" : ""} ${isDragging ? "dragging" : ""} ${selectionMode ? "selecting" : ""} ${selected ? "selected" : ""}`}
       draggable
       onDragStart={(e) => {
         setIsDragging(true);
@@ -90,6 +124,21 @@ export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDr
       <div className="krowe-rail" />
 
       <div className="krowe-card-row">
+        {onToggleSelect && (
+          <button
+            type="button"
+            className={`krowe-card-select ${selected ? "on" : ""}`}
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={selected ? "Deselect task" : "Select task"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect(task);
+            }}
+          >
+            {selected && <Check width={12} height={12} strokeWidth={3} />}
+          </button>
+        )}
         {task.status === "done" && (
           <span className="krowe-card-check" aria-hidden="true">
             <Check width={11} height={11} strokeWidth={3} />
@@ -158,6 +207,65 @@ export function TaskCard({ task, role, onSelect, onStatusMove, onDragStart, onDr
                   Resubmit
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMatch && commitMatch && (
+        <div className="krowe-card-shipped">
+          <div className="krowe-card-shipped-head">
+            <span className="badge">
+              <CheckCheck width={13} height={13} strokeWidth={2.2} />
+            </span>
+            <span className="h">Looks shipped</span>
+            {commitMatch.committedAt && (
+              <span className="t">{relativeTime(commitMatch.committedAt)}</span>
+            )}
+          </div>
+          <div className="krowe-card-shipped-body">
+            {commitMatch.url ? (
+              <a
+                className="krowe-card-shipped-commit"
+                href={commitMatch.url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="sha">{commitMatch.shortSha}</span>
+                <span className="msg">{commitMatch.subject}</span>
+              </a>
+            ) : (
+              <span className="krowe-card-shipped-commit">
+                <span className="sha">{commitMatch.shortSha}</span>
+                <span className="msg">{commitMatch.subject}</span>
+              </span>
+            )}
+            {commitMatch.reason && (
+              <p className="krowe-card-shipped-reason">{commitMatch.reason}</p>
+            )}
+            <div className="krowe-card-shipped-foot">
+              <button
+                type="button"
+                className="deny"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismissMatch?.(task);
+                }}
+              >
+                Not done
+              </button>
+              <button
+                type="button"
+                className="confirm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConfirmMatch?.(task);
+                }}
+              >
+                <Check width={13} height={13} strokeWidth={2.4} />
+                Confirm done
+              </button>
             </div>
           </div>
         </div>

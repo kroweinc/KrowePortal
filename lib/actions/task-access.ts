@@ -67,7 +67,7 @@ export async function isEngagementMember(
 }
 
 async function taskIdForChild(
-  table: "task_subtasks" | "task_attachments" | "task_commits",
+  table: "task_subtasks" | "task_attachments" | "task_commits" | "task_comments",
   childId: string
 ): Promise<string | null> {
   const admin = createAdminClient();
@@ -97,4 +97,23 @@ export async function isTaskCommitMember(
   if (DEV_PROFILE_IDS.has(profileId)) return true;
   const taskId = await taskIdForChild("task_commits", taskCommitId);
   return taskId ? isTaskMember(taskId, profileId) : false;
+}
+
+/** Editing and deleting a comment is author-only — membership isn't enough, or
+ *  a builder could rewrite the operator's words. Returns the parent task id so
+ *  the caller can write its audit entry without a second lookup. */
+export async function getOwnCommentTaskId(
+  commentId: string,
+  profileId: string
+): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("task_comments")
+    .select("task_id, author_id, deleted_at")
+    .eq("id", commentId)
+    .maybeSingle();
+
+  if (!data || data.deleted_at) return null;
+  if (data.author_id !== profileId) return null;
+  return data.task_id as string;
 }

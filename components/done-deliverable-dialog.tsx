@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Paperclip, X, GitBranch } from "lucide-react";
 import {
@@ -12,9 +12,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { uploadAttachment } from "@/lib/actions/attachments";
-import { markTaskDone } from "@/lib/actions/tasks";
-import { linkTaskCommit } from "@/lib/actions/task-commits";
 import {
   getEngagementBranchesCached,
   refreshEngagementBranches,
@@ -22,7 +19,12 @@ import {
   type PreloadedBranches,
 } from "@/lib/actions/get-engagement-branches";
 import { BranchChipPicker } from "@/components/branch-chip-picker";
-import { isDefaultBranch } from "@/lib/tasks/staging-grouping";
+import {
+  isDefaultBranch,
+  reconcileBranch,
+  type PickedBranch,
+} from "@/lib/tasks/staging-grouping";
+import type { DonePayload } from "@/lib/tasks/commit-done-deliverable";
 import {
   MAX_ATTACHMENT_SIZE,
   ALLOWED_ATTACHMENT_EXTENSIONS,
@@ -47,7 +49,10 @@ interface DoneDeliverableDialogProps {
   // Server-preloaded branch list for the task's engagement, so the picker paints
   // instantly with no on-open fetch. Falls back to the cached fetch when absent.
   preloaded?: PreloadedBranches;
-  onSaved: () => void;
+  // Fires the moment Save/Skip is clicked with a snapshot of everything the
+  // dialog collected. The caller closes the dialog and commits in the
+  // background, so there's no "Saving…" wait here.
+  onSubmit: (payload: DonePayload) => void;
 }
 
 export function DoneDeliverableDialog({
@@ -55,7 +60,7 @@ export function DoneDeliverableDialog({
   onOpenChange,
   task,
   preloaded,
-  onSaved,
+  onSubmit,
 }: DoneDeliverableDialogProps) {
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
@@ -72,8 +77,10 @@ export function DoneDeliverableDialog({
   // to main", so keep an explicit toggle for that case.
   const [noRepoPushed, setNoRepoPushed] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [isPending, startTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // What the builder has picked so far — the on-open revalidation must not
+  // stomp a branch they already chose.
+  const pickedRef = useRef<PickedBranch>({ picked: false, value: null });
 
   const branchIsDefault = isDefaultBranch(branch, defaultBranch);
   const pushedToMain =
@@ -91,44 +98,59 @@ export function DoneDeliverableDialog({
       setBranchState("idle");
       setNoRepoPushed(false);
       setRefreshing(false);
+      pickedRef.current = { picked: false, value: null };
     }
   }, [open]);
 
-  // Load the engagement repo's branches (from the persisted cache, so it paints
-  // instantly) so the deliverable can be filed under the branch it shipped on —
-  // the repo default is pre-selected, which counts as "pushed to main". Degrades
-  // to a hidden picker when the task has no linked repo.
+  // Load the engagement repo's branches so the deliverable can be filed under
+  // the branch it shipped on — the repo default is pre-selected, which counts as
+  // "pushed to main". Degrades to a hidden picker when the task has no repo.
   useEffect(() => {
     if (!open || !task) return;
 
     // Instant paint: when the server preheated this engagement's cached branch
     // list, hydrate straight from it — no fetch, no "Loading branches…" flash.
-    if (preloaded && preloaded.branches.length > 0) {
-      setBranches(preloaded.branches);
-      setDefaultBranch(preloaded.defaultBranch);
+    const snapshot = preloaded && preloaded.branches.length > 0 ? preloaded : null;
+    if (snapshot) {
+      setBranches(snapshot.branches);
+      setDefaultBranch(snapshot.defaultBranch);
       // Default to "main" so the common case is one click away.
-      setBranch(preloaded.defaultBranch);
+      setBranch(snapshot.defaultBranch);
       setBranchState("ready");
-      return;
+    } else {
+      setBranchState("loading");
     }
 
+    // ...then always reconcile against the repo. The preloaded list is a
+    // snapshot from whenever the page last rendered, so a branch deleted on
+    // GitHub since then would otherwise stay clickable for the life of the tab.
     let cancelled = false;
-    setBranchState("loading");
     getEngagementBranchesCached(task.id)
       .then((res) => {
         if (cancelled) return;
         if (!res.hasRepo || res.branches.length === 0) {
-          setBranchState("no_repo");
+          // Only downgrade to the no-repo toggle if we had nothing to show; a
+          // failed reconcile shouldn't tear down a list already on screen.
+          if (!snapshot) setBranchState("no_repo");
           return;
         }
         setBranches(res.branches);
         setDefaultBranch(res.defaultBranch);
-        // Default to "main" so the common case is one click away.
-        setBranch(res.defaultBranch);
+        const { branch: next, dropped } = reconcileBranch(pickedRef.current, res);
+        setBranch(next);
+        if (dropped) {
+          // Their pick was deleted on GitHub between the page render and now.
+          // Say so — silently moving the selection would file the deliverable
+          // somewhere they didn't choose.
+          pickedRef.current = { picked: true, value: next };
+          toast.info(
+            `Branch "${dropped}" no longer exists on GitHub — switched to ${next ?? "no branch"}.`
+          );
+        }
         setBranchState("ready");
       })
       .catch(() => {
-        if (!cancelled) setBranchState("no_repo");
+        if (!cancelled && !snapshot) setBranchState("no_repo");
       });
     return () => {
       cancelled = true;
@@ -136,6 +158,7 @@ export function DoneDeliverableDialog({
   }, [open, task, preloaded]);
 
   function selectBranch(next: string | null, pushed: boolean) {
+    pickedRef.current = { picked: true, value: next };
     setBranch(next);
     // Leaving the default branch clears the pushed-to-main extras.
     if (!pushed) {
@@ -152,6 +175,14 @@ export function DoneDeliverableDialog({
       if (res.hasRepo && res.branches.length > 0) {
         setBranches(res.branches);
         setDefaultBranch(res.defaultBranch);
+        const { branch: next, dropped } = reconcileBranch(pickedRef.current, res);
+        setBranch(next);
+        if (dropped) {
+          pickedRef.current = { picked: true, value: next };
+          toast.info(
+            `Branch "${dropped}" no longer exists on GitHub — switched to ${next ?? "no branch"}.`
+          );
+        }
       }
     } catch {
       // keep the current list on failure
@@ -182,79 +213,33 @@ export function DoneDeliverableDialog({
     setStagedFiles((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  // Save/Skip just hand a snapshot to the caller, which closes the dialog and
+  // commits in the background. No await here — that's what makes it feel instant.
   function handleSave() {
     if (!task) return;
-    startTransition(async () => {
-      let uploaded = 0;
-      for (const file of stagedFiles) {
-        const fd = new FormData();
-        fd.set("task_id", task.id);
-        fd.set("file", file);
-        fd.set("is_deliverable", "true");
-        const result = await uploadAttachment(fd);
-        if (result.error) {
-          toast.error(`Failed to upload ${file.name}: ${result.error}`);
-        } else {
-          uploaded++;
-        }
-      }
-
-      if (stagedFiles.length > 0 && uploaded < stagedFiles.length) {
-        toast.warning(`${uploaded} of ${stagedFiles.length} files uploaded`);
-      }
-
-      const result = await markTaskDone(task.id, {
+    onSubmit({
+      core: {
         pushed_to_main: pushedToMain || pickedCommits.length > 0,
         completion_note: note.trim() || null,
         branch_name: branch,
-      });
-
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
-
-      if (pushedToMain && pickedCommits.length > 0) {
-        let linked = 0;
-        for (const commit of pickedCommits) {
-          const linkResult = await linkTaskCommit(task.id, {
-            sha: commit.sha,
-            url: commit.html_url,
-            message: commit.message,
-            author_name: commit.author_name,
-            author_login: commit.author_login,
-            committed_at: commit.committed_at,
-            repo_full_name: commit.repo_full_name,
-          });
-          if ("error" in linkResult) {
-            toast.error(`Couldn't link ${commit.short_sha}: ${linkResult.error}`);
-          } else {
-            linked++;
-          }
-        }
-        if (linked < pickedCommits.length) {
-          toast.warning(`${linked} of ${pickedCommits.length} commits linked`);
-        }
-      }
-
-      toast.success("Task marked as done");
-      onSaved();
+      },
+      files: stagedFiles,
+      commits: pickedCommits,
+      linkCommits: pushedToMain,
     });
   }
 
   function handleSkip() {
     if (!task) return;
-    startTransition(async () => {
-      const result = await markTaskDone(task.id, {
+    onSubmit({
+      core: {
         pushed_to_main: false,
         completion_note: null,
         branch_name: branch,
-      });
-      if ("error" in result) {
-        toast.error(result.error);
-        return;
-      }
-      onSaved();
+      },
+      files: [],
+      commits: [],
+      linkCommits: false,
     });
   }
 
@@ -281,8 +266,7 @@ export function DoneDeliverableDialog({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isPending}
-                className="text-xs text-neutral-400 hover:text-neutral-700 transition-colors disabled:opacity-50"
+                className="text-xs text-neutral-400 hover:text-neutral-700 transition-colors"
               >
                 + Add files
               </button>
@@ -299,8 +283,7 @@ export function DoneDeliverableDialog({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isPending}
-                className="w-full rounded-lg border border-dashed border-neutral-200 py-4 text-center text-xs text-neutral-400 hover:border-neutral-300 hover:text-neutral-600 transition-colors disabled:opacity-50"
+                className="w-full rounded-lg border border-dashed border-neutral-200 py-4 text-center text-xs text-neutral-400 hover:border-neutral-300 hover:text-neutral-600 transition-colors"
               >
                 Click to attach files (screenshots, docs, etc.)
               </button>
@@ -317,7 +300,6 @@ export function DoneDeliverableDialog({
                       <button
                         type="button"
                         onClick={() => removeStaged(idx)}
-                        disabled={isPending}
                         className="rounded p-0.5 text-neutral-400 hover:text-red-500 transition-colors"
                       >
                         <X className="h-3 w-3" />
@@ -329,7 +311,6 @@ export function DoneDeliverableDialog({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={isPending}
                     className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
                   >
                     + Add more
@@ -360,7 +341,6 @@ export function DoneDeliverableDialog({
                   defaultBranch={defaultBranch}
                   value={branch}
                   onChange={selectBranch}
-                  disabled={isPending}
                   onRefresh={handleRefreshBranches}
                   refreshing={refreshing}
                 />
@@ -377,7 +357,6 @@ export function DoneDeliverableDialog({
                   type="button"
                   className={`krowe-branch-chip is-default${noRepoPushed ? " active" : ""}`}
                   aria-pressed={noRepoPushed}
-                  disabled={isPending}
                   onClick={() => setNoRepoPushed(true)}
                 >
                   <GitBranch className="h-3.5 w-3.5" />
@@ -387,7 +366,6 @@ export function DoneDeliverableDialog({
                   type="button"
                   className={`krowe-branch-chip is-none${!noRepoPushed ? " active" : ""}`}
                   aria-pressed={!noRepoPushed}
-                  disabled={isPending}
                   onClick={() => {
                     setNoRepoPushed(false);
                     setPickedCommits([]);
@@ -405,15 +383,13 @@ export function DoneDeliverableDialog({
                   taskId={task.id}
                   selected={pickedCommits}
                   onChange={setPickedCommits}
-                  disabled={isPending}
                 />
 
                 {!showNoteFallback && (
                   <button
                     type="button"
                     onClick={() => setShowNoteFallback(true)}
-                    disabled={isPending}
-                    className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors disabled:opacity-50"
+                    className="text-xs text-neutral-400 hover:text-neutral-600 transition-colors"
                   >
                     + Or paste a note instead
                   </button>
@@ -429,28 +405,21 @@ export function DoneDeliverableDialog({
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="What did you deliver? e.g. PR #123, a Figma link, or a short note"
                 maxLength={2000}
-                disabled={isPending}
                 rows={2}
-                className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 disabled:opacity-40 resize-none"
+                className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 resize-none"
               />
             )}
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="ghost"
-            onClick={() => onOpenChange(false)}
-            disabled={isPending}
-          >
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button variant="outline" onClick={handleSkip} disabled={isPending}>
+          <Button variant="outline" onClick={handleSkip}>
             Skip
           </Button>
-          <Button onClick={handleSave} disabled={isPending}>
-            {isPending ? "Saving…" : "Save"}
-          </Button>
+          <Button onClick={handleSave}>Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

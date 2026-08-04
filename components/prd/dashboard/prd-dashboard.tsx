@@ -1,30 +1,41 @@
 "use client";
 
-/* PRD Dashboard — the builder's PRD screen with two modes:
-   • Edit    — summary strip + section rail with click-any-field inline editing.
-   • Preview — the same summary strip + section rail, read-only: every edit
-               affordance (inputs, add/remove, Save/Send/Delete) hidden.
+/* PRD Dashboard — the builder's PRD screen: summary strip + section rail with
+   click-any-field inline editing. Always editable; the client-facing read-only
+   rendering lives in the public view and the print stage below.
    Edits persist automatically (debounced) the moment any field — tech stack,
    integrations, any section — changes; the explicit Save button is an optional
    "save now". Also carries Send / Delete. */
 
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { toast } from "sonner";
-import { Send, Sparkles, Check, Link2, Receipt, Trash2 } from "lucide-react";
+import {
+  Send,
+  Check,
+  ChevronLeft,
+  Download,
+  Link2,
+  Receipt,
+  RotateCcw,
+  Settings2,
+  Trash2,
+  WandSparkles,
+} from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updatePrdContent, sendPrd, deletePrd } from "@/lib/actions/prds";
 import type { Prd, PrdContent } from "@/lib/types";
 import { PrdDocument } from "@/components/prd/prd-document";
-import { PrdDownloadButton } from "@/components/prd/prd-download-button";
+import { printPrd } from "@/components/prd/prd-download-button";
 import { ShareLinkControls } from "@/components/doc/share-link-controls";
+import { ContextMenu, useContextMenu, type MenuItem } from "@/components/ui/context-menu";
 import { EditContext, InlineText } from "./inline-edit";
 import { PrdStatStrip } from "./prd-stat-strip";
 import { PrdRail } from "./prd-rail";
 import { RefineSectionDialog } from "./refine-section-dialog";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import "./prd-dashboard.css";
+import "./prd-editor.css";
 
 /** How long after the last edit we flush to the server. */
 const AUTOSAVE_DELAY_MS = 1200;
@@ -56,9 +67,9 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirm, confirmDialog] = useConfirm();
+  const options = useContextMenu();
 
   const isDraft = prd.status === "draft";
-  const [mode, setMode] = useState<"edit" | "preview">("edit");
   const [title, setTitle] = useState(prd.title);
   const [content, setContent] = useState<PrdContent>(prd.content ?? {});
   const [refine, setRefine] = useState<{ open: boolean; sectionId: string | null }>({
@@ -210,6 +221,22 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
     });
   }
 
+  /** Start the PRD over: back through the wizard, which replaces this draft in
+      place when it finishes (same id, same share link). Draft-only. */
+  async function regenerate() {
+    const ok = await confirm({
+      title: "Start this PRD over?",
+      description:
+        "You’ll go back through the wizard. When it finishes, this draft’s content is replaced — the share link stays the same.",
+      confirmText: "Restart wizard",
+      cancelText: "Keep this draft",
+      icon: RotateCcw,
+      tone: "brand",
+    });
+    if (!ok) return;
+    void leave(`${backHref}/prd/new?regenerate=${prd.id}`);
+  }
+
   async function remove() {
     const ok = await confirm({
       title: "Delete this draft?",
@@ -230,100 +257,63 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
     });
   }
 
-  const editing = mode === "edit";
+  /* "Options" — everything that isn't Refine or Send. Kept in one menu so the
+     sticky header stays a single row at document width. */
+  const optionItems: MenuItem[] = [
+    {
+      label: "Download PDF",
+      icon: <Download className="h-3.5 w-3.5" />,
+      onSelect: () => printPrd(title),
+    },
+    {
+      label: "Generate quote",
+      icon: <Receipt className="h-3.5 w-3.5" />,
+      onSelect: () => leave(`${backHref}/quotes/new?fromPrd=${prd.id}`),
+    },
+    {
+      label: "Copy link",
+      icon: <Link2 className="h-3.5 w-3.5" />,
+      onSelect: copyLink,
+    },
+    // Regenerate and Delete are both draft-only — a sent PRD is live at a link the
+    // client may already hold, so neither rewrites nor removes it out from under them.
+    ...(isDraft
+      ? [
+          {
+            label: "Regenerate",
+            icon: <RotateCcw className="h-3.5 w-3.5" />,
+            onSelect: regenerate,
+            separatorBefore: true,
+          },
+          {
+            label: "Delete draft",
+            icon: <Trash2 className="h-3.5 w-3.5" />,
+            onSelect: remove,
+            destructive: true,
+            separatorBefore: true,
+          },
+        ]
+      : []),
+  ];
 
   return (
     <>
-    <div className="prd-dashboard">
+    <div className="prd-dashboard prd-editor">
       <div className="dash">
-        <a
-          href={backHref}
-          className="dash-back"
-          onClick={(e) => {
-            e.preventDefault();
-            void leave(backHref);
-          }}
-        >
-          ← {projectName}
-        </a>
-
-        <header className="dash-header">
-          <div className="dash-header__actions">
-              <div className="mode-toggle" role="tablist" aria-label="View mode">
-                <button
-                  type="button"
-                  className={"mode-seg" + (mode === "preview" ? " is-active" : "")}
-                  onClick={() => setMode("preview")}
-                >
-                  Preview
-                </button>
-                <button
-                  type="button"
-                  className={"mode-seg" + (mode === "edit" ? " is-active" : "")}
-                  onClick={() => setMode("edit")}
-                >
-                  Edit
-                </button>
-              </div>
-              <PrdDownloadButton title={title} className="prd-btn prd-btn--outline" />
-              <Link
-                href={`${backHref}/quotes/new?fromPrd=${prd.id}`}
-                className="prd-btn prd-btn--outline"
-                title="Generate a priced quote from this PRD"
-              >
-                <Receipt className="h-3.5 w-3.5" /> Generate quote
-              </Link>
-              <button
-                type="button"
-                className="prd-btn prd-btn--outline"
-                onClick={copyLink}
-                disabled={isPending}
-              >
-                <Link2 className="h-3.5 w-3.5" /> Copy link
-              </button>
-              <ShareLinkControls
-                kind="prd"
-                id={prd.id}
-                token={prd.token}
-                expiresAt={prd.token_expires_at}
-                revokedAt={prd.token_revoked_at}
-                isDraft={isDraft}
-              />
-              {editing && (
-                <div className="dash-actions">
-                  {isDraft && (
-                    <button type="button" className="prd-btn prd-btn--ghost" onClick={remove} disabled={isPending}>
-                      Delete
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="prd-btn prd-btn--ghost"
-                    onClick={() => setRefine({ open: true, sectionId: null })}
-                    disabled={isPending}
-                  >
-                    <Sparkles className="h-3.5 w-3.5" /> Refine a section
-                  </button>
-                  <SaveControl
-                    state={saveState}
-                    dirty={dirty}
-                    isDraft={isDraft}
-                    isPending={isPending}
-                    onSave={saveNow}
-                  />
-                  {isDraft && (
-                    <button type="button" className="prd-btn prd-btn--primary" onClick={send} disabled={isPending}>
-                      <Send className="h-3.5 w-3.5" /> Send to client
-                    </button>
-                  )}
-                </div>
-              )}
-          </div>
-
-          <div className="dash-header__lead">
-            <EditContext.Provider value={{ editing }}>
-              <h1 className="dash-title dash-title--serif">
-                <InlineText value={title} onChange={setTitle} placeholder="PRD title" serif />
+        <header className="dash-dochead">
+          <div className="dochead-lead">
+            <button
+              type="button"
+              className="dochead-back"
+              onClick={() => void leave(backHref)}
+              title={`Back to ${projectName}`}
+              aria-label={`Back to ${projectName}`}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <EditContext.Provider value={{ editing: true }}>
+              <h1 className="dash-title">
+                <InlineText value={title} onChange={setTitle} placeholder="PRD title" />
               </h1>
             </EditContext.Provider>
             <div className="dash-meta">
@@ -331,11 +321,52 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
               {prd.sent_at && <span className="dash-updated">Sent {formatDateTime(prd.sent_at)}</span>}
             </div>
           </div>
+
+          <div className="dochead-actions">
+            <SaveControl
+              state={saveState}
+              dirty={dirty}
+              isDraft={isDraft}
+              isPending={isPending}
+              onSave={saveNow}
+            />
+            <button
+              type="button"
+              className="prd-btn prd-btn--primary"
+              onClick={() => setRefine({ open: true, sectionId: null })}
+              disabled={isPending}
+            >
+              <WandSparkles className="h-3.5 w-3.5" /> Refine
+            </button>
+            {isDraft && (
+              <button type="button" className="prd-btn prd-btn--outline" onClick={send} disabled={isPending}>
+                <Send className="h-3.5 w-3.5" /> Send to client
+              </button>
+            )}
+            <ShareLinkControls
+              kind="prd"
+              id={prd.id}
+              token={prd.token}
+              expiresAt={prd.token_expires_at}
+              revokedAt={prd.token_revoked_at}
+              isDraft={isDraft}
+            />
+            <button
+              type="button"
+              className="prd-btn prd-btn--outline"
+              onClick={(e) => options.openAtAnchor(e.currentTarget)}
+              disabled={isPending}
+              aria-haspopup="menu"
+              aria-expanded={options.isOpen}
+            >
+              <Settings2 className="h-3.5 w-3.5" /> Options
+            </button>
+          </div>
         </header>
 
         <PrdStatStrip content={content} />
 
-        <EditContext.Provider value={{ editing }}>
+        <EditContext.Provider value={{ editing: true }}>
           <div className="dash-grid">
             <PrdRail
               content={content}
@@ -354,6 +385,8 @@ export function PrdDashboard({ prd, backHref, projectName }: PrdDashboardProps) 
         currentContent={content}
         onApply={(p) => patch(p)}
       />
+
+      <ContextMenu state={options.state} items={optionItems} onClose={options.close} />
 
       {confirmDialog}
     </div>

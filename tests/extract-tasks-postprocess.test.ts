@@ -372,6 +372,79 @@ describe("model wire schema", () => {
   });
 });
 
+// Granola sometimes writes action items with no owner ("- Push the call sheet
+// live") alongside narrative sections. The ownerless ones are still action items
+// and need the completeness net; the narrative ones must never reach it, or every
+// summary bullet becomes a synthesized draft in the reviewer's list.
+describe("parseAssignedBullets — ownerless bullets under an action heading", () => {
+  const NOTES = [
+    "## Summary",
+    "",
+    "- The team walked through the reminder backlog and agreed it is shrinking.",
+    "- Pricing came up again but nobody owned a next step.",
+    "",
+    "## Action items",
+    "",
+    "- Push the case status call sheet live.",
+    "- Steven: update the established year from 2014 to 2013.",
+    "",
+    "## Context",
+    "",
+    "- The portal has been live since March.",
+  ].join("\n");
+
+  it("keeps ownerless action bullets and leaves narrative sections alone", () => {
+    const bullets = parseAssignedBullets(NOTES);
+    expect(bullets.map((b) => b.owner)).toEqual([undefined, "Steven"]);
+    expect(bullets[0].head).toBe("Push the case status call sheet live");
+    // Nothing from ## Summary or ## Context.
+    expect(bullets.some((b) => /pricing|walked through|live since march/i.test(b.raw))).toBe(false);
+  });
+
+  it("synthesizes an uncovered ownerless action item as builder-owned", () => {
+    const { items, repairs } = postProcessExtraction([], {
+      notes: NOTES,
+      builderAliases: ["Steven Ortega"],
+    });
+    expect(repairs.filter((r) => r.kind === "missing_task_synthesized")).toHaveLength(2);
+    const synthesized = items.find((i) => /call sheet live/i.test(i.title));
+    expect(synthesized).toBeDefined();
+    // Undefined owner reads as the builder's downstream.
+    expect(synthesized?.owner).toBeUndefined();
+    expect(filterDraftsByOwner(items, "builder")).toContainEqual(synthesized);
+  });
+
+  it("never reattributes a task from an ownerless bullet", () => {
+    // Rahul owns this on the model's reading; the ownerless bullet claims nobody,
+    // so it must not overwrite that attribution.
+    const items = [
+      draft({
+        title: "Push the case status call sheet live",
+        description: "Push the case status call sheet live for the team.".padEnd(25, "."),
+        owner: "Rahul",
+        sourceQuote: "- Push the case status call sheet live.",
+      }),
+    ];
+    const result = postProcessExtraction(items, {
+      notes: NOTES,
+      builderAliases: ["Steven Ortega"],
+    });
+    expect(result.repairs.filter((r) => r.kind === "owner_reattributed")).toHaveLength(0);
+    expect(result.items.find((i) => /call sheet live/i.test(i.title))?.owner).toBe("Rahul");
+    // Only the Steven bullet is uncovered — proving the ownerless bullet DID
+    // match this draft, so the no-reattribution assertion above is meaningful
+    // rather than vacuously true on an unmatched bullet.
+    const synthesized = result.repairs.filter((r) => r.kind === "missing_task_synthesized");
+    expect(synthesized).toHaveLength(1);
+    expect(synthesized[0].detail).toContain("Steven");
+  });
+
+  it("still ignores ownerless bullets when no action heading scopes them", () => {
+    const notes = ["## Summary", "", "- Push the case status call sheet live."].join("\n");
+    expect(parseAssignedBullets(notes)).toHaveLength(0);
+  });
+});
+
 describe("filterDraftsByOwner", () => {
   it("filters by assignee after extraction", () => {
     const items = [

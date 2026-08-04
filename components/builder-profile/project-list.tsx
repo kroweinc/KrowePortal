@@ -1,42 +1,37 @@
 "use client";
 
-import { useTransition } from "react";
+import { Fragment, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, GitCommitHorizontal, Globe, Lock, Pencil, Star, Trash2 } from "lucide-react";
+import { CircleCheck, GitCommitHorizontal, Globe, Lock, Pencil, Star } from "lucide-react";
 import { ManualProjectForm } from "./manual-project-form";
-import { VerifiedBadge } from "./verified-badge";
 import { LanguageBar } from "./language-bar";
-import { TechBadge } from "./tech-badge";
+import { CardActions, CardActionButton, CardGrip, CardDropLane } from "./card-actions";
+import { useDragReorder } from "./use-drag-reorder";
 import {
   deleteProfileProject,
   reorderProfileProjects,
   updateProfileProject,
 } from "@/lib/actions/builder-profile";
 import { safeExternalHref } from "@/lib/project/business-context";
-import { useConfirm, usePrompt } from "@/components/ui/confirm-dialog";
+import { usePrompt } from "@/components/ui/confirm-dialog";
 import type { BuilderProfileProject } from "@/lib/types";
 
 export function ProjectList({ projects }: { projects: BuilderProfileProject[] }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [confirm, confirmDialog] = useConfirm();
   const [prompt, promptDialog] = usePrompt();
 
-  function move(index: number, dir: -1 | 1) {
-    const next = [...projects];
-    const target = index + dir;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    startTransition(async () => {
-      const result = await reorderProfileProjects(next.map((p) => p.id));
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      router.refresh();
-    });
-  }
+  // Local mirror so a drag can paint instantly; re-seeded whenever the server
+  // sends a new list (add, delete, sync).
+  const [order, setOrder] = useState(projects);
+  useEffect(() => setOrder(projects), [projects]);
+
+  const { dropIndex, rowProps, laneProps } = useDragReorder({
+    items: order,
+    onReorder: setOrder,
+    persist: reorderProfileProjects,
+  });
 
   // Manual projects edit their live link in the edit dialog; GitHub rows are
   // otherwise read-only, so this is their only affordance for setting one.
@@ -61,176 +56,131 @@ export function ProjectList({ projects }: { projects: BuilderProfileProject[] })
     });
   }
 
-  async function remove(project: BuilderProfileProject) {
-    const isGithub = project.source === "github";
-    const note = isGithub
-      ? "You can re-add it from the picker anytime."
-      : "This cannot be undone.";
-    if (
-      !(await confirm({
-        title: isGithub ? "Remove this repo?" : "Remove this project?",
-        description: note,
-        confirmText: "Remove",
-        cancelText: "Cancel",
-        tone: "danger",
-        icon: Trash2,
-      }))
-    )
-      return;
-    startTransition(async () => {
-      const result = await deleteProfileProject(project.id);
-      if (result.error) {
-        toast.error(result.error);
-        return;
-      }
-      router.refresh();
-    });
-  }
-
-  if (projects.length === 0) {
+  if (order.length === 0) {
     return (
-      <p className="rounded-md border border-dashed border-neutral-200 px-4 py-6 text-center text-sm text-neutral-400">
-        No projects yet. Feature repos from GitHub or add one by hand.
-      </p>
+      <div className="ss-empty">
+        <p>No projects added yet. Feature repos from GitHub or add one by hand.</p>
+      </div>
     );
   }
 
   return (
     <>
-    <ul className="space-y-3">
-      {projects.map((project, index) => (
-        <li
-          key={project.id}
-          className="rounded-md border border-neutral-200 bg-white p-4"
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                {project.url ? (
-                  <a
-                    href={safeExternalHref(project.url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="truncate text-sm font-semibold text-neutral-900 hover:underline"
-                  >
-                    {project.name}
-                  </a>
-                ) : (
-                  <span className="truncate text-sm font-semibold text-neutral-900">
-                    {project.name}
-                  </span>
-                )}
-                {project.source === "github" && <VerifiedBadge />}
-                {project.github_is_private && (
-                  <span
-                    className="inline-flex items-center gap-1 text-[11px] text-neutral-400"
-                    title="Private repository"
-                  >
-                    <Lock className="h-3 w-3" /> private
-                  </span>
-                )}
-                {project.live_url && (
-                  <a
-                    href={safeExternalHref(project.live_url)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-medium text-neutral-600 underline underline-offset-2 hover:text-neutral-900"
-                  >
-                    <Globe className="h-3 w-3" /> Live ↗
-                  </a>
-                )}
-              </div>
-              {project.description && (
-                <p className="mt-1 text-xs text-neutral-500">{project.description}</p>
-              )}
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500">
-                {project.commit_count !== null && project.source === "github" && (
-                  <span className="inline-flex items-center gap-1">
-                    <GitCommitHorizontal className="h-3 w-3" />
-                    {project.commit_count.toLocaleString()} commits
-                  </span>
-                )}
-                {project.stars !== null && project.stars > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <Star className="h-3 w-3" /> {project.stars.toLocaleString()}
-                  </span>
-                )}
-                {/* Plain text pills in the editor: tags are live, unsaved draft
-                    state, and resolving brand glyphs here would pull the heavy
-                    `simple-icons` table back into the client bundle. The public
-                    profile shows the resolved brand logos (server-resolved). */}
-                {project.tech.map((t) => (
-                  <TechBadge key={t} tech={t} icon={null} />
-                ))}
-              </div>
-              {project.languages && project.languages.length > 0 && (
-                <div className="mt-3">
-                  <LanguageBar languages={project.languages} />
-                </div>
-              )}
-            </div>
+      <ul className="ss-items">
+        {order.map((project, index) => {
+          const isGithub = project.source === "github";
+          const href = safeExternalHref(project.url);
+          const liveHref = safeExternalHref(project.live_url);
+          return (
+            <Fragment key={project.id}>
+              {dropIndex === index && <CardDropLane {...laneProps} />}
+              <li
+                className={`ss-item${project.is_hidden ? " hidden-item" : ""}`}
+                {...rowProps(index)}
+              >
+                <div className="body">
+                  <div className="titlerow">
+                    {href ? (
+                      <a className="nm" href={href} target="_blank" rel="noopener noreferrer">
+                        {project.name}
+                      </a>
+                    ) : (
+                      <span className="nm">{project.name}</span>
+                    )}
+                    {isGithub && (
+                      <span className="ss-chip verified">
+                        <CircleCheck /> Verified
+                      </span>
+                    )}
+                    {project.github_is_private && (
+                      <span className="ss-chip tech">
+                        <Lock /> private
+                      </span>
+                    )}
+                    {liveHref && (
+                      <a
+                        className="livelink"
+                        href={liveHref}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Live ↗
+                      </a>
+                    )}
+                  </div>
 
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onClick={() => move(index, -1)}
-                disabled={isPending || index === 0}
-                className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-30"
-                aria-label="Move up"
-              >
-                <ArrowUp className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => move(index, 1)}
-                disabled={isPending || index === projects.length - 1}
-                className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 disabled:opacity-30"
-                aria-label="Move down"
-              >
-                <ArrowDown className="h-3.5 w-3.5" />
-              </button>
-              {project.source === "github" && (
-                <button
-                  type="button"
-                  onClick={() => setLiveLink(project)}
-                  disabled={isPending}
-                  className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
-                  aria-label="Set live demo link"
-                  title="Set live demo link"
+                  {(isGithub || (project.stars ?? 0) > 0) && (
+                    <div className="meta">
+                      {isGithub && (
+                        <span className="ss-mediarow" style={{ gap: "var(--spacing-md)" }}>
+                          <GitCommitHorizontal width={16} height={16} />
+                          {(project.commit_count ?? 0).toLocaleString()} commits
+                        </span>
+                      )}
+                      {(project.stars ?? 0) > 0 && (
+                        <span className="ss-mediarow" style={{ gap: "var(--spacing-md)" }}>
+                          <Star width={16} height={16} />
+                          {project.stars}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {project.description && <p className="desc">{project.description}</p>}
+
+                  <LanguageBar languages={project.languages ?? []} />
+
+                  {project.tech.length > 0 && (
+                    <div className="ss-chiprow">
+                      {project.tech.map((tech) => (
+                        <span key={tech} className="ss-chip tech">
+                          {tech}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <CardActions
+                  kind="project"
+                  id={project.id}
+                  hidden={project.is_hidden}
+                  name={project.name}
+                  deleteLabel={isGithub ? "Remove this repo" : "Remove this project"}
+                  onDelete={() => deleteProfileProject(project.id)}
                 >
-                  <Globe className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {project.source === "manual" && (
-                <ManualProjectForm
-                  project={project}
-                  trigger={
-                    <button
-                      type="button"
-                      className="rounded p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700"
-                      aria-label="Edit project"
+                  {isGithub ? (
+                    <CardActionButton
+                      label="Set live demo link"
+                      onClick={() => setLiveLink(project)}
+                      disabled={isPending}
                     >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                  }
-                />
-              )}
-              <button
-                type="button"
-                onClick={() => remove(project)}
-                disabled={isPending}
-                className="rounded p-1 text-neutral-400 hover:bg-red-50 hover:text-red-600"
-                aria-label="Remove project"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
-    {confirmDialog}
-    {promptDialog}
+                      <Globe />
+                    </CardActionButton>
+                  ) : (
+                    <ManualProjectForm
+                      project={project}
+                      trigger={
+                        <button
+                          type="button"
+                          className="ss-cardact"
+                          title="Edit project"
+                          aria-label="Edit project"
+                        >
+                          <Pencil />
+                        </button>
+                      }
+                    />
+                  )}
+                </CardActions>
+                <CardGrip />
+              </li>
+            </Fragment>
+          );
+        })}
+        {dropIndex === order.length && <CardDropLane {...laneProps} />}
+      </ul>
+      {promptDialog}
     </>
   );
 }

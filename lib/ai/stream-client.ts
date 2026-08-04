@@ -1,54 +1,69 @@
 /**
  * Client-side consumer for the SSE generation routes (app/api/ai/{prd,quote}/stream).
- * Browser-only: uses fetch + ReadableStream. Its only runtime imports are the
- * isomorphic zod section-patch schema + the pure stripNullsDeep helper (both
- * client-safe), so it's safe to pull into a "use client" wizard.
+ * Browser-only: uses fetch + ReadableStream. Its only runtime import is the pure
+ * section scanner (client-safe), so it's safe to pull into a "use client" wizard.
  */
 
 import type { ExtractedTaskDraft, Question } from "@/lib/ai/schemas";
-import { PrdSectionPatchSchema } from "@/lib/ai/schemas";
 import { createPrdSectionScanner } from "@/lib/ai/prd-section-scanner";
-import { stripNullsDeep } from "@/lib/ai/strict-schema";
-import type { PrdContent } from "@/lib/types";
 
-/** The terminal event of a stream — what the wizard acts on. */
-export type StreamFinal =
+/** The terminal event the server can send. */
+type ServerFinal =
   | { type: "questions"; items: Question[] }
   | { type: "done"; prdId?: string; quoteId?: string }
   | { type: "error"; error: string };
 
-type WireEvent = { type: "delta"; text: string } | StreamFinal;
+/** What the wizard acts on. `unavailable` is client-side only: the request never
+    reached the route, so nothing was generated and the caller should retry
+    through the blocking server action. */
+export type StreamFinal = ServerFinal | { type: "unavailable" };
+
+type WireEvent = { type: "delta"; text: string } | ServerFinal;
+
+/**
+ * Human-facing copy for a thrown generation failure. A dropped connection
+ * surfaces as a bare TypeError — "Failed to fetch" in Chrome, "Load failed" in
+ * Safari — which is never something a builder should be shown.
+ */
+export function generationErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof TypeError) return "Lost the connection to Krowe. Check your network and try again.";
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 /**
  * POST `body` to an SSE generation route and consume the stream, resolving with
  * the terminal event. Pre-stream failures (auth, validation, streaming-disabled)
- * come back as a JSON body and surface as an `error` event. Aborting `opts.signal`
- * cancels the fetch (and the server generation); the resulting AbortError
- * propagates to the caller to handle alongside its gen token.
+ * come back as a JSON body and surface as an `error` event; a network failure
+ * before any response resolves to `unavailable` so the caller can fall back to
+ * the blocking action. Aborting `opts.signal` cancels the fetch (and the server
+ * generation); the resulting AbortError propagates to the caller to handle
+ * alongside its gen token.
  *
  * `opts.onSection` (optional) turns the model's text deltas — otherwise discarded —
  * into honest progress: it fires with each top-level PRD `content` key the instant
  * that section streams in, so the wizard can show a real "drafting section N of M"
  * meter instead of a time-based estimate. It fires only during a finished-PRD
  * round (question rounds carry no `content` object, so the scanner stays silent).
- *
- * `opts.onContent` (optional) goes one step further and yields the accumulating PRD
- * itself — a validated `PrdContent` partial containing every section completed so
- * far — so the wizard can render the document building live. It fires on each
- * section boundary (≤ ~22×/generation, never per delta) with only fully-written
- * sections, so there is no half-parsed prose, flicker, or layout shift.
  */
 export async function streamDraft(
   url: string,
   body: unknown,
-  opts: { signal: AbortSignal; onSection?: (key: string) => void; onContent?: (partial: PrdContent) => void }
+  opts: { signal: AbortSignal; onSection?: (key: string) => void }
 ): Promise<StreamFinal> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal: opts.signal,
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    if ((err as Error)?.name === "AbortError") throw err;
+    // No response headers ever arrived, so the route never got to generate or
+    // save anything — safe for the caller to re-run through the blocking action.
+    return { type: "unavailable" };
+  }
 
   const ctype = res.headers.get("content-type") ?? "";
   if (!res.ok || ctype.includes("application/json")) {
@@ -66,52 +81,43 @@ export async function streamDraft(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let final: StreamFinal | null = null;
+  let final: ServerFinal | null = null;
   // Scans the streamed PRD JSON and yields each top-level section key as it lands.
   const scanSection = createPrdSectionScanner();
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() ?? "";
-    for (const chunk of chunks) {
-      const line = chunk.trim();
-      if (!line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (!payload) continue;
-      let evt: WireEvent;
-      try {
-        evt = JSON.parse(payload) as WireEvent;
-      } catch {
-        continue;
-      }
-      // Drive real progress off the text deltas (feeding the section scanner), then
-      // act on the terminal event.
-      if (evt.type === "delta") {
-        const keys = scanSection(evt.text);
-        if (opts.onSection) for (const key of keys) opts.onSection(key);
-        // On each section boundary, hand the wizard the PRD-so-far for live render.
-        // safeContentBody() excludes the section currently being written, so the
-        // wrapped body always parses; validate as a partial (strict-mode nulls for
-        // not-yet-filled sections are stripped first) before surfacing it.
-        if (keys.length > 0 && opts.onContent) {
-          const body = scanSection.safeContentBody();
-          if (body) {
-            try {
-              const parsed = stripNullsDeep(JSON.parse(`{${body}}`));
-              const validated = PrdSectionPatchSchema.safeParse(parsed);
-              if (validated.success) opts.onContent(validated.data as PrdContent);
-            } catch {
-              // Not cleanly parseable at this boundary — wait for the next section.
-            }
-          }
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() ?? "";
+      for (const chunk of chunks) {
+        const line = chunk.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        let evt: WireEvent;
+        try {
+          evt = JSON.parse(payload) as WireEvent;
+        } catch {
+          continue;
         }
-      } else {
-        final = evt;
+        // Drive real progress off the text deltas (feeding the section scanner), then
+        // act on the terminal event.
+        if (evt.type === "delta") {
+          const keys = scanSection(evt.text);
+          if (opts.onSection) for (const key of keys) opts.onSection(key);
+        } else {
+          final = evt;
+        }
       }
     }
+  } catch (err) {
+    if ((err as Error)?.name === "AbortError") throw err;
+    // Dropped mid-generation. Not `unavailable`: the route may have reached its
+    // save, so re-running blocking could leave a duplicate draft behind.
+    return { type: "error", error: "The connection dropped mid-generation. Try again." };
   }
 
   return final ?? { type: "error", error: "The generation ended unexpectedly." };

@@ -42,7 +42,7 @@ const COPY: Record<Mode, { title: string; subtitle: string; submit: string; pend
 
 // Shared field + button styling, tuned to the login screen's token palette.
 const FIELD_CLASS =
-  "h-[46px] w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--background)] px-3.5 text-[14.5px] text-[var(--foreground)] outline-none transition-[border-color,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-smooth)] placeholder:text-[var(--muted-foreground)] focus:border-[color-mix(in_oklch,var(--primary)_45%,var(--border))] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--primary)_22%,transparent)] disabled:cursor-not-allowed disabled:opacity-60";
+  "h-[46px] w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--background)] px-3.5 text-[14.5px] text-[var(--foreground)] outline-none transition-[border-color,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-smooth)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--border-focus)] disabled:cursor-not-allowed disabled:opacity-60";
 
 const PRIMARY_BTN_CLASS =
   "flex h-[46px] w-full cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[var(--radius-full)] bg-[var(--primary)] text-[14.5px] font-semibold text-[var(--primary-foreground)] transition-[background-color,box-shadow] duration-[var(--duration-fast)] ease-[var(--ease-out-smooth)] hover:bg-[var(--primary-hover)] hover:shadow-[var(--shadow-1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--primary)_35%,transparent)] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60";
@@ -109,8 +109,18 @@ export function LoginForm() {
     formError ??
     (urlError ? (ERROR_MESSAGES[urlError] ?? "Something went wrong. Please try again.") : null);
 
+  /**
+   * Where to land after a successful sign-in. Only an in-app path is honored:
+   * this value is handed straight to window.location.assign below, so an
+   * absolute URL ("https://elsewhere/") or a protocol-relative one ("//host")
+   * would walk a *freshly authenticated* user off the platform on a link that
+   * legitimately begins at our own domain. Mirrors the guard the OAuth callback
+   * already applies server-side (app/auth/callback/route.ts).
+   */
   function nextPath() {
-    return searchParams.get("next") ?? "/portal";
+    const requested = searchParams.get("next");
+    if (!requested) return "/portal";
+    return requested.startsWith("/") && !requested.startsWith("//") ? requested : "/portal";
   }
 
   function switchMode(next: Mode) {

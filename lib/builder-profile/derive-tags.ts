@@ -12,9 +12,12 @@ import { BUILDER_TAG_PRESETS } from "@/lib/types";
 export interface DeriveTagsInput {
   headline: string | null;
   bio: string | null;
-  educationSchool: string | null;
-  educationMajor: string | null;
-  educationYear: string | null;
+  education: {
+    school: string;
+    level: string | null;
+    field_of_study: string | null;
+    end_year: string | null;
+  }[];
   experience: { role: string; company: string; description: string | null }[];
   projects: {
     source: string;
@@ -78,9 +81,18 @@ export function deriveProfileTags(input: DeriveTagsInput): string[] {
     return false;
   };
 
-  const major = (input.educationMajor ?? "").toLowerCase();
-  const school = (input.educationSchool ?? "").toLowerCase();
-  const year = (input.educationYear ?? "").toLowerCase();
+  // Education is a list; flatten each dimension so a rule that fires on any one
+  // degree still fires. Level joins the major text — "Bootcamp" and "CS" are
+  // both signals about what the builder studied.
+  // filter(Boolean) before joining matters: the year rules below distinguish
+  // "no year given" from a year that doesn't look current, and joining empties
+  // would produce whitespace that reads as the latter.
+  const flatten = (pick: (e: DeriveTagsInput["education"][number]) => string | null) =>
+    input.education.map(pick).filter(Boolean).join(" ").trim().toLowerCase();
+
+  const major = flatten((e) => [e.field_of_study, e.level].filter(Boolean).join(" ") || null);
+  const school = flatten((e) => e.school);
+  const year = flatten((e) => e.end_year);
 
   const hasFrontend = hasTech(FRONTEND_TECH) || hasText(/\bfront[\s-]?end\b/);
   const hasBackend = hasTech(BACKEND_TECH) || hasText(/\bback[\s-]?end\b/);
@@ -146,7 +158,7 @@ export function deriveProfileTags(input: DeriveTagsInput): string[] {
   // Bootcamp: a well-known program name, or the word itself in school/text.
   const BOOTCAMPS =
     /\b(bootcamp|app academy|hack reactor|general assembly|flatiron|lambda school|bloomtech|le wagon|codesmith|fullstack academy|springboard|nucamp)\b/;
-  if (BOOTCAMPS.test(school) || hasText(BOOTCAMPS)) add("Bootcamp Grad");
+  if (BOOTCAMPS.test(school) || BOOTCAMPS.test(major) || hasText(BOOTCAMPS)) add("Bootcamp Grad");
 
   // CS Student: a computing major at a named school. Year hints at "in progress"
   // strengthen it but aren't required.

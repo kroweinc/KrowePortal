@@ -25,6 +25,31 @@ const ROWS: { key: keyof NotificationPreferenceFlags; label: string; hint: strin
     label: "Invite accepted",
     hint: "When an operator accepts your invite and joins a client.",
   },
+  {
+    key: "notify_task_approval_requested",
+    label: "Task sent for approval",
+    hint: "When a builder sends a task for your review.",
+  },
+  {
+    key: "notify_task_approved",
+    label: "Task approved",
+    hint: "When an operator approves a task you sent for review.",
+  },
+  {
+    key: "notify_task_changes_requested",
+    label: "Changes requested",
+    hint: "When an operator sends a task back with changes.",
+  },
+  {
+    key: "notify_task_delivered",
+    label: "Task delivered",
+    hint: "When a builder marks a task done and delivers it.",
+  },
+  {
+    key: "notify_task_comment",
+    label: "New comment",
+    hint: "When someone comments on a task you're working on together.",
+  },
 ];
 
 export function NotificationPreferencesEditor({ initial }: { initial: NotificationPreferenceFlags }) {

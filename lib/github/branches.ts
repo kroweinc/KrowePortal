@@ -382,3 +382,55 @@ export const buildBranchGraph = unstable_cache(
   ["branch-graph"],
   { revalidate: REVALIDATE_SECONDS }
 );
+
+export type BranchNames = {
+  names: string[];
+  /** See isListingComplete — false means we hold only a subset of the repo. */
+  complete: boolean;
+};
+
+/**
+ * Whether a branch listing is the repo's *whole* branch list. False when we hit
+ * the page/HARD_CAP ceiling or a listing page failed — we then hold a subset,
+ * and branches missing from it may well still exist. Callers that delete
+ * "branches no longer on GitHub" must check this first, or a big repo (or one
+ * flaky page fetch) would silently wipe live branches from their cache.
+ *
+ * Only `branches:page-N` degradations shrink the list; `branches` (the repo has
+ * none) and the tip/merge-base degradations leave it complete.
+ */
+export function isListingComplete(truncated: boolean, degraded: string[]): boolean {
+  return !truncated && !degraded.some((d) => d.startsWith("branches:page-"));
+}
+
+/**
+ * Just the repo's branch names, live from GitHub. One request for almost every
+ * repo (two past 100 branches) — no tip commits, no merge-base compares.
+ *
+ * The branch *cache* only ever needed names, but it used to derive them from the
+ * full graph, which costs a tip-commit call per branch plus n·(n−1) merge-base
+ * compares — ~145 requests for a 12-branch repo. That price is why the cache
+ * carried a long TTL and why every refresh was deferred to `after()`, which is
+ * what let a deleted branch linger in the pickers. Anything that only needs the
+ * branch list should call this; leave buildBranchGraph to the views that
+ * actually render the tree.
+ *
+ * Returns null when the first page fails, so callers can tell "couldn't reach
+ * GitHub" from "this repo has no branches" and skip the cache sweep.
+ */
+export async function fetchBranchNames(
+  token: string,
+  owner: string,
+  repo: string
+): Promise<BranchNames | null> {
+  const degraded: string[] = [];
+  try {
+    const { branches, truncated } = await listBranches(token, owner, repo, degraded);
+    return {
+      names: branches.map((b) => b.name).filter(Boolean),
+      complete: isListingComplete(truncated, degraded),
+    };
+  } catch {
+    return null;
+  }
+}

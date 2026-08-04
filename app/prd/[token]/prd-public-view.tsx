@@ -17,6 +17,7 @@ import { type PublicPrd } from "@/lib/actions/prds-public";
 import { acceptAndSignPrd, rejectPrd } from "@/lib/actions/accept-doc";
 import type { PrdContent } from "@/lib/types";
 import "@/components/prd/dashboard/prd-dashboard.css";
+import "@/components/prd/dashboard/prd-editor.css";
 
 /** The rail is read-only here, so edits never fire — patch is a no-op. */
 const noopPatch = () => {};
@@ -34,17 +35,17 @@ export function PrdPublicView({
 
   return (
     <main className="prd-public">
-      <div className="prd-dashboard">
+      <div className="prd-dashboard prd-editor">
         <div className="dash">
-          <header className="dash-header">
-            <div className="dash-header__actions">
-              <PrdDownloadButton title={prd.title} className="prd-btn prd-btn--outline" />
-            </div>
-            <div className="dash-header__lead">
-              <h1 className="dash-title dash-title--serif">{prd.title}</h1>
+          <header className="dash-dochead">
+            <div className="dochead-lead">
+              <h1 className="dash-title">{prd.title}</h1>
               <div className="dash-meta">
                 <PreparedBy builder={data.builder} className="dash-updated" />
               </div>
+            </div>
+            <div className="dochead-actions">
+              <PrdDownloadButton title={prd.title} className="prd-btn prd-btn--outline" />
             </div>
           </header>
 

@@ -4,8 +4,7 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Plus, RefreshCw } from "lucide-react";
 import { RepoPickerDialog } from "./repo-picker-dialog";
 import { syncGithubProjects } from "@/lib/actions/builder-profile";
 import type { BuilderProfileProject } from "@/lib/types";
@@ -50,15 +49,10 @@ export function GithubShowcaseEditor({
 
   if (!githubConnected) {
     return (
-      <div className="rounded-md border border-dashed border-neutral-200 px-4 py-6 text-center">
-        <p className="text-sm text-neutral-500">
-          Connect GitHub to feature verified projects with real commit and language stats.
-        </p>
-        <Link
-          href="/b/settings"
-          className="mt-2 inline-block text-sm text-neutral-700 underline underline-offset-2 hover:text-neutral-900"
-        >
-          Connect GitHub in Settings
+      <div className="ss-empty">
+        <p>Connect GitHub to feature verified projects with real commit and language stats.</p>
+        <Link href="/b/settings" className="ss-btn">
+          <Plus /> Connect GitHub
         </Link>
       </div>
     );
@@ -69,22 +63,24 @@ export function GithubShowcaseEditor({
     .filter((id): id is number => id !== null);
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="text-xs text-neutral-500">
-        Connected as <span className="font-medium text-neutral-700">{githubUsername}</span>
+    <div className="ss-ghrow">
+      <div className="who">
+        <span>
+          Connected to <b>{githubUsername}</b>
+        </span>
         {githubSyncedAt && (
           <>
-            {" "}
-            <span className="text-neutral-300">·</span> Last synced {formatSyncTime(githubSyncedAt)}
+            <span className="ss-rule" aria-hidden />
+            <span>Last synced {formatSyncTime(githubSyncedAt)}</span>
           </>
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="acts">
         {githubProjects.length > 0 && (
-          <Button variant="outline" size="sm" onClick={sync} disabled={isPending}>
-            <RefreshCw className={"h-3.5 w-3.5" + (isPending ? " animate-spin" : "")} />
-            {isPending ? "Syncing…" : "Sync from GitHub"}
-          </Button>
+          <button type="button" className="ss-btn" onClick={sync} disabled={isPending}>
+            <RefreshCw className={isPending ? "animate-spin" : undefined} />
+            {isPending ? "Syncing\u2026" : "Sync from GitHub"}
+          </button>
         )}
         <RepoPickerDialog featuredRepoIds={featuredIds} />
       </div>

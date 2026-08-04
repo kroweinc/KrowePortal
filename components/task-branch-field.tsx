@@ -48,19 +48,25 @@ export function TaskBranchField({ taskId, branch, readOnly, preloaded }: Props) 
 
   function openEditor() {
     setEditing(true);
-    if (state === "ready" || state === "loading") return;
-    setState("loading");
+    if (state === "loading") return;
+    // Paint whatever we already have, but always reconcile against the repo:
+    // the preloaded list is a snapshot from the last server render, so a branch
+    // deleted on GitHub since then would otherwise stay clickable indefinitely.
+    const hadList = state === "ready";
+    if (!hadList) setState("loading");
     getEngagementBranchesCached(taskId)
       .then((res) => {
         if (!res.hasRepo || res.branches.length === 0) {
-          setState("no_repo");
+          if (!hadList) setState("no_repo");
           return;
         }
         setBranches(res.branches);
         setDefaultBranch(res.defaultBranch);
         setState("ready");
       })
-      .catch(() => setState("no_repo"));
+      .catch(() => {
+        if (!hadList) setState("no_repo");
+      });
   }
 
   function handleSelect(next: string | null, pushedToMain: boolean) {

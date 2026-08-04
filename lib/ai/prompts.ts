@@ -1,5 +1,21 @@
 import type { RepoContext } from "@/lib/github/types";
-import { TASK_TAGS, type TaskTag } from "@/lib/types";
+import {
+  TASK_PRIORITIES,
+  TASK_TAGS,
+  TASK_TYPES,
+  type TaskTag,
+  type TaskType,
+} from "@/lib/types";
+import { DRAFT_CONFIDENCE, type DraftConfidence } from "@/lib/ai/schemas";
+import type {
+  CommitMatchCandidate,
+  TaskMatchCandidate,
+} from "@/lib/tasks/commit-match-filter";
+// A compile-time constant, so interpolating it leaves the untracked-work system
+// prompt a fixed string computed once at import — the static prefix
+// prompt_cache_key: "untracked-work-v1" depends on. Imported rather than
+// retyped so the prompt can't promise a cap the filter doesn't enforce.
+import { MAX_GAPS_PER_PUSH } from "@/lib/tasks/untracked-filter";
 
 // One-line gloss per area label, used only to steer the classifier. Typed as a
 // Record<TaskTag, …> so adding a tag to TASK_TAGS forces a description here.
@@ -16,6 +32,31 @@ const TASK_TAG_DESCRIPTIONS: Record<TaskTag, string> = {
   growth: "marketing, SEO, analytics, onboarding, referrals, conversion",
   ai: "LLM / model features — prompts, classification, content generation",
 };
+
+// Same Record<> trick as TASK_TAG_DESCRIPTIONS: adding a value to TASK_TYPES or
+// DRAFT_CONFIDENCE fails to compile until its gloss is written, so the prompt
+// text can't drift from the schema the model is decoded against.
+const TASK_TYPE_DESCRIPTIONS: Record<TaskType, string> = {
+  feature: "a capability that does not exist yet",
+  bug: "behavior that is broken, wrong, or erroring today",
+  change:
+    "a tweak to something that already works — copy, styling, config, scope. Default here when it is neither clearly new nor clearly broken.",
+};
+
+const DRAFT_CONFIDENCE_DESCRIPTIONS: Record<DraftConfidence, string> = {
+  high: "assigned in plain terms on the call — no interpretation needed",
+  medium: "the assignment or the scope required interpretation",
+  low: "you are not sure it was really agreed",
+};
+
+/** Render an enum as an indented "- value: gloss" list nested under a field
+    bullet. Values come from the const array the zod schema enums over. */
+function glossedValues<T extends string>(
+  values: readonly T[],
+  descriptions: Record<T, string>
+): string {
+  return values.map((v) => `  - "${v}": ${descriptions[v]}`).join("\n");
+}
 
 const MANIFEST_PROMPT_CAP = 150;
 
@@ -341,6 +382,300 @@ export function buildClassifyTaskUserPrompt(input: {
   }
   parts.push("\nRespond with JSON only.");
   return parts.join("\n");
+}
+
+// ── Default-branch commits → already-shipped open tasks ─────────────────────
+
+// A commit body can be an essay (release notes, co-author trailers, revert
+// dumps). The subject plus the first few lines carries the signal; the rest is
+// noise that pushes the real tasks further from the model's attention.
+const COMMIT_MESSAGE_CAP = 400;
+const TASK_DESCRIPTION_CAP = 500;
+
+function truncate(text: string, cap: number): string {
+  const clean = text.trim();
+  return clean.length > cap ? `${clean.slice(0, cap)}…` : clean;
+}
+
+export function buildMatchCommitsSystemPrompt(): string {
+  return `You are a senior engineer reviewing a repository's default-branch commit history against a builder's open task list. You are looking for one thing: work that has already SHIPPED but whose task was never marked done.
+
+You have each commit's message and each open task's title, description, change type, and area label. You do NOT have the diff, the changed file paths, or the repo source — you are judging from message text alone, and that is a hard ceiling on how certain you can be.
+
+A match means this commit, on its own or as the obvious final piece, delivers what that specific task asked for. Anything weaker is not a match.
+
+These are matches:
+  • Task "Fix invoice PDF page breaks" ← commit "fix(invoices): correct PDF page breaks on multi-page bills" — same defect, same surface.
+  • Task "Add CSV export to the client list" ← commit "feat: export clients to CSV from the list toolbar" — same capability, same place.
+  • Task "Rename the Clients tab to Accounts" ← commit "rename Clients → Accounts across nav and breadcrumbs" — literally the described change.
+
+These are NOT matches:
+  • Task "Rebuild the auth flow" vs commit "fix(auth): typo in reset-password copy" — same subsystem, unrelated work. Sharing an area is not evidence.
+  • Task "Add CSV export" vs commit "refactor: extract useTable hook" — plausible groundwork. Preparatory work does not finish a task.
+  • Any task vs commit "wip", "stuff", "address feedback", "Merge pull request #42 from acme/dev" — an uninformative message is evidence for nothing.
+  • Any pair whose only overlap is a generic word both happen to use ("dashboard", "user", "form", "page", "fix").
+
+Rules:
+1. Work commit by commit. For each commit ask whether exactly ONE task is plainly delivered by it. If two tasks fit equally well, that means you are matching on area rather than on the work — report neither.
+2. Report each commit at most once, against at most one task.
+3. confidence is a decimal from 0 to 1: how sure you are that this commit finishes this task. Reserve 0.9 and above for a commit that names the same concrete thing the task names. Anything you would describe as "probably" or "could be" belongs below 0.8.
+4. reason is ONE sentence of at most 200 characters naming the specific overlap you relied on — the shared feature, defect, or noun. If you cannot name that overlap concretely, you do not have a match.
+5. Prefer reporting nothing. A wrong match tells a builder that unfinished work is finished; staying silent costs nothing, because the task is still sitting on their board either way.
+
+Off-schema behavior: report only commits from the input list and only tasks from the input list, copying their sha and id strings exactly. When no commit finishes any task — the common case — return an empty matches array. Never stretch to fill it.`;
+}
+
+export function buildMatchCommitsUserPrompt(input: {
+  repoFullName: string;
+  branch: string;
+  commits: CommitMatchCandidate[];
+  tasks: TaskMatchCandidate[];
+}): string {
+  const commitBlock = input.commits
+    .map((c) => {
+      const when = c.committedAt ? ` (committed ${c.committedAt})` : "";
+      return `sha: ${c.sha}${when}\n${truncate(c.message, COMMIT_MESSAGE_CAP)}`;
+    })
+    .join("\n\n");
+
+  const taskBlock = input.tasks
+    .map((t) => {
+      const parts = [`id: ${t.id}`, `title: ${t.title}`];
+      parts.push(`type: ${t.type ?? "(unclassified)"}`);
+      if (t.tags.length > 0) parts.push(`area: ${t.tags.join(", ")}`);
+      parts.push(
+        t.description?.trim()
+          ? `description: ${truncate(t.description, TASK_DESCRIPTION_CAP)}`
+          : "description: (none)"
+      );
+      return parts.join("\n");
+    })
+    .join("\n\n");
+
+  return [
+    `Repository: ${input.repoFullName}`,
+    `Branch: ${input.branch}`,
+    ``,
+    `=== Commits on this branch ===`,
+    commitBlock,
+    ``,
+    `=== Open tasks ===`,
+    taskBlock,
+  ].join("\n");
+}
+
+// ── Push → work that was never tracked ───────────────────────────────────────
+
+// Same Record<> derivation as everywhere else in this file: adding a value to
+// DRAFT_CONFIDENCE fails to compile until its gloss is written here. Separate
+// from DRAFT_CONFIDENCE_DESCRIPTIONS above because that one is phrased for a
+// call transcript ("assigned in plain terms on the call") and means nothing
+// when the evidence is a diff.
+const UNTRACKED_CONFIDENCE_DESCRIPTIONS: Record<DraftConfidence, string> = {
+  high: "the commits and paths name one clear deliverable, and no listed task covers it",
+  medium: "clearly separate work, but its scope or boundary took interpretation",
+  low: "you suspect it but cannot point to what it delivers",
+};
+
+/** Changed paths shown per push. Enough to characterise the work; past this it
+ *  reads as a directory listing and buries the paths that carry meaning. */
+const PUSH_FILE_CAP = 60;
+
+export function buildUntrackedWorkSystemPrompt(): string {
+  const typeList = glossedValues(TASK_TYPES, TASK_TYPE_DESCRIPTIONS);
+  const tagList = glossedValues(TASK_TAGS, TASK_TAG_DESCRIPTIONS);
+  const confidenceList = glossedValues(DRAFT_CONFIDENCE, UNTRACKED_CONFIDENCE_DESCRIPTIONS);
+
+  return `You are a senior engineer auditing one push to a repository's main branch against the tasks a solo builder logged for it. You are looking for one thing: work that SHIPPED in this push and that no task describes.
+
+You have the push's commit subjects and the paths it changed, plus every task the builder attributed to this push. You do not have the diff contents or the repo source, so a path is your strongest evidence of what was built — "app/api/agent/pdf/route.ts" tells you a PDF endpoint shipped, and a subject reading "wip" tells you nothing.
+
+The builder writes tasks for deliverables: a capability, a fix, a visible change someone asked for. They do not write tasks for the housekeeping that surrounds them. Your job is to find the former hiding among the latter.
+
+These ARE untracked work:
+  • Six commits touching "lib/pdf/", "app/api/report/pdf/route.ts" and "components/download-button.tsx", and no listed task mentions PDFs or exports — one proposal: the PDF export.
+  • A new "supabase/migrations/0091_referrals.sql" plus "app/referrals/page.tsx", with the listed tasks all about billing — one proposal: the referrals feature.
+
+These are NOT untracked work:
+  • Anything the listed tasks already describe, even loosely. A task called "Speed up the client list" covers commits about query caching on that list.
+  • Dependency bumps, lockfile churn, lint and formatting passes, comment and typo fixes, CI config, version tags, the merge commit itself.
+  • Refactors, extractions, and renames with no behavior change — real work, but not a deliverable anyone tracks.
+  • A push where every subject is uninformative ("wip", "stuff", "fixes") and the paths are scattered. You cannot name what shipped, so there is nothing to propose.
+
+Rules:
+1. Work from the paths first, then the subjects. Ask what a user or client would say this push delivered, then check whether a listed task already says it.
+2. Group every commit belonging to one deliverable into ONE proposal. Six commits building a PDF export are one forgotten task, not six. Two unrelated deliverables in one push are two proposals.
+3. Propose at most ${MAX_GAPS_PER_PUSH}. If more than that look plausible you are proposing individual commits rather than deliverables — go back to rule 2.
+4. Set shas to the commits that back the proposal, copied exactly from the input. Set files to at most 10 of the input paths that make the case. A proposal you cannot back with at least one commit from the list is not a proposal.
+5. Write title as an imperative verb phrase of at most 80 characters, naming the deliverable the way the builder would have if they had written the task first ("Add PDF export to the agent report"). Write description as at least one full sentence, at least 20 characters, saying what shipped and what it does for the user — grounded in the paths you were given, never in what you assume the codebase looks like elsewhere.
+6. Set priority to one of ${TASK_PRIORITIES.map((p) => `"${p}"`).join(", ")}. The work is already done, so this is only how it would have been ranked: use "medium" unless the push plainly fixes something broken.
+7. Set type to the single value that fits:
+${typeList}
+8. Set tags to exactly ONE area label:
+${tagList}
+9. Set confidence:
+${confidenceList}
+10. Prefer proposing nothing, because the cost is lopsided. A missed gap costs the builder nothing — the work shipped either way. A wrong one invents a task for work that was already tracked and puts it on a client's changelog.
+
+Off-schema behavior: propose only work evidenced by the commits and paths in this push, and copy shas and file paths exactly as given — never invent a path to strengthen a case. When every deliverable in the push is already covered by a listed task, which is the common and expected outcome, return an empty items array. Never stretch to fill it.`;
+}
+
+export interface UntrackedWorkInput {
+  repoFullName: string;
+  /** The merge/push subject — often names the branch that landed. */
+  pushSubject: string;
+  branch: string | null;
+  commits: { sha: string; subject: string }[];
+  files: { path: string; status: string }[];
+  filesTruncated: boolean;
+  /** Tasks the builder attributed to this push — the "already accounted for" set. */
+  trackedTasks: { title: string; description: string | null }[];
+}
+
+export function buildUntrackedWorkUserPrompt(input: UntrackedWorkInput): string {
+  const commitBlock =
+    input.commits.length > 0
+      ? input.commits.map((c) => `${c.sha} ${c.subject || "(no subject)"}`).join("\n")
+      : "(none reported)";
+
+  const shown = input.files.slice(0, PUSH_FILE_CAP);
+  const remainder = input.files.length - shown.length;
+  const fileBlock =
+    shown.length > 0
+      ? shown.map((f) => `${f.status.padEnd(8)} ${f.path}`).join("\n") +
+        (remainder > 0 || input.filesTruncated
+          ? `\n…and more files not shown${remainder > 0 ? ` (${remainder})` : ""}. Judge only what is listed.`
+          : "")
+      : "(none reported)";
+
+  const taskBlock =
+    input.trackedTasks.length > 0
+      ? input.trackedTasks
+          .map((t) =>
+            t.description?.trim()
+              ? `- ${t.title}\n  ${truncate(t.description, TASK_DESCRIPTION_CAP)}`
+              : `- ${t.title}`
+          )
+          .join("\n")
+      : "(none — this push was recorded with no tasks against it at all)";
+
+  return [
+    `Repository: ${input.repoFullName}`,
+    `Push: ${input.pushSubject || "(no subject)"}`,
+    `Branch merged: ${input.branch ?? "(none — a direct push to main)"}`,
+    ``,
+    `=== Commits in this push ===`,
+    commitBlock,
+    ``,
+    `=== Files this push changed ===`,
+    fileBlock,
+    ``,
+    `=== Tasks already logged against this push ===`,
+    taskBlock,
+  ].join("\n");
+}
+
+// ── Granola call → task drafts ───────────────────────────────────────────────
+
+export interface ExtractTasksInput {
+  noteTitle: string | null;
+  summary: string | null;
+  transcript: string; // normalized plain text ("Me: … / Them: …")
+  participants: string | null; // raw <known_participants> text from Granola, if any
+  /** The builder's display name, when known. Lets the model (and the
+      post-processor) map "Steven: do X" notes onto owner "builder". */
+  builderName?: string | null;
+}
+
+// Keep the prompt well inside the context window; an 80k-char transcript is
+// ~2-2.5h of talking, which covers any real call. When we must cut, keep the
+// head (agenda, early asks) AND the tail (wrap-ups recap the action items) and
+// drop the middle — a head-only cut silently loses the end-of-call recap.
+// Exported because a cut is a real recall hole: a commitment made mid-call and
+// never recapped is absent from the model's input entirely, so the generator
+// logs when this fires (see buildExtractionParams).
+export const MAX_TRANSCRIPT_CHARS = 80_000;
+const TAIL_CHARS = 30_000;
+
+// The full extraction instruction block, kept BYTE-IDENTICAL across every call so
+// it forms one large static prefix OpenAI can cache (prompt_cache_key:
+// "granola-task-extraction-v2"). Every interpolation here is a compile-time
+// constant, so this string is computed once at import and never varies. The ONLY
+// per-builder text — the builder's identity — is appended AFTER this base in
+// buildExtractTasksSystemPrompt, never spliced into it, so the shared cacheable
+// prefix stays intact across calls (and across builders). Don't reintroduce a
+// per-call value here or the cache hit shrinks.
+const EXTRACT_TASKS_SYSTEM_BASE = [
+  "You extract action items from one client call — its meeting notes and its transcript — into task drafts for a solo software builder.",
+  "",
+  "Context you are working with:",
+  "- The user message holds the call title, participants, meeting notes (when Granola produced them), and the transcript. Long transcripts are truncated in the middle; the head and the tail are always intact, and the tail is where action items get recapped.",
+  "- You capture EVERY participant's action items, not only the builder's. Each draft carries an owner and filtering by owner happens after you return, so another person's task is never yours to discard.",
+  "- Every draft is reviewed by the builder before any task is created. Nothing you emit is auto-committed.",
+  "",
+  "Work the call in three passes:",
+  "1. If meeting notes are present, enumerate every assigned item in them and account for each one: it becomes exactly one draft, or it matches an exclusion in step 3. Notes almost always restate each commitment, so an assigned note item you did not turn into a draft is a defect. One bullet is one draft — two separately-listed items stay two drafts however similar they sound, and one bullet never becomes several drafts.",
+  "2. Read the transcript top to bottom and flag every commitment cue: builder commitments (\"I'll…\", \"I can…\", \"let me…\"), client asks (\"can we…\", \"could you…\", \"we need…\"), other participants' commitments (\"Rahul said he'd…\", \"I'll send you the list\"), reported problems, and agreements reached tentatively. Read the wrap-up closely — action items are usually restated at the end, and a commitment made mid-call may appear nowhere else.",
+  "3. Merge repeated mentions of one deliverable into one draft, apply the exclusions, and emit what remains.",
+  "",
+  "Include / exclude — decide per item:",
+  "- Someone explicitly took the work on (\"I'll do X\", \"can you do X\" answered yes, a note bullet assigning X) → emit a draft. When an item is borderline but was genuinely assigned, emit it: a missed assignment costs real work, an extra draft costs one unchecked box.",
+  "- Nobody took it on — \"we should probably…\", open brainstorming, background context, chit-chat, scheduling the next meeting → emit nothing. The leeway in the line above does not reach these; an unassigned idea stays out no matter how concrete it sounds.",
+  "- The same deliverable came up more than once → one draft, not one per mention.",
+  "",
+  "Owner attribution — apply in order:",
+  "1. The notes or transcript assign the work to the builder by name, by first name, or as \"Me\" when speakers are only labeled Me/Them → owner is exactly \"builder\". The builder's name is given at the end of these instructions.",
+  "2. Another participant committed to it → owner is that person's name as written on the call (\"Rahul\", \"Kathleen\"), ≤80 chars. Use a name that appears in the input; do not compose one.",
+  "3. Another person owes the builder a file, template, list, or link → that is THEIR draft, and it also belongs in the blocked builder draft's dependencies. It is not a second builder draft.",
+  "4. Nobody was named and the work is not clearly the builder's → omit owner and set confidence to \"medium\" or \"low\". An omitted owner is reviewed; a guessed one is trusted, so guessing is the more expensive mistake.",
+  "Work sounding technical is not evidence the builder owns it — only an explicit assignment is.",
+  "",
+  "What each draft carries:",
+  '- title: imperative and specific to the deliverable ("Add CSV export to the reports page"), 3–300 chars. The title is a label — a requirement that lives only in the title is a lost requirement.',
+  '- description: 20–2000 chars, written as 3–6 bullet lines that each begin with "• " and nothing else around them — what the work is, why it came up, and the context from the call. Copy email addresses, dates, day counts, time windows, field names, status names, and quoted replacement copy character-for-character from the call; those are the values the builder will act on.',
+  '- checklist: one entry per distinct requirement or completion criterion when the item has several (nested sub-bullets, ";"-separated clauses, "X and Y", "then push it live"). Every nested sub-bullet of the source item appears here, worded with its exact values. A single-step item gets an empty checklist. At most 20 entries, each ≤300 chars.',
+  "- dependencies: what another person must deliver first, as owner (≤80 chars) plus requirement (≤300 chars). At most 10, and only blockers actually stated on the call.",
+  "- owner: per the attribution rules above.",
+  `- confidence: how clearly the call assigned it.\n${glossedValues(DRAFT_CONFIDENCE, DRAFT_CONFIDENCE_DESCRIPTIONS)}`,
+  `- priority: the urgency expressed on the call, from ${TASK_PRIORITIES.map((p) => `"${p}"`).join(", ")}. Use "medium" when the call did not signal urgency.`,
+  `- type: the single best fit.\n${glossedValues(TASK_TYPES, TASK_TYPE_DESCRIPTIONS)}`,
+  `- tags: the one area the work primarily touches, as a one-element array — or an empty array when no area fits. Pick from this list only:\n${glossedValues(TASK_TAGS, TASK_TAG_DESCRIPTIONS)}`,
+  "- sourceQuote: ≤300 chars copied verbatim from the notes or transcript, the lines that put this draft in the list. For a note bullet, that bullet's own line.",
+  "",
+  "Grounding and off-schema behavior:",
+  "- Every draft traces to a specific line of the input, quoted verbatim in sourceQuote. A draft you cannot quote does not belong in the output.",
+  "- When the call gives no value for a field, leave that field empty rather than filling it from something nearby — an owner, a date, or a quote borrowed from an unrelated part of the call reads as fact to the reviewer and is worse than an absent value.",
+  "- A call with no assigned action items — a status sync, a demo, a sales conversation — returns an empty items array. That is a correct answer, not a failure.",
+  "- At most 40 drafts. If the call yields more, keep the 40 most concrete.",
+].join("\n");
+
+export function buildExtractTasksSystemPrompt(builderName: string | null): string {
+  // The ONE per-builder line — appended last so EXTRACT_TASKS_SYSTEM_BASE stays a
+  // cacheable static prefix (see the note on the constant).
+  const builderIdentity = builderName
+    ? `Builder identity: the builder's name is "${builderName}" — work assigned to that name, or to its first name, is the builder's: set owner to exactly "builder".`
+    : 'Builder identity: no name was given — if speakers are only labeled "Me"/"Them", "Me" is the builder.';
+  return `${EXTRACT_TASKS_SYSTEM_BASE}\n\n${builderIdentity}`;
+}
+
+export function buildExtractTasksUserPrompt(input: ExtractTasksInput): string {
+  const transcript =
+    input.transcript.length > MAX_TRANSCRIPT_CHARS
+      ? [
+          input.transcript.slice(0, MAX_TRANSCRIPT_CHARS - TAIL_CHARS),
+          "[… middle of transcript omitted …]",
+          input.transcript.slice(-TAIL_CHARS),
+        ].join("\n\n")
+      : input.transcript;
+
+  return [
+    input.noteTitle ? `Call: ${input.noteTitle}` : null,
+    input.participants ? `## Participants\n${input.participants}` : null,
+    input.summary ? `## Meeting summary\n${input.summary}` : null,
+    `## Transcript\n${transcript}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export function buildSimplifyTasksSystemPrompt(): string {

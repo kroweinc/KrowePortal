@@ -3,26 +3,25 @@ import type { RepoLanguage } from "@/lib/types";
 // Stable, readable palette for the top-5 language split.
 const COLORS = ["#f97316", "#0ea5e9", "#8b5cf6", "#10b981", "#f43f5e"];
 
+// Shared by the profile editor and the public page, so it carries its own
+// token-based styles rather than inheriting either surface's conventions.
 export function LanguageBar({ languages }: { languages: RepoLanguage[] }) {
   if (!languages || languages.length === 0) return null;
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
+    <div className="krowe-langbar">
+      <div className="bar">
         {languages.map((lang, i) => (
-          <div
+          <span
             key={lang.name}
             style={{ width: `${lang.pct}%`, backgroundColor: COLORS[i % COLORS.length] }}
           />
         ))}
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-neutral-500">
+      <div className="legend">
         {languages.map((lang, i) => (
-          <span key={lang.name} className="inline-flex items-center gap-1">
-            <span
-              className="inline-block h-2 w-2 rounded-full"
-              style={{ backgroundColor: COLORS[i % COLORS.length] }}
-            />
+          <span key={lang.name}>
+            <i style={{ backgroundColor: COLORS[i % COLORS.length] }} />
             {lang.name} {lang.pct}%
           </span>
         ))}

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { after } from "next/server";
 import { getCurrentProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import {
@@ -9,7 +8,7 @@ import {
   getEngagementRepoById,
   type EngagementRepo,
 } from "@/lib/github/engagement-repo";
-import { buildBranchGraph, type BranchNode } from "@/lib/github/branches";
+import { fetchBranchNames } from "@/lib/github/branches";
 
 export type EngagementBranch = { name: string; purpose: string | null };
 
@@ -20,9 +19,12 @@ export type PreloadedBranches = {
   branches: EngagementBranch[];
 };
 
-// The branch cache tracks the repo within this window; older rows trigger a
-// background re-sync. Matches the branch-graph unstable_cache TTL.
-const REPO_BRANCHES_TTL_MS = 1800 * 1000;
+// How long a cached branch list is trusted before a read re-pulls it from
+// GitHub. Deliberately short: a branch you just deleted should disappear from
+// the pickers on the next open, not on the next half hour. Affordable only
+// because syncRepoBranches is a single GitHub request (see fetchBranchNames) —
+// it used to cost ~145, which is what forced the old 30-minute window.
+const REPO_BRANCHES_TTL_MS = 60 * 1000;
 
 function isStale(syncedAtIso: string): boolean {
   const t = Date.parse(syncedAtIso);
@@ -64,11 +66,6 @@ const EMPTY: EngagementBranchesResult = {
   branches: [],
 };
 
-function flattenNames(node: BranchNode, out: string[]): void {
-  if (node.name) out.push(node.name);
-  for (const child of node.children) flattenNames(child, out);
-}
-
 /**
  * Cached branch "purpose" one-liners for a repo, keyed by branch name (latest
  * generated wins). Read-only against branch_purposes — never triggers AI
@@ -97,100 +94,47 @@ export async function getCachedBranchPurposes(
 }
 
 /**
- * The engagement repo's branch list for a task, for the done-dialog branch
- * picker. Reuses the cached branch graph (30-min TTL) and cached purposes;
- * returns hasRepo=false when the task has no linked repo so the caller can
- * degrade gracefully.
- */
-export async function getEngagementBranches(
-  taskId: string
-): Promise<EngagementBranchesResult> {
-  const profile = await getCurrentProfile();
-  if (!profile) return EMPTY;
-
-  const repo = await getEngagementRepoForTask(taskId, profile.id);
-  if (!repo) return EMPTY;
-
-  const graph = await buildBranchGraph(
-    repo.token,
-    repo.owner,
-    repo.name,
-    repo.defaultBranch
-  );
-  if (!graph) {
-    return {
-      hasRepo: true,
-      repoFullName: repo.fullName,
-      defaultBranch: repo.defaultBranch,
-      branches: [],
-    };
-  }
-
-  const flat: string[] = [];
-  flattenNames(graph.root, flat);
-
-  // De-dupe and drop empty names (the graph synthesizes an empty default entry
-  // for repos with no branches). Default branch floats to the top.
-  const seen = new Set<string>();
-  const ordered: string[] = [];
-  for (const name of flat) {
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    ordered.push(name);
-  }
-  ordered.sort((a, b) => {
-    if (a === repo.defaultBranch) return -1;
-    if (b === repo.defaultBranch) return 1;
-    return a.localeCompare(b);
-  });
-
-  const purposes = await getCachedBranchPurposes(repo.fullName);
-  const branches: EngagementBranch[] = ordered.map((name) => ({
-    name,
-    purpose: purposes[name] ?? null,
-  }));
-
-  return {
-    hasRepo: true,
-    repoFullName: repo.fullName,
-    defaultBranch: repo.defaultBranch,
-    branches,
-  };
-}
-
-/**
- * Refresh the persisted branch list for a repo from GitHub. Reuses the cached
- * branch graph (30-min TTL), upserts every live branch, and deletes rows for
- * branches that no longer exist — so the DB cache tracks the repo as branches
- * are pushed and deleted. Service-role only; safe to call from `after()`.
+ * Refresh the persisted branch list for a repo from GitHub. Upserts every live
+ * branch and deletes rows for branches that no longer exist — so the DB cache
+ * tracks the repo as branches are pushed and deleted. Service-role only.
+ *
+ * Reads names **live** (fetchBranchNames) rather than through any cached graph.
+ * This function is what synced_at freshness is judged by, so a cached read would
+ * re-persist an already-stale snapshot and stamp it fresh: a deleted branch
+ * would survive the sweep *and* suppress the next resync that would have caught
+ * it. One GitHub request, so callers can await it on a read path.
  */
 export async function syncRepoBranches(repo: EngagementRepo): Promise<void> {
-  const graph = await buildBranchGraph(
-    repo.token,
-    repo.owner,
-    repo.name,
-    repo.defaultBranch
-  );
-  if (!graph) return;
+  const live = await fetchBranchNames(repo.token, repo.owner, repo.name);
+  // null = GitHub was unreachable. Leave the cache alone rather than sweeping it
+  // to empty on a transient failure.
+  if (!live) return;
 
-  const flat: string[] = [];
-  flattenNames(graph.root, flat);
-  const names = orderNames(flat, repo.defaultBranch);
-  if (names.length === 0) return;
+  const names = orderNames(live.names, repo.defaultBranch);
 
   const supabase = createAdminClient();
   const now = new Date().toISOString();
-  const rows = names.map((branch_name) => ({
-    repo_full_name: repo.fullName,
-    branch_name,
-    is_default: branch_name === repo.defaultBranch,
-    synced_at: now,
-  }));
 
-  const { error } = await supabase
-    .from("repo_branches")
-    .upsert(rows, { onConflict: "repo_full_name,branch_name" });
-  if (error) return;
+  // No names means the repo genuinely has no branches — skip the upsert, but
+  // still sweep below so the cache empties out with it.
+  if (names.length > 0) {
+    const rows = names.map((branch_name) => ({
+      repo_full_name: repo.fullName,
+      branch_name,
+      is_default: branch_name === repo.defaultBranch,
+      synced_at: now,
+    }));
+
+    const { error } = await supabase
+      .from("repo_branches")
+      .upsert(rows, { onConflict: "repo_full_name,branch_name" });
+    if (error) return;
+  }
+
+  // Only sweep when we hold the repo's *whole* branch list — on a truncated or
+  // partially-failed listing, a live branch missing from `names` would be
+  // deleted from the cache.
+  if (!live.complete) return;
 
   // Sweep branches that vanished from the repo: any row for this repo we didn't
   // just re-stamp keeps its older synced_at. Comparing against `now` avoids
@@ -203,10 +147,14 @@ export async function syncRepoBranches(repo: EngagementRepo): Promise<void> {
 }
 
 /**
- * Branch list for a task's engagement repo, read from the persisted cache so it
- * paints instantly (no GitHub round-trip). Warms the cache on a miss and kicks
- * a background re-sync when the rows are stale, so the list stays current.
- * Same result shape as getEngagementBranches — a drop-in for the pickers.
+ * Branch list for a task's engagement repo, read from the persisted cache.
+ *
+ * When the rows are cold or older than the TTL this re-pulls from GitHub
+ * **inline** and returns the fresh list. It used to hand back the stale rows and
+ * defer the sync to `after()`, which meant a branch deleted on GitHub kept
+ * showing in the pickers for the whole of the current visit — the sweep only
+ * landed after the response had already been rendered from the old list. Waiting
+ * on one GitHub request is the cheaper trade.
  */
 export async function getEngagementBranchesCached(
   taskId: string
@@ -218,28 +166,24 @@ export async function getEngagementBranchesCached(
   if (!repo) return EMPTY;
 
   const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("repo_branches")
-    .select("branch_name, is_default, synced_at")
-    .eq("repo_full_name", repo.fullName);
+  const read = async () =>
+    (
+      await supabase
+        .from("repo_branches")
+        .select("branch_name, synced_at")
+        .eq("repo_full_name", repo.fullName)
+    ).data ?? [];
 
-  // Cold cache — fall back to the live graph and warm the cache in the
-  // background so the next open is instant.
-  if (!data || data.length === 0) {
-    after(() => syncRepoBranches(repo).catch(() => {}));
-    return getEngagementBranches(taskId);
-  }
+  let rows = await read();
+  const newest = rows.reduce((max, r) => (r.synced_at > max ? r.synced_at : max), "");
 
-  const newest = data.reduce(
-    (max, r) => (r.synced_at > max ? r.synced_at : max),
-    ""
-  );
-  if (isStale(newest)) {
-    after(() => syncRepoBranches(repo).catch(() => {}));
+  if (rows.length === 0 || isStale(newest)) {
+    await syncRepoBranches(repo).catch(() => {});
+    rows = await read();
   }
 
   const ordered = orderNames(
-    data.map((r) => r.branch_name),
+    rows.map((r) => r.branch_name),
     repo.defaultBranch
   );
   const purposes = await getCachedBranchPurposes(repo.fullName);
@@ -291,25 +235,26 @@ export async function warmEngagementBranches(): Promise<void> {
     .not("started_at", "is", null);
   if (!engagements || engagements.length === 0) return;
 
-  // Resolve each engagement to a usable (token, repo) pair, deduped by repo so a
-  // repo shared across engagements is synced once.
-  const repos = new Map<string, EngagementRepo>();
+  // One engagement per repo, so a repo shared across engagements syncs once.
+  const engagementByRepo = new Map<string, string>();
   for (const e of engagements as {
     id: string;
     github_repo_full_name: string | null;
   }[]) {
-    if (!e.github_repo_full_name || repos.has(e.github_repo_full_name)) continue;
-    const repo = await getEngagementRepoById(e.id, profile.id);
-    if (repo) repos.set(repo.fullName, repo);
+    if (!e.github_repo_full_name || engagementByRepo.has(e.github_repo_full_name)) {
+      continue;
+    }
+    engagementByRepo.set(e.github_repo_full_name, e.id);
   }
-  if (repos.size === 0) return;
+  if (engagementByRepo.size === 0) return;
 
-  // Skip repos whose cache is already fresh — the guard that keeps repeated
-  // reloads from re-crawling GitHub.
+  // Freshness check first: resolving a repo costs several queries plus a token
+  // decrypt, so don't pay it for repos the cache already tracks. That's what
+  // keeps this cheap enough to await on a page that renders branch groups.
   const { data: rows } = await supabase
     .from("repo_branches")
     .select("repo_full_name, synced_at")
-    .in("repo_full_name", Array.from(repos.keys()));
+    .in("repo_full_name", Array.from(engagementByRepo.keys()));
 
   const newest = new Map<string, string>();
   for (const row of (rows ?? []) as {
@@ -320,11 +265,11 @@ export async function warmEngagementBranches(): Promise<void> {
     if (!cur || row.synced_at > cur) newest.set(row.repo_full_name, row.synced_at);
   }
 
-  for (const [fullName, repo] of repos) {
+  for (const [fullName, engagementId] of engagementByRepo) {
     const n = newest.get(fullName);
-    if (!n || isStale(n)) {
-      await syncRepoBranches(repo).catch(() => {});
-    }
+    if (n && !isStale(n)) continue;
+    const repo = await getEngagementRepoById(engagementId, profile.id);
+    if (repo) await syncRepoBranches(repo).catch(() => {});
   }
 }
 

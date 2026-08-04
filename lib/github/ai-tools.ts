@@ -138,6 +138,12 @@ export type ToolLoopOptions = {
   maxTokens?: number;
   responseFormat?: { type: "json_object" } | { type: "text" };
   maxRounds?: number;
+  /**
+   * Stable prompt_cache_key. The system prefix is re-sent on every round, so a
+   * key keeps that prefix cached round-to-round (and across repeated calls),
+   * cutting per-round TTFT. Omit to fall back to OpenAI's automatic caching.
+   */
+  promptCacheKey?: string;
 };
 
 export type ToolLoopResult = {
@@ -153,6 +159,16 @@ export async function runWithTools(
 ): Promise<ToolLoopResult> {
   const maxRounds = opts.maxRounds ?? 30;
   const messages: ChatCompletionMessageParam[] = [...initialMessages];
+
+  // gpt-5.x rejects a reasoning pass alongside function tools on
+  // /v1/chat/completions ("Function tools with reasoning_effort are not
+  // supported… set reasoning_effort to 'none'"), so every tool-using round must
+  // pin "none". It's also the snappy setting — no reasoning latency — which is
+  // the right tradeoff for a grounded, tool-reading agent.
+  const perCall = {
+    reasoning_effort: "none" as const,
+    ...(opts.promptCacheKey ? { prompt_cache_key: opts.promptCacheKey } : {}),
+  };
 
   const telemetry: ToolLoopTelemetry = {
     rounds: 0,
@@ -172,6 +188,7 @@ export async function runWithTools(
       tools: REPO_TOOLS,
       tool_choice: "auto",
       messages,
+      ...perCall,
     });
 
     const message = response.choices[0]?.message;
@@ -249,6 +266,7 @@ export async function runWithTools(
     max_completion_tokens: opts.maxTokens ?? 1500,
     response_format: opts.responseFormat,
     messages,
+    ...perCall,
   });
 
   return {

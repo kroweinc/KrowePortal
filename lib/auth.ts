@@ -1,12 +1,14 @@
 import { cookies } from "next/headers";
 import { cache } from "react";
-import { createClient } from "@/lib/supabase/server";
-import type { Profile } from "@/lib/types";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
+import type { OnboardingState, OnboardingStatus, Profile } from "@/lib/types";
 
 export const DEV_TOGGLE_ENABLED =
   process.env.NODE_ENV !== "production" &&
   process.env.NEXT_PUBLIC_ENABLE_ROLE_SWITCHER !== "false";
 export const DEV_ROLE_COOKIE = "dev_role";
+// Set by /api/dev/onboarding/reset — see withDevOnboarding below.
+export const DEV_ONBOARDING_COOKIE = "dev_onboarding";
 export const DEV_PROFILE_IDS = new Set([
   "00000000-0000-0000-0000-000000000001",
   "00000000-0000-0000-0000-000000000002",
@@ -34,6 +36,37 @@ const DEV_PROFILES: Record<string, Profile> = {
   },
 };
 
+/**
+ * Dev-only onboarding testing mode.
+ *
+ * A dev identity is synthetic, but the onboarding wizard's state can't be: every
+ * step writes profiles.onboarding and the next render reads it back, so the
+ * hardcoded `onboarding: {}` above pins the wizard to step one forever and
+ * `onboarding_status: "completed"` bounces /onboarding straight to /b. When the
+ * dev_onboarding cookie is set, hydrate the two fields the wizard owns (plus the
+ * display name it edits) from the dev profile's real row — writes already land
+ * there, since DEV_PROFILE_IDS routes dev actions through the service role.
+ *
+ * Gated on the cookie rather than always-on so ordinary dev browsing keeps its
+ * zero-query identity resolution. tour_status stays hardcoded so the flip noted
+ * above is still the way to exercise the tour.
+ */
+async function withDevOnboarding(base: Profile): Promise<Profile> {
+  const { data } = await createAdminClient()
+    .from("profiles")
+    .select("display_name, onboarding_status, onboarding")
+    .eq("id", base.id)
+    .maybeSingle();
+  if (!data) return base;
+
+  return {
+    ...base,
+    display_name: (data.display_name as string | null) ?? base.display_name,
+    onboarding_status: (data.onboarding_status as OnboardingStatus | null) ?? base.onboarding_status,
+    onboarding: (data.onboarding as OnboardingState | null) ?? base.onboarding,
+  };
+}
+
 // Memoized per-request. The layout, the page, and every server action that runs
 // during a single render all ask "who is this?" — each call previously made a
 // network round-trip to Supabase auth (getUser) plus a profiles query. cache()
@@ -45,15 +78,18 @@ export const getCurrentProfile = cache(async function getCurrentProfile(): Promi
   // production even if the variables are accidentally set.
   if (DEV_TOGGLE_ENABLED) {
     const cookieStore = await cookies();
+    const testingOnboarding = cookieStore.get(DEV_ONBOARDING_COOKIE)?.value === "1";
     const cookieRole = cookieStore.get(DEV_ROLE_COOKIE)?.value;
     if (cookieRole && cookieRole in DEV_PROFILES) {
-      return DEV_PROFILES[cookieRole];
+      const dev = DEV_PROFILES[cookieRole];
+      return testingOnboarding ? withDevOnboarding(dev) : dev;
     }
 
     // Env bypass: set DEV_AUTH_ROLE=operator or DEV_AUTH_ROLE=builder in .env.local
     const devRole = process.env.DEV_AUTH_ROLE;
     if (devRole && devRole in DEV_PROFILES) {
-      return DEV_PROFILES[devRole];
+      const dev = DEV_PROFILES[devRole];
+      return testingOnboarding ? withDevOnboarding(dev) : dev;
     }
   }
 

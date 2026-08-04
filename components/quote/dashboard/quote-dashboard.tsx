@@ -10,7 +10,7 @@
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Sparkles, Check, Link2, Trash2 } from "lucide-react";
+import { Send, Sparkles, Check, Link2, RotateCcw, Trash2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import { updateQuoteContent, sendQuote, deleteQuote } from "@/lib/actions/quote-docs";
 import type { Quote, QuoteContent } from "@/lib/types";
@@ -204,6 +204,24 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
     });
   }
 
+  /** Start the quote over: back through the wizard, which replaces this draft in
+      place when it finishes (same id, same share link). Draft-only. */
+  async function regenerate() {
+    if (
+      !(await confirm({
+        title: "Start this quote over?",
+        description:
+          "You’ll go back through the wizard. When it finishes, this draft’s pricing is replaced — the share link stays the same.",
+        confirmText: "Restart wizard",
+        cancelText: "Keep this draft",
+        icon: RotateCcw,
+        tone: "brand",
+      }))
+    )
+      return;
+    void leave(`${backHref}/quotes/new?regenerate=${quote.id}`);
+  }
+
   async function remove() {
     if (
       !(await confirm({
@@ -281,6 +299,13 @@ export function QuoteDashboard({ quote, backHref, projectName }: QuoteDashboardP
                 {isDraft && (
                   <button type="button" className="prd-btn prd-btn--ghost" onClick={remove} disabled={isPending}>
                     Delete
+                  </button>
+                )}
+                {/* Draft-only, like Delete — a sent quote is live at a link the
+                    client may already hold, so it's never rewritten under them. */}
+                {isDraft && (
+                  <button type="button" className="prd-btn prd-btn--ghost" onClick={regenerate} disabled={isPending}>
+                    <RotateCcw className="h-3.5 w-3.5" /> Regenerate
                   </button>
                 )}
                 <button

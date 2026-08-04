@@ -4,61 +4,61 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { advanceOnboarding, finishOnboarding } from "@/lib/actions/onboarding";
 import {
-  PathStep,
-  ProspectStep,
-  HandoffStep,
+  IdentityStep,
+  AgencyTypeStep,
+  AgencySizeStep,
   ClientStep,
-  RepoStep,
-  TasksStep,
-  DocsStep,
+  ChargingStep,
 } from "./steps";
 import type { WizardNav } from "./wizard-shell";
-import type { GitHubRepo, OnboardingPath, OnboardingStep } from "@/lib/types";
+import { ONBOARDING_STEPS } from "@/lib/types";
+import type {
+  AgencySize,
+  AgencyType,
+  OnboardingStep,
+  PricingModel,
+} from "@/lib/types";
+
+// The builder's onboarding answers so far, loaded server-side and threaded in so
+// each step renders prefilled (resume-safe — the wizard holds no local history).
+export interface OnboardingBuilderProfile {
+  displayName: string;
+  agencyName: string | null;
+  agencyRole: string | null;
+  agencyWebsite: string | null;
+  agencyType: AgencyType | null;
+  agencySize: AgencySize | null;
+  pricingModel: PricingModel | null;
+  hourlyRate: number | null;
+  avatarUrl: string | null;
+}
 
 export interface WizardProps {
   step: OnboardingStep;
-  path?: OnboardingPath;
-  oauthError?: string;
-  project: { id: string; name: string } | null;
-  engagement: { id: string; title: string; repoFullName: string | null } | null;
+  engagement: { id: string; title: string } | null;
   inviteToken: string | null;
-  github: { connected: boolean; repos: GitHubRepo[] };
+  profile: OnboardingBuilderProfile;
 }
 
-const STEPS_BY_PATH: Record<OnboardingPath, OnboardingStep[]> = {
-  no_clients: ["path", "prospect", "handoff"],
-  has_clients: ["path", "client", "repo", "tasks", "docs"],
-};
-
-// Deterministic Back: the previous step is derived from STEPS_BY_PATH so forward
-// and backward navigation can never desync. State lives in the DB, not a history
-// stack, so this survives router.refresh() and resume.
-function prevStep(step: OnboardingStep, path?: OnboardingPath): OnboardingStep | null {
-  if (!path) return null;
-  const seq = STEPS_BY_PATH[path];
-  const i = seq.indexOf(step);
-  return i > 0 ? seq[i - 1] : null;
+// Single linear flow — no fork. Back is derived from ONBOARDING_STEPS' order so
+// forward and backward navigation can never desync; state lives in the DB, not a
+// history stack, so this survives router.refresh() and resume.
+function prevStep(step: OnboardingStep): OnboardingStep | null {
+  const i = ONBOARDING_STEPS.indexOf(step);
+  return i > 0 ? ONBOARDING_STEPS[i - 1] : null;
 }
 
-export function OnboardingWizard({
-  step,
-  path,
-  oauthError,
-  project,
-  engagement,
-  inviteToken,
-  github,
-}: WizardProps) {
+export function OnboardingWizard({ step, engagement, inviteToken, profile }: WizardProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
-  const prev = prevStep(step, path);
+  const prev = prevStep(step);
 
   const nav: WizardNav = {
-    canBack: prev !== null && step !== "path",
+    canBack: prev !== null,
     back: () =>
       startTransition(async () => {
-        if (prev) await advanceOnboarding(prev, path);
+        if (prev) await advanceOnboarding(prev);
         router.refresh();
       }),
     exit: () =>
@@ -68,15 +68,20 @@ export function OnboardingWizard({
       }),
   };
 
-  const clientName = engagement?.title;
-
   switch (step) {
-    case "path":
-      return <PathStep key="path" nav={nav} />;
-    case "prospect":
-      return <ProspectStep key="prospect" nav={nav} />;
-    case "handoff":
-      return project ? <HandoffStep key="handoff" nav={nav} project={project} /> : null;
+    case "identity":
+      return <IdentityStep key="identity" nav={nav} profile={profile} />;
+    case "agency_type":
+      return <AgencyTypeStep key="agency_type" nav={nav} selected={profile.agencyType} />;
+    case "agency_size":
+      return (
+        <AgencySizeStep
+          key="agency_size"
+          nav={nav}
+          selected={profile.agencySize}
+          priorType={profile.agencyType}
+        />
+      );
     case "client":
       return (
         <ClientStep
@@ -85,28 +90,13 @@ export function OnboardingWizard({
           existing={engagement ? { title: engagement.title, inviteToken } : null}
         />
       );
-    case "repo":
+    case "charging":
       return (
-        <RepoStep
-          key="repo"
+        <ChargingStep
+          key="charging"
           nav={nav}
-          connected={github.connected}
-          repos={github.repos}
-          engagement={engagement ? { id: engagement.id, repoFullName: engagement.repoFullName } : null}
-          clientName={clientName}
-          oauthError={oauthError}
-        />
-      );
-    case "tasks":
-      return <TasksStep key="tasks" nav={nav} engagementId={engagement?.id ?? null} clientName={clientName} />;
-    case "docs":
-      return (
-        <DocsStep
-          key="docs"
-          nav={nav}
-          projectId={project?.id ?? null}
-          engagementId={engagement?.id ?? null}
-          clientName={clientName}
+          selectedModel={profile.pricingModel}
+          hourlyRate={profile.hourlyRate}
         />
       );
     default:

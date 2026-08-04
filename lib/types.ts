@@ -21,10 +21,16 @@ export interface GitHubRepo {
 export type Role = "operator" | "builder";
 export type TaskStatus = "backlog" | "todo" | "in_progress" | "done";
 export type TaskSource = "operator_request" | "builder_added";
-export type TaskPriority = "low" | "medium" | "high" | "urgent";
+// Const arrays, not bare unions, so the AI prompts can derive their value lists
+// from the same source the zod schemas enum over (see TASK_TAGS below and
+// lib/ai/prompts.ts) — adding a value becomes a compile error until every
+// gloss is written, instead of silently drifting the prompt text.
+export const TASK_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 // Linear-style change type. Null on legacy/unclassified tasks (see migration
 // 0064); auto-set by the AI classifier on creation and overridable in the UI.
-export type TaskType = "feature" | "bug" | "change";
+export const TASK_TYPES = ["feature", "bug", "change"] as const;
+export type TaskType = (typeof TASK_TYPES)[number];
 
 // Fixed taxonomy of area labels the AI classifier may assign. A task gets
 // exactly ONE of these (stored as a single-element tasks.tags array) — the
@@ -48,12 +54,23 @@ export type TaskTag = (typeof TASK_TAGS)[number];
 export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
 // First-time product-tour lifecycle (separate from the onboarding form wizard).
 export type TourStatus = "pending" | "completed" | "dismissed";
-export type OnboardingPath = "no_clients" | "has_clients";
-export type OnboardingStep = "path" | "prospect" | "handoff" | "client" | "repo" | "tasks" | "docs";
+// The onboarding wizard is an about-you intake: who you are, what kind of
+// agency you run, its size, an optional current client, and how you charge.
+// Declared in wizard order — the sequence IS the flow, so Back derives from it
+// and a stored step that isn't in this list is treated as stale (see
+// app/onboarding/page.tsx).
+export const ONBOARDING_STEPS = [
+  "identity",
+  "agency_type",
+  "agency_size",
+  "client",
+  "charging",
+] as const;
+export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 // Wizard-internal state — only the onboarding flow reads/writes this.
+// engagement_id/project_id are set when the optional client step creates one.
 export interface OnboardingState {
-  path?: OnboardingPath;
   step?: OnboardingStep;
   project_id?: string;
   engagement_id?: string;
@@ -78,6 +95,13 @@ export interface NotificationPreferences {
   notify_doc_signed: boolean;
   notify_change_order: boolean;
   notify_invite_accepted: boolean;
+  // Task-lifecycle toggles (migration 0078).
+  notify_task_approval_requested: boolean;
+  notify_task_approved: boolean;
+  notify_task_changes_requested: boolean;
+  notify_task_delivered: boolean;
+  // Task comment thread (migration 0083).
+  notify_task_comment: boolean;
   updated_at: string;
 }
 
@@ -155,6 +179,13 @@ export interface Task {
   // joined so the read-only pill can render without the groups list.
   staging_group_id: string | null;
   staging_group?: { name: string } | null;
+  // The push this task went live in (migration 0084). Nullable and NOT
+  // redundant with shipped_at: the backfill can date a task from the audit log
+  // without being able to group it, so shipped_at set + release_id null is a
+  // legal state that the timeline renders as a per-day group.
+  release_id: string | null;
+  shipped_at: string | null;
+  release?: Release | null;
   engagement?: Engagement;
   // The person who submitted the task, joined on created_by. Surfaced in place of
   // the old operator/builder source badge. Absent unless the query selects it.
@@ -179,6 +210,70 @@ export interface StagingGroup {
   engagement_id: string;
   name: string;
   sort_order: number;
+  created_at: string;
+}
+
+// How a release came to exist (migration 0084).
+//   auto     — a merge into main detected by pollMainMerges; carries merge_sha.
+//              branch_name is the branch that carried the push (a label only —
+//              membership is "everything that was waiting", not the branch).
+//   manual   — the builder asserting "this is live" (bulk button / done dialog).
+//   combined — a builder-named umbrella over >= 2 other releases. Its children
+//              keep their own rows and tasks, so splitting it is lossless.
+export type ReleaseKind = "auto" | "manual" | "combined";
+
+// One push to main (migration 0084) — the durable record that replaced the
+// single mutable row per branch in branch_push_marks. Scoped to one engagement
+// (null = personal); a release never spans engagements.
+export interface Release {
+  id: string;
+  engagement_id: string | null;
+  kind: ReleaseKind;
+  // Null means the UI derives a label from the branch and date.
+  title: string | null;
+  notes: string | null;
+  repo_full_name: string | null;
+  branch_name: string | null;
+  merge_sha: string | null;
+  // First line of the merge/push commit (0085) — the push's display label, and
+  // often the only thing that names it: a plain push to main leaves branch_name
+  // null. Null on manual releases and on rows predating 0085.
+  merge_subject: string | null;
+  shipped_at: string;
+  // Set on a child that has been folded into a kind="combined" parent.
+  combined_into_id: string | null;
+  // When this push was scanned for work that shipped without a task (0086).
+  // Null means "never looked", NOT "nothing found" — the scan stamps this even
+  // when it proposes nothing, which is what keeps it from re-billing.
+  gaps_scanned_at?: string | null;
+  created_at: string;
+}
+
+// One commit backing a release gap, snapshotted at scan time so the card renders
+// and the accept path links commits without a second GitHub call.
+export interface ReleaseGapCommit {
+  sha: string;
+  subject: string;
+  url: string;
+}
+
+// A proposed task for work that shipped in a push with nothing tracking it
+// (migration 0086) — the "you forgot to create a task" safeguard. Rendered under
+// its push on the Shipped timeline; accepting creates the task, dismissing
+// retires the suggestion for good. Never creates anything on its own.
+export interface ReleaseGap {
+  id: string;
+  release_id: string;
+  engagement_id: string | null;
+  repo_full_name: string;
+  title: string;
+  description: string;
+  priority: TaskPriority;
+  type: TaskType;
+  tags: TaskTag[];
+  confidence: "high" | "medium" | "low";
+  evidence: ReleaseGapCommit[];
+  files: string[];
   created_at: string;
 }
 
@@ -658,8 +753,6 @@ export interface PrdContent {
   assumptions?: string[]; // §11 — what the client must provide
   constraintsDetail?: PrdConstraints; // §12
   constraints?: string[]; //    legacy fallback
-  risks?: string[]; // §13
-  openQuestions?: string[]; // §13
   milestoneDueDate?: string | null; // §14 — overall deadline the milestones build toward
   milestoneList?: PrdMilestone[]; // §14
   milestones?: string; //    legacy fallback
@@ -875,6 +968,24 @@ export interface TaskAttachment {
   uploader?: Pick<Profile, "id" | "display_name" | "role">;
 }
 
+// A message in a task's comment thread (migration 0082). Rendered in the detail
+// sheet's Comments tab, interleaved with the approval-loop events from
+// task_audit_log — this row is only what someone typed.
+//
+// updated_at is null until the first edit (it's the flag behind the "edited"
+// tag). deleted_at is a soft delete: the row survives so the thread keeps its
+// shape, and the API blanks `body` to null so the UI renders a placeholder.
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  author_id: string;
+  body: string | null;
+  created_at: string;
+  updated_at: string | null;
+  deleted_at: string | null;
+  author?: Pick<Profile, "id" | "display_name" | "role"> | null;
+}
+
 // ============================================================
 // Builder Profile — shareable resume (see 0040_builder_profiles.sql)
 // ============================================================
@@ -895,9 +1006,6 @@ export interface BuilderProfile {
   linkedin_url: string | null;
   github_url: string | null;
   portfolio_url: string | null;
-  education_school: string | null; // university or high school
-  education_major: string | null;
-  education_year: string | null; // freeform, e.g. "Class of 2027" or "2020 – 2024"
   resume_storage_path: string | null;
   resume_file_name: string | null;
   avatar_storage_path: string | null;
@@ -907,6 +1015,13 @@ export interface BuilderProfile {
   token_revoked_at: string | null; // set when the share link is revoked
   github_synced_at: string | null;
   tags: string[]; // achievement/identity badges, e.g. "Hackathon Winner"
+  // Agency identity + charging captured during onboarding (migration 0080).
+  agency_name: string | null;
+  agency_role: string | null; // the builder's role/title, e.g. "Founder"
+  agency_website: string | null; // brand-fetched site url, e.g. "https://acme.com" (0081)
+  agency_type: AgencyType | null;
+  agency_size: AgencySize | null;
+  pricing_model: PricingModel | null;
   // Quote defaults — the base pricing every new quote starts from (0058).
   default_hourly_rate: number; // blended rate line items price at (hours × rate)
   payment_terms_preset: PaymentTermsPreset; // seeds paymentMilestones on new quotes
@@ -915,6 +1030,17 @@ export interface BuilderProfile {
   created_at: string;
   updated_at: string;
 }
+
+// Onboarding intake option sets. The DB check constraints in
+// 0080_agency_charging_onboarding.sql mirror these — keep them in sync.
+export const AGENCY_TYPES = ["ai", "web", "software"] as const;
+export type AgencyType = (typeof AGENCY_TYPES)[number];
+
+export const AGENCY_SIZES = ["solo", "2_5", "6_15", "16_plus"] as const;
+export type AgencySize = (typeof AGENCY_SIZES)[number];
+
+export const PRICING_MODELS = ["hourly", "fixed_bid", "retainer"] as const;
+export type PricingModel = (typeof PRICING_MODELS)[number];
 
 // Builder quote-default option sets. The DB check constraints in
 // 0058_quote_pricing_defaults.sql mirror these — keep them in sync.
@@ -940,6 +1066,7 @@ export interface BuilderProfileProject {
   languages: RepoLanguage[] | null;
   stars: number | null;
   github_pushed_at: string | null;
+  is_hidden: boolean;
   display_order: number;
   created_at: string;
   updated_at: string;
@@ -956,6 +1083,43 @@ export interface BuilderProfileExperience {
   start_label: string | null;
   end_label: string | null;
   description: string | null;
+  is_hidden: boolean;
+  display_order: number;
+  created_at: string;
+}
+
+// Degree levels offered by the education editor. Free text in the DB
+// (validated app-side, same call as CODING_TOOL_CATEGORIES) so the list can
+// grow without a migration — a builder can also type their own.
+export const EDUCATION_LEVELS = [
+  "High School",
+  "Associate's",
+  "Bachelor's",
+  "Master's",
+  "MBA",
+  "PhD",
+  "Bootcamp",
+  "Certificate",
+] as const;
+
+export const EDUCATION_MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+] as const;
+
+export interface BuilderProfileEducation {
+  id: string;
+  builder_profile_id: string;
+  school: string;
+  level: string | null; // e.g. "Bachelor's"; free text, see EDUCATION_LEVELS
+  field_of_study: string | null;
+  start_month: string | null;
+  start_year: string | null;
+  end_month: string | null;
+  /** Blank end = still in progress; the UI reads it as "or expected". Legacy
+      0049 rows backfilled a freeform label here ("Class of 2027"). */
+  end_year: string | null;
+  is_hidden: boolean;
   display_order: number;
   created_at: string;
 }
@@ -1002,6 +1166,7 @@ export interface BuilderProfileCodingTool {
   name: string;
   category: CodingToolCategory | null;
   url: string | null;
+  is_hidden: boolean;
   display_order: number;
   created_at: string;
 }

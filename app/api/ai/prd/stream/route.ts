@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
           {
             model: AI_MODEL,
             max_completion_tokens: PRD_MAX_TOKENS,
-            response_format: prdResponseFormat(genInput.forceFinal),
+            response_format: prdResponseFormat(genInput),
             // Shares the static system prefix with the blocking path — same key so
             // both hit the same cached prefix (see callOpenAI in generate-prd.ts).
             prompt_cache_key: "prd-gen-v1",
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const parsed = parsePrdResult(full, genInput.forceFinal);
+        const parsed = parsePrdResult(full, genInput);
         if (parsed.kind === "questions") {
           // Drop questions already answered (or repeated within the round) so the
           // no-context flow never re-asks them — notably the fixed fallback questions,
@@ -108,14 +108,20 @@ export async function POST(request: NextRequest) {
         let result =
           parsed.kind === "prd"
             ? parsed
-            : await generatePrd({ ...genInput, forceFinal: true }, { userId: profile.id, operation: "generate_prd" });
+            : await generatePrd(
+                { ...genInput, forceFinal: true, mustAsk: false },
+                { userId: profile.id, operation: "generate_prd" }
+              );
 
         // A STREAMED final round can truncate mid-JSON and degrade to an empty draft
         // ({ content: {} }) — don't persist that blank. Recover with one blocking
         // forced-final attempt (which retries and re-uses the strict schema) before
         // giving up; persistPrdDraft still refuses an empty result as a last resort.
         if (result.kind === "prd" && isEmptyPrdContent(result.content)) {
-          result = await generatePrd({ ...genInput, forceFinal: true }, { userId: profile.id, operation: "generate_prd" });
+          result = await generatePrd(
+            { ...genInput, forceFinal: true, mustAsk: false },
+            { userId: profile.id, operation: "generate_prd" }
+          );
         }
         if (result.kind !== "prd") {
           // Defensive: forceFinal cannot return questions, but keep the stream honest.

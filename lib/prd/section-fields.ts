@@ -39,8 +39,6 @@ export const REFINABLE_SECTIONS: RefinableSection[] = [
   { id: "constraints", title: "Constraints", fields: ["constraintsDetail", "constraints"] },
   // ids must match the SECTIONS registry in prd-sections.tsx so the inline
   // "Refine" button (gated by isRefinable(section.id)) renders on every section.
-  { id: "risks", title: "Risks", fields: ["risks"] },
-  { id: "openQuestions", title: "Open Questions", fields: ["openQuestions"] },
   { id: "milestones", title: "Milestones", fields: ["milestoneList"] },
 ];
 

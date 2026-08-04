@@ -16,8 +16,8 @@ import { generateQuote } from "@/lib/ai/generate-quote";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { refineQuoteSection as runRefineSection } from "@/lib/ai/refine-quote-section";
 import { fieldsForSection, refinableSection } from "@/lib/quote/section-fields";
+import { MIN_INSTRUCTION, MAX_INSTRUCTION } from "@/lib/doc/refine";
 import { recomputeTotals, applyMilestonePercents } from "@/lib/quote/totals";
-import type { Question } from "@/lib/ai/schemas";
 import type { Quote, QuoteContent } from "@/lib/types";
 import {
   resolveQuoteDraft,
@@ -25,9 +25,6 @@ import {
   type DraftQuoteInput,
   type DraftQuoteResult,
 } from "@/lib/quote/draft-core";
-
-/** Hard cap on refine question rounds before a section patch is forced. */
-const MAX_REFINE_ROUNDS = 2;
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
@@ -124,31 +121,20 @@ const refineSchema = z.object({
   // The live quote content (incl. unsaved inline edits) sent from the client so
   // the AI refines against what the builder currently sees, not the last-saved row.
   currentContent: z.record(z.string(), z.unknown()),
-  answers: z
-    .array(
-      z.object({
-        questionId: z.string(),
-        question: z.string().max(400),
-        answer: z.string().max(2000),
-      })
-    )
-    .max(20)
-    .optional(),
-  round: z.number().int().min(0).max(10),
+  // What the builder typed into "What do you want to change?" — a casual
+  // one-liner, not a structured brief.
+  instruction: z.string().trim().min(MIN_INSTRUCTION).max(MAX_INSTRUCTION),
 });
 
 export type RefineQuoteSectionInput = z.input<typeof refineSchema>;
 
-export type RefineQuoteSectionResult =
-  | { kind: "questions"; items: Question[] }
-  | { kind: "section"; patch: Partial<QuoteContent> }
-  | { error: string };
+export type RefineQuoteSectionResult = { patch: Partial<QuoteContent> } | { error: string };
 
 /**
- * Adaptive single-section refine. Sends the live quote content + section focus
- * to the AI and either asks a round of targeted clarifying questions or returns
- * a patch covering ONLY that section's keys. Does NOT persist — the client merges
- * the patch into its edit state (and recomputes totals) then saves through
+ * Single-section refine driven by the builder's instruction. Sends the live quote
+ * content + section focus + the instruction to the AI and returns a patch
+ * covering ONLY that section's keys. Does NOT persist — the client merges the
+ * patch into its edit state (and recomputes totals) then saves through
  * updateQuoteContent.
  */
 export async function refineQuoteSection(
@@ -158,24 +144,22 @@ export async function refineQuoteSection(
   if (!profile) redirect("/login");
   if (profile.role !== "builder") return { error: "Only the builder can edit a quote." };
 
-  const budget = await assertAiBudget(profile.id);
-  if (!budget.ok) return { error: budget.error };
-
   const parsed = refineSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
-  const { quoteId, sectionId, currentContent, answers = [], round } = parsed.data;
+  const { quoteId, sectionId, currentContent, instruction } = parsed.data;
 
   const fields = fieldsForSection(sectionId);
   if (fields.length === 0) return { error: "That section can't be refined." };
   const section = refinableSection(sectionId);
 
+  // The budget check and the ownership read only share profile.id — one round trip.
   const supabase = await getClient(profile.id);
-  const { data: before } = await supabase
-    .from("quotes")
-    .select("created_by, source_notes")
-    .eq("id", quoteId)
-    .single();
+  const [budget, { data: before }] = await Promise.all([
+    assertAiBudget(profile.id),
+    supabase.from("quotes").select("created_by, source_notes").eq("id", quoteId).single(),
+  ]);
+  if (!budget.ok) return { error: budget.error };
 
   if (!before) return { error: "Quote not found." };
   if (before.created_by !== profile.id) return { error: "Not your quote." };
@@ -187,17 +171,15 @@ export async function refineQuoteSection(
       sectionTitle: section?.title ?? sectionId,
       sectionFields: fields as string[],
       currentContent: currentContent as QuoteContent,
+      instruction,
       businessContext: (before.source_notes as string | null) ?? undefined,
-      answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
-      forceFinal: round >= MAX_REFINE_ROUNDS,
       currentDate: new Date().toISOString().slice(0, 10),
     }, { userId: profile.id, operation: "refine_quote_section" });
   } catch (err) {
     return { error: friendlyAiError(err) };
   }
 
-  if (result.kind === "questions") return { kind: "questions", items: result.items };
-  return { kind: "section", patch: result.patch };
+  return { patch: result.patch };
 }
 
 const updateSchema = z.object({

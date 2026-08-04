@@ -703,7 +703,7 @@ export function ImportFromGranolaDialog({
                 </p>
               ) : (
                 <>
-                  <label className="krowe-gr-search">
+                  <label className="krowe-field-shell krowe-gr-search">
                     <span className="si">
                       <Search size={15} strokeWidth={2} />
                     </span>

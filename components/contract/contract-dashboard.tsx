@@ -11,7 +11,7 @@
 import { useState, useTransition, useEffect, useRef, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Send, Check, Link2, Plus, X, Trash2 } from "lucide-react";
+import { Send, Check, Link2, Plus, RotateCcw, X, Trash2 } from "lucide-react";
 import { BriefStatusPill } from "@/components/brief/brief-status-pill";
 import {
   updateContractContent,
@@ -222,6 +222,24 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
     });
   }
 
+  /** Start the contract over: back through the draft form, which replaces this
+      draft in place when it finishes (same id, same share link). Draft-only. */
+  async function regenerate() {
+    if (
+      !(await confirm({
+        title: "Start this contract over?",
+        description:
+          "You’ll go back through the draft form. When it finishes, this draft’s terms are replaced — the share link stays the same.",
+        confirmText: "Redraft contract",
+        cancelText: "Keep this draft",
+        icon: RotateCcw,
+        tone: "brand",
+      }))
+    )
+      return;
+    void leave(`${backHref}/contract/new?regenerate=${contract.id}`);
+  }
+
   async function remove() {
     if (
       !(await confirm({
@@ -297,6 +315,13 @@ export function ContractDashboard({ contract, backHref, projectName }: ContractD
                 {isDraft && (
                   <button type="button" className="prd-btn prd-btn--ghost" onClick={remove} disabled={isPending}>
                     Delete
+                  </button>
+                )}
+                {/* Draft-only, like Delete — a sent contract is live at a link the
+                    client may already hold, so it's never rewritten under them. */}
+                {isDraft && (
+                  <button type="button" className="prd-btn prd-btn--ghost" onClick={regenerate} disabled={isPending}>
+                    <RotateCcw className="h-3.5 w-3.5" /> Regenerate
                   </button>
                 )}
                 <SaveControl

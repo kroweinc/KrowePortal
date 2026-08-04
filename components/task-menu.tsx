@@ -27,6 +27,8 @@ import {
   Pin,
   PinOff,
   CheckCircle2,
+  CheckSquare,
+  Square,
   Trash2,
 } from "lucide-react";
 import { useContextMenu, type MenuItem } from "@/components/ui/context-menu";
@@ -58,13 +60,17 @@ interface TaskMenuArgs {
   /** Override for the Delete item (e.g. to reuse a shared confirm dialog);
       defaults to the hook's own confirm + deleteTask flow. */
   onDelete?: () => void | Promise<void>;
+  /** Multi-select: when provided, the menu grows a "Select"/"Deselect" item
+      that toggles this task in the board's bulk-select set. */
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }
 
 function isErr(r: unknown): r is { error: string } {
   return !!r && typeof r === "object" && "error" in r && !!(r as { error?: string }).error;
 }
 
-export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, requestApproval, onDelete }: TaskMenuArgs) {
+export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, requestApproval, onDelete, selected, onToggleSelect }: TaskMenuArgs) {
   const router = useRouter();
   const menu = useContextMenu();
   const [confirm, confirmDialog] = useConfirm();
@@ -92,6 +98,17 @@ export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, req
         },
       },
     ];
+
+    // Select — enter/extend the board's bulk-select set from the right-click
+    // menu (the hover checkbox is the primary affordance; this aids discovery).
+    if (onToggleSelect) {
+      list.push({
+        label: selected ? "Deselect" : "Select",
+        icon: selected ? <CheckSquare size={15} strokeWidth={1.9} /> : <Square size={15} strokeWidth={1.9} />,
+        separatorBefore: true,
+        onSelect: () => onToggleSelect(),
+      });
+    }
 
     // Pin to top — the operator's primary "prioritize" affordance (their menu is
     // otherwise Open / Copy link / Delete), and available to the builder too so
@@ -122,7 +139,10 @@ export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, req
           disabled: task.status === status,
           disabledReason: "Task is already here",
           onSelect: async () => {
-            if (status === "done") {
+            if (status === "done" && onStatusMove) {
+              // Board move → optimistic instant flip through the deliverable dialog.
+              onStatusMove(task.id, "done");
+            } else if (status === "done") {
               requestDone({ task });
             } else if (onStatusMove) {
               onStatusMove(task.id, status);
@@ -190,7 +210,7 @@ export function useTaskMenu({ task, role, onOpen, onStatusMove, requestDone, req
     return list;
     // task is the only data input; router/confirm/onOpen/request* are stable per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id, task.title, task.status, task.approval_sent_at, task.approval_approved_at, task.pinned_at, role, href]);
+  }, [task.id, task.title, task.status, task.approval_sent_at, task.approval_approved_at, task.pinned_at, role, href, selected, onToggleSelect]);
 
   return { menu, items, dialogs: confirmDialog };
 }

@@ -14,6 +14,7 @@ import { getMyEngagements, getMyPendingInvites } from "@/lib/actions/invitations
 import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-avatars";
 import { getBranchesByEngagement } from "@/lib/actions/get-engagement-branches";
 import { getStagingGroupsByEngagement } from "@/lib/actions/staging-groups";
+import { getPendingCommitMatches } from "@/lib/actions/get-commit-task-matches";
 import type { Task } from "@/lib/types";
 
 export const metadata = { title: "Tasks" };
@@ -67,10 +68,13 @@ export default async function BuilderDashboard({
   const tasks = attachCreatorAvatars(rows, avatars);
 
   // Preload the cached repo branches + staging groups per engagement so the
-  // task detail sheet's deliverable chips paint with no fetch.
-  const [branchesByEngagement, stagingGroupsByEngagement] = await Promise.all([
+  // task detail sheet's deliverable chips paint with no fetch. commitMatches
+  // carries the "a commit on main looks like it finished this" suggestions —
+  // scoped to still-open tasks, so a done card can never render one.
+  const [branchesByEngagement, stagingGroupsByEngagement, commitMatches] = await Promise.all([
     getBranchesByEngagement(engagementList),
     getStagingGroupsByEngagement(engagementIds),
+    getPendingCommitMatches(tasks.filter((t) => t.status !== "done").map((t) => t.id)),
   ]);
   const firstEngagement = engagementList[0];
 
@@ -126,6 +130,7 @@ export default async function BuilderDashboard({
                 currentUserId={profile.id}
                 branchesByEngagement={branchesByEngagement}
                 stagingGroupsByEngagement={stagingGroupsByEngagement}
+                commitMatches={commitMatches}
               />
             </Suspense>
           </div>

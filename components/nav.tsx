@@ -22,6 +22,10 @@ export function Nav({ profile }: NavProps) {
 
   return (
     <header className="krowe-topbar">
+      {/* Empty left slot — the sidebar carries the brand. It exists so the
+          search pill centers against the right-hand actions. */}
+      <div className="krowe-topbar-left" />
+
       <GlobalSearch role={role} />
 
       <div className="krowe-topbar-right">

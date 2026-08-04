@@ -18,15 +18,9 @@ import { composeBusinessContext } from "@/lib/project/business-context";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { analyzeFreeTierFit, stackServiceNames } from "@/lib/ai/free-tier-fit";
 import type { PrdGenInput } from "@/lib/ai/generate-prd";
-import { SCOPE_STAGE_COUNT, deepStageIndex } from "@/lib/prd/scope-stages";
+import { planPrdRound } from "@/lib/prd/scope-stages";
 import type { Question } from "@/lib/ai/schemas";
 import type { PrdContent } from "@/lib/types";
-
-/** Hard cap on adaptive question rounds before a PRD is forced. */
-const MAX_PRD_ROUNDS = 5;
-/** No-notes "deep context" path: the opener round (round 0) plus one round per
-    fixed scope stage, then force the PRD. */
-const MAX_PRD_ROUNDS_DEEP = SCOPE_STAGE_COUNT + 1;
 
 export async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : await createClient();
@@ -96,6 +90,11 @@ export const draftPrdSchema = z.object({
     .max(40)
     .optional(),
   round: z.number().int().min(0).max(10),
+  /** Regenerate: the existing draft this run replaces. When set, the finished PRD
+      overwrites that row in place (same id, same share token) instead of inserting
+      a new one. Validated in resolvePrdDraft — must be the builder's own draft in
+      this project. */
+  replaceId: z.string().uuid().optional(),
 });
 
 export type DraftPrdInput = z.input<typeof draftPrdSchema>;
@@ -119,6 +118,9 @@ export type PrdSaveContext = {
   notes?: string;
   answers: PrdAnswerRow[];
   deepContext: boolean;
+  /** Regenerate target — the draft to overwrite instead of inserting. The token is
+      carried so the replace path can revalidate the public share link too. */
+  replace?: { id: string; token: string | null };
 };
 
 export type PrdDraftResolution =
@@ -146,29 +148,31 @@ export async function resolvePrdDraft(input: DraftPrdInput): Promise<PrdDraftRes
   const parsed = draftPrdSchema.safeParse(input);
   if (!parsed.success) return { ok: false, status: 400, error: parsed.error.issues[0]?.message ?? "Invalid input." };
 
-  const { projectId, title, notes, answers = [], round } = parsed.data;
+  const { projectId, title, notes, answers = [], round, replaceId } = parsed.data;
 
   const project = await getProjectById(projectId);
   if (!project) return { ok: false, status: 404, error: "Document not found." };
   if (project.owner_id !== profile.id) return { ok: false, status: 403, error: "Not your document." };
 
-  // These three reads are independent — run them concurrently rather than serially.
-  const [materials, sopTranscripts, budget] = await Promise.all([
+  // These reads are independent — run them concurrently rather than serially. The
+  // regenerate target is resolved here too so an invalid one fails before any AI
+  // spend, and every round of the re-run carries the same validated target.
+  const [materials, sopTranscripts, budget, replace] = await Promise.all([
     getProjectMaterials(projectId),
     getProjectSopTranscripts(projectId),
     assertAiBudget(profile.id),
+    resolveReplaceTarget(profile.id, projectId, replaceId),
   ]);
   if (!budget.ok) return { ok: false, status: 429, error: budget.error };
+  if (replace && "error" in replace) return { ok: false, status: replace.status, error: replace.error };
 
-  // No written notes ⇒ deep context-gathering mode: a fixed step-by-step scope
-  // intake (round 0 is the free-text opener, then one stage per round), and a
-  // synthesized context summary saved back to the project. The opener round is
-  // served as a fixed question by the caller (no AI call); `stageIndex` maps the
-  // staged rounds (1..N) to their scope stage and is undefined for the opener.
-  const deepContext = !(notes && notes.trim().length > 0);
-  const openerRound = deepContext && round === 0;
-  const forceFinal = round >= (deepContext ? MAX_PRD_ROUNDS_DEEP : MAX_PRD_ROUNDS);
-  const stageIndex = deepContext ? (deepStageIndex(round) ?? undefined) : undefined;
+  // How much the builder wrote decides how scope gets gathered (see PrdIntakeMode):
+  // no notes ⇒ the free-text opener then one stage per round; notes too thin to specify
+  // anything ⇒ the same staged intake with those notes standing in for the opener;
+  // a real brief ⇒ the adaptive interview. Both staged modes also synthesize a context
+  // summary back onto the project. The opener round is served as a fixed question by the
+  // caller (no AI call); `stageIndex` is undefined for it and for the adaptive interview.
+  const { openerRound, forceFinal, mustAsk, deepContext, seeded, stageIndex } = planPrdRound(notes, round);
 
   const genInput: PrdGenInput = {
     title,
@@ -176,7 +180,9 @@ export async function resolvePrdDraft(input: DraftPrdInput): Promise<PrdDraftRes
     businessContext: composeBusinessContext(project, materials, sopTranscripts),
     answers: answers.map((a) => ({ question: a.question, answer: a.answer })),
     forceFinal,
+    mustAsk,
     deepContext,
+    seeded,
     stageIndex,
     currentDate: new Date().toISOString().slice(0, 10),
   };
@@ -185,9 +191,37 @@ export async function resolvePrdDraft(input: DraftPrdInput): Promise<PrdDraftRes
     ok: true,
     profile,
     genInput,
-    save: { profile, project, projectId, title, notes, answers, deepContext },
+    save: { profile, project, projectId, title, notes, answers, deepContext, replace: replace ?? undefined },
     openerRound,
   };
+}
+
+/**
+ * Resolve a `replaceId` to the draft it's allowed to overwrite. Returns null when
+ * there's nothing to replace (the ordinary new-PRD path). Only the builder's OWN
+ * draft, in this project, can be replaced — a sent or signed PRD is live at a share
+ * link the client may already hold, so regenerating it is refused outright.
+ * Queried directly rather than via getPrdById to keep draft-core free of a circular
+ * import back into the "use server" action file.
+ */
+async function resolveReplaceTarget(
+  profileId: string,
+  projectId: string,
+  replaceId: string | undefined
+): Promise<{ id: string; token: string | null } | { error: string; status: number } | null> {
+  if (!replaceId) return null;
+  const supabase = await getClient(profileId);
+  const { data } = await supabase
+    .from("prds")
+    .select("id, status, created_by, project_id, token")
+    .eq("id", replaceId)
+    .maybeSingle();
+
+  if (!data) return { status: 404, error: "PRD not found." };
+  if (data.created_by !== profileId) return { status: 403, error: "Not your PRD." };
+  if (data.project_id !== projectId) return { status: 400, error: "That PRD belongs to another document." };
+  if (data.status !== "draft") return { status: 409, error: "Only drafts can be regenerated." };
+  return { id: data.id as string, token: (data.token as string | null) ?? null };
 }
 
 /**
@@ -201,7 +235,7 @@ export async function persistPrdDraft(
   content: PrdContent,
   contextSummary?: string
 ): Promise<{ prdId: string } | { error: string }> {
-  const { profile, project, projectId, title, notes, answers, deepContext } = save;
+  const { profile, project, projectId, title, notes, answers, deepContext, replace } = save;
 
   // Never persist a blank PRD. A truncated/failed final round degrades to an empty
   // `{ content: {} }` (and a model can finalize early with nothing), which the
@@ -224,21 +258,37 @@ export async function persistPrdDraft(
   // in; every consumer degrades gracefully when freeTierAnalysis is absent. The
   // regenerate action (lib/actions/prds.ts) still runs it inline, on purpose.
   const supabase = await getClient(profile.id);
-  const { data, error } = await supabase
-    .from("prds")
-    .insert({
-      project_id: projectId,
-      created_by: profile.id,
-      title,
-      status: "draft",
-      content,
-      source_notes: sourceNotes,
-    })
-    .select("id")
-    .single();
 
-  if (error || !data) return { error: error?.message ?? "Failed to create PRD." };
-  const prdId = data.id as string;
+  let prdId: string;
+  if (replace) {
+    // Regenerate: overwrite the draft in place so its id — and the share link the
+    // client may already hold — survive the re-run. `status`, `token` and the
+    // created_* columns are deliberately left alone. The previous content's
+    // freeTierAnalysis is dropped with it (it describes the old stack); the PRD
+    // page's lazy compute refills it.
+    const { error } = await supabase
+      .from("prds")
+      .update({ title, content, source_notes: sourceNotes, updated_at: new Date().toISOString() })
+      .eq("id", replace.id);
+    if (error) return { error: error.message };
+    prdId = replace.id;
+  } else {
+    const { data, error } = await supabase
+      .from("prds")
+      .insert({
+        project_id: projectId,
+        created_by: profile.id,
+        title,
+        status: "draft",
+        content,
+        source_notes: sourceNotes,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data) return { error: error?.message ?? "Failed to create PRD." };
+    prdId = data.id as string;
+  }
 
   // Deep-context path: persist the synthesized business context to the project so
   // future documents start warm. Only when the project has no context yet — never
@@ -255,5 +305,11 @@ export async function persistPrdDraft(
   }
 
   revalidatePath(`/b/projects/${projectId}`);
+  // A replaced draft is already cached at its own routes — bust the builder page
+  // and the public share link so both serve the regenerated content immediately.
+  if (replace) {
+    revalidatePath(`/b/projects/${projectId}/prd/${replace.id}`);
+    if (replace.token) revalidatePath(`/prd/${replace.token}`);
+  }
   return { prdId };
 }

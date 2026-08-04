@@ -4,7 +4,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { getProjectById } from "@/lib/actions/projects";
 import { getPrdsByProject } from "@/lib/actions/prds";
 import { getQuotesByProject } from "@/lib/actions/quote-docs";
-import { createContractDraft } from "@/lib/actions/contracts";
+import { createContractDraft, getContractById } from "@/lib/actions/contracts";
 import { NewContractForm, type ContractDocOption } from "@/components/contract/new-contract-form";
 
 function fmtDateTime(iso: string): string {
@@ -36,20 +36,49 @@ function pickDefault(items: { id: string; status: string }[]): string {
   );
 }
 
-export const metadata = { title: "New Contract" };
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<{ regenerate?: string }>;
+}) {
+  const { regenerate } = await searchParams;
+  return { title: regenerate ? "Regenerate Contract" : "New Contract" };
+}
 
 export default async function NewProjectContractPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ regenerate?: string }>;
 }) {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
   if (profile.role !== "builder") redirect("/o");
 
   const { id } = await params;
+  const { regenerate } = await searchParams;
   const project = await getProjectById(id);
   if (!project) notFound();
+
+  // Regenerate: re-run the form over an existing draft, replacing it in place. Only
+  // the builder's own draft in THIS project qualifies — anything else (a sent
+  // contract, another project's, a stale id) bounces back rather than silently
+  // falling through to a blank form, which would create a second document.
+  // Contracts don't record which quote/PRD they were drafted from, so the pickers
+  // below fall back to their usual "strongest source" default.
+  let regenerateId: string | null = null;
+  let initialTitle = `${project.name} — Services Agreement`;
+  let initialNotes: string | null = null;
+  if (regenerate) {
+    const contract = await getContractById(regenerate);
+    if (!contract || contract.project_id !== id || contract.status !== "draft") {
+      redirect(`/b/projects/${id}`);
+    }
+    regenerateId = contract.id;
+    initialTitle = contract.title;
+    initialNotes = contract.source_notes;
+  }
 
   // Both actions return rows ordered created_at desc (most recent first).
   const [quotes, prds] = await Promise.all([getQuotesByProject(id), getPrdsByProject(id)]);
@@ -74,19 +103,24 @@ export default async function NewProjectContractPage({
         <Link href={`/b/projects/${id}`} className="text-xs text-neutral-500 hover:text-neutral-900">
           ← {project.name}
         </Link>
-        <h1 className="text-2xl font-semibold text-neutral-900 mb-1 mt-3">New contract</h1>
+        <h1 className="text-2xl font-semibold text-neutral-900 mb-1 mt-3">
+          {regenerateId ? "Regenerate contract" : "New contract"}
+        </h1>
         <p className="text-sm text-neutral-500 mb-6">
-          Pick the quote and PRD to build from, add any extra terms, and AI drafts a services
-          agreement (kept consistent with the quote) you can edit before sending.
+          {regenerateId
+            ? "Confirm the quote and PRD to build from and adjust the terms, then AI redrafts the agreement. Finishing replaces the current draft — its share link stays the same."
+            : "Pick the quote and PRD to build from, add any extra terms, and AI drafts a services agreement (kept consistent with the quote) you can edit before sending."}
         </p>
         <NewContractForm
           action={createContractDraft}
           projectId={id}
-          initialTitle={`${project.name} — Services Agreement`}
+          initialTitle={initialTitle}
           quotes={quoteOptions}
           prds={prdOptions}
           defaultQuoteId={pickDefault(quotes)}
           defaultPrdId={pickDefault(prds)}
+          regenerateId={regenerateId}
+          initialNotes={initialNotes}
         />
       </div>
     </main>

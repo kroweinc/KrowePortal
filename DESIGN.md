@@ -43,17 +43,32 @@
 |---|---|---|
 | `--background` | `#fdfbfa` | Page canvas |
 | `--surface-subtle` | `#fbf8f5` | Card / panel backgrounds |
+| `--surface-sunken` | `#f7f3ef` | Recessed fills — meter tracks, glyph medallions |
 | `--foreground` | `#1a1512` | Body text, icons |
 | `--muted-foreground` | `#68625e` | Secondary text, placeholders |
+| `--faint-foreground` | `#908b87` | Hints, counters, empty-state copy |
 | `--border` | `#e7e4e1` | Dividers, input borders |
+| `--border-strong` | `#d4d0cd` | Hover borders, dashed affordances |
+| `--border-soft` | `#ebeae9` | Neutral chip fills that sit on white |
+| `--border-focus` | `#7f7974` | Keyboard focus on a typed-into surface — the only non-orange focus colour. 4.29:1 on white |
 
 #### Semantic Palette
 
-| Token | Hex | Light Variant | Usage |
+The soft variant is a 12% wash of its base over white. `--success` additionally
+carries a brighter mint pair for success states that must hold their own against
+white rather than whisper — a Verified pill, a recommendation panel.
+
+| Token | Hex | Soft Variant | Usage |
 |---|---|---|---|
-| `--success` | `#15803d` | `--success-light: #f0fdf4` | Confirmations |
-| `--warning` | `#b45309` | `--warning-light: #fffbeb` | Caution states |
-| `--danger` | `#b91c1c` | `--danger-light: #fef2f2` | Errors, destructive actions |
+| `--success` | `#15803d` | `--success-soft` | Confirmations |
+| `--warning` | `#b45309` | `--warning-soft` | Caution states |
+| `--danger` | `#b91c1c` | `--danger-soft` | Errors, destructive actions |
+| `--info` | `#1269a8` | `--info-soft: #f0f9ff` | Neutral-positive states — a chosen tag, an advisory note |
+| — | — | `--success-tint: #d0fae5` | Verified pills, recommendation chips |
+| — | — | `--success-surface: #f5fbf6` | Recommendation panel fill |
+
+`--info` is not `--builder-text`. The builder/operator accents identify *who is
+looking*; `--info` describes *what a thing is*. Never substitute one for the other.
 
 #### Extras
 
@@ -152,6 +167,27 @@ Subtitle text beneath a hero headline fades in at `--duration-slower` with a `20
 | `--space-4xl` | `48px` |
 | `--space-5xl` | `64px` |
 | `--space-6xl` | `96px` |
+
+#### Shell Dimensions
+
+| Token | Value | Usage |
+|---|---|---|
+| `--sidebar-width` | `260px` | Sidebar rail width. `216px` at ≤860px, `64px` when the rail is collapsed (set on `.krowe-app` via `:has()`, so the topbar can read it too). |
+| `--topbar-height` | `60px` | Topbar height. The topbar is sticky, so this is also the offset a scrolled-to anchor must clear — use it for `scroll-margin-top`, never a literal. |
+
+The rail and the topbar are the shell's two pinned surfaces: both stick to the
+window (the page itself is the scroll container), and the topbar sits at `z-30`
+— above a page's own sticky bits, below sheets, dialogs and menus. A page gets
+one pinned header, and the topbar is it; don't add a second sticky bar beneath
+it.
+
+The topbar renders inside the content column, to the right of the rail — so
+centering something in the topbar makes it read right of the window's true
+centerline. To center against the whole window, give the topbar's right-hand
+slot a flex-basis of `var(--sidebar-width)`; the extra basis shifts the centered
+item left by half a rail. Prefer this over a transform offset, so the item
+reflows instead of sliding under the rail when space runs short. The global
+search pill is the reference case.
 
 #### Border Radius
 
@@ -266,13 +302,58 @@ All buttons use `--radius-full` (pill). Never use a rectangular button.
 
 #### Focus Ring
 
+Two treatments, split by how the control is operated. **Which one applies is not
+a judgment call** — pick by the verb, not by how the control looks.
+
+**Click / pick / toggle it** — buttons, links, `<select>`, checkbox, radio:
+
 ```css
 outline: none;
 box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.10);
 border: 1px solid var(--primary);
 ```
 
-The 4px orange halo is the system's universal keyboard-focus signal.
+**Type into it** — `<input>` (text-ish), `<textarea>`, composers, search fields:
+
+```css
+outline: none;
+border-color: var(--border-focus);
+box-shadow: none;               /* never a halo, never orange */
+```
+
+The orange halo is an *attention* signal. On a text surface it reads as an error
+state on an idle field, so a typed-into control gets a quiet neutral border step
+instead. `--border-focus` clears 3:1 against white (WCAG 1.4.11) so this is still
+a real focus indicator — never remove it entirely, and never substitute a
+different neutral. It is one token, used everywhere.
+
+**Composed fields — the two-ring rule.** When a bordered shell wraps a
+borderless control (comment composer, search pill, prefixed-link input group),
+the shell carries `.krowe-field-shell`. The shell draws the one focus treatment;
+the control inside draws nothing. Otherwise the shell's `:focus-within` and the
+control's own `:focus-visible` stack into two concentric rings.
+
+```jsx
+<div className="krowe-field-shell krowe-cm-composer">
+  <textarea />        {/* draws no focus treatment of its own */}
+</div>
+```
+
+Do **not** hand-roll a `:focus-within` rule plus an inner zeroing rule in a
+feature stylesheet — that reinvention is exactly what this class replaces. A
+shell wrapping a *picker* keeps the halo instead and does not take this class.
+
+This applies to Tailwind class strings too, not just `app/globals.css`. A
+`focus:ring-2 focus:ring-[color-mix(…var(--primary)…)]` on an `<input>` is the
+same violation written somewhere a CSS search won't find it — use
+`focus:border-[var(--border-focus)]` and no ring.
+
+Sanctioned exceptions, all narrow: a shell may keep a **mode** colour through
+focus (the composer's amber `.flagged` border signals request-a-change, not
+focus), may keep a **surface lift** (`background` change) on focus, and may keep
+**resting elevation** by declaring `--field-shell-shadow` next to its own
+`box-shadow`. None of the three may reintroduce a focus ring — no orange border,
+no halo.
 
 #### States
 
@@ -347,10 +428,32 @@ Show green for acceptable input and red for inacceptable. Gray is default.
 | Padding | 0 `--space-xl` |
 | Font | Body M (16px), `--foreground` |
 | Placeholder | Body M, `--muted-foreground` |
-| Focus border | `--primary` |
-| Focus ring | 4px `rgba(249,115,22,0.10)` |
+| Focus border | `--border-focus` |
+| Focus ring | None — a typed-into surface never gets a halo (see Focus Ring) |
 | Error border | `--danger` |
 | Error ring | 4px `rgba(185,28,28,0.10)` |
+
+#### Checkbox
+
+Opt-in/opt-out for a single choice inside a form. A real `<input type="checkbox">`
+kept focusable but visually replaced by the box, wrapped in a `<label>` so the
+text is part of the hit target. Implemented as `.wz-check` in `app/globals.css`.
+
+| Property | Value |
+|---|---|
+| Box | 20×20px, `--radius-sm` (6px) |
+| Border (unchecked) | 2px `--border` |
+| Border (hover) | 2px `--primary` at 55% |
+| Checked | `--primary` fill + border, white check glyph |
+| Row height | 44px min (touch target) |
+| Gap (box → text) | `--space-lg` (12px) |
+| Label | Body S (14.5px), weight 500, `--foreground` |
+| Hint (optional) | Caption (12.5px), `--muted-foreground`, below the label |
+| Focus ring | 4px `rgba(249,115,22,0.10)` + `--primary` border, on the box via `:has(input:focus-visible)` |
+| Transition | `background` + `border-color`, `--duration-fast`, `--ease-out-smooth` |
+
+Never a bare checkbox with no `<label>`. When the choice changes what the primary
+button does, restate it in the button ("Create client" vs "Create client & invite link").
 
 #### Progress Stepper
 
@@ -532,8 +635,10 @@ Filter sidebar → Sort bar → Idea card grid → Pagination or infinite scroll
 - Never place `--muted-foreground` text on `--surface-subtle` without checking contrast
 
 #### Focus & Keyboard
-Primary focus treatment in components uses the orange ring at controlled opacity. Tab order should follow reading order; modals must trap focus until dismissed.
-- Focus ring: 4px `rgba(249,115,22,0.10)` halo + 1px `--primary` border — present on every interactive element
+Every interactive element carries a visible focus treatment — but which one depends on how the control is operated (full spec in Buttons → Focus Ring). Tab order should follow reading order; modals must trap focus until dismissed.
+- Click / pick / toggle controls: 4px `rgba(249,115,22,0.10)` halo + 1px `--primary` border
+- Typed-into controls (input, textarea, composers, search): 1px `--border-focus`, no halo, never orange
+- Composed fields: the `.krowe-field-shell` wrapper owns the focus treatment; the control inside draws none — two stacked rings is a bug, not a style choice
 - Tab order: follows DOM order; never use positive `tabindex` values
 - Modals: trap focus within the modal while open; return focus to the trigger on close
 - Icon-only buttons: always include `aria-label`

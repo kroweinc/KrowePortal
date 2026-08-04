@@ -11,6 +11,7 @@ import {
   warmEngagementBranches,
   getBranchesByEngagement,
 } from "@/lib/actions/get-engagement-branches";
+import { sweepMainPushes } from "@/lib/actions/tasks";
 
 const BUILDER_TABS = [
   { label: "Tasks", href: "/b", icon: "list-checks", tour: "nav-tasks" },
@@ -32,6 +33,13 @@ export default async function BuilderLayout({ children }: { children: React.Reac
   // picker is instant and current by the time the builder reaches approval. Runs
   // after the response flushes and only re-crawls GitHub for cold/stale repos.
   after(() => warmEngagementBranches());
+
+  // Catch up on any push to main that landed since the last visit. Detection
+  // used to run only on /b/staging, so a push stayed unrecorded until someone
+  // opened that one page; from here every builder page catches it. Idempotent
+  // against the release ledger and it reuses the commit scan's cached GitHub
+  // read, so a repeat visit costs one indexed lookup.
+  after(() => sweepMainPushes());
 
   // Preload the cached branch list per engagement so the Mark-as-done dialog's
   // chips paint with zero fetch (read-only from repo_branches, no GitHub call).

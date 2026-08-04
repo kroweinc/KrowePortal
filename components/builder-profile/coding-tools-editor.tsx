@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Plus, Search, X } from "lucide-react";
+import { Check, Eye, EyeOff, Plus, Search, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +14,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BrandLogo } from "@/components/prd/brand-logo";
-import { addCodingTools, deleteCodingTool } from "@/lib/actions/builder-profile";
+import {
+  addCodingTools,
+  deleteCodingTool,
+  setProfileItemHidden,
+} from "@/lib/actions/builder-profile";
 import { CODING_TOOL_PRESETS, findCodingToolPreset } from "@/lib/coding-tools";
 import { CODING_TOOL_CATEGORIES, type BuilderProfileCodingTool } from "@/lib/types";
 
@@ -51,39 +55,80 @@ export function CodingToolsEditor({ entries }: { entries: BuilderProfileCodingTo
     });
   }
 
+  // Hiding is reversible and silent, so unlike the section cards this needs no
+  // confirm either — the X beside it is the destructive one.
+  function toggleHidden(entry: BuilderProfileCodingTool) {
+    startTransition(async () => {
+      const result = await setProfileItemHidden({
+        kind: "tool",
+        id: entry.id,
+        hidden: !entry.is_hidden,
+      });
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="tool-empty">
+        <p>No coding tools added yet.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-3.5">
-      {entries.length === 0 ? (
-        <p className="tool-empty">No coding tools added yet.</p>
-      ) : (
-        <div className="tool-grid">
-          {entries.map((entry) => (
-            <div key={entry.id} className="tool-tile">
-              <BrandLogo
-                domain={findCodingToolPreset(entry.name)?.domain}
-                name={entry.name}
-                size={30}
-              />
-              <div className="info">
-                <div className="nm" title={entry.name}>
-                  {entry.name}
-                </div>
-                {entry.category && <div className="ct">{entry.category}</div>}
-              </div>
-              <button
-                type="button"
-                onClick={() => remove(entry.id)}
-                disabled={isPending}
-                className="tool-rm disabled:opacity-40"
-                aria-label={`Remove ${entry.name}`}
-              >
-                <X />
-              </button>
+    <div className="tool-grid">
+      {entries.map((entry) => (
+        <div key={entry.id} className={`tool-tile${entry.is_hidden ? " hidden-item" : ""}`}>
+          <span className="plate">
+            <BrandLogo
+              domain={findCodingToolPreset(entry.name)?.domain}
+              name={entry.name}
+              size={28}
+            />
+          </span>
+          <div className="info">
+            <div className="nm" title={entry.name}>
+              {entry.name}
             </div>
-          ))}
+            {entry.category && <div className="ct">{entry.category}</div>}
+          </div>
+          <div className="tool-acts">
+            <button
+              type="button"
+              onClick={() => toggleHidden(entry)}
+              disabled={isPending}
+              className="tool-rm show"
+              title={
+                entry.is_hidden
+                  ? `Show ${entry.name} on your public profile`
+                  : `Hide ${entry.name} from clients`
+              }
+              aria-label={
+                entry.is_hidden
+                  ? `Show ${entry.name} on your public profile`
+                  : `Hide ${entry.name} from clients`
+              }
+            >
+              {entry.is_hidden ? <EyeOff /> : <Eye />}
+            </button>
+            <button
+              type="button"
+              onClick={() => remove(entry.id)}
+              disabled={isPending}
+              className="tool-rm"
+              title={`Remove ${entry.name}`}
+              aria-label={`Remove ${entry.name}`}
+            >
+              <X />
+            </button>
+          </div>
         </div>
-      )}
-      <AddCodingToolsDialog entries={entries} />
+      ))}
     </div>
   );
 }
@@ -98,7 +143,7 @@ interface PendingCustom {
    tiles (with an "Added" state for tools already on the profile), a custom-tool
    builder, and a live selected-count footer. Inserts the whole batch in one
    action. Ported from the Krowe Design handoff (Profile Setup · Smart Scroll). */
-function AddCodingToolsDialog({ entries }: { entries: BuilderProfileCodingTool[] }) {
+export function AddCodingToolsDialog({ entries }: { entries: BuilderProfileCodingTool[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -204,12 +249,9 @@ function AddCodingToolsDialog({ entries }: { entries: BuilderProfileCodingTool[]
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          className="border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-        >
-          <Plus className="h-4 w-4" /> Add tool
-        </Button>
+        <button type="button" className="ss-btn">
+          <Plus /> Add new tool
+        </button>
       </DialogTrigger>
       <DialogContent className="ctm-shell flex flex-col gap-0 overflow-hidden p-0 w-[560px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-3rem)] rounded-[var(--radius-xl)] border border-[var(--border)] bg-[var(--background)]">
         <div className="ctm-head">

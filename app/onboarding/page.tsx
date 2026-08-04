@@ -1,26 +1,22 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
-import { getUserGithubConnection } from "@/lib/github/token";
-import { fetchGithubRepos } from "@/lib/github/list-repos";
 import { OnboardingForm } from "./onboarding-form";
-import { OnboardingWizard, type WizardProps } from "./wizard";
+import { OnboardingWizard, type OnboardingBuilderProfile, type WizardProps } from "./wizard";
 import { EditorialShell } from "./wizard-shell";
 import { PortalTeaserStage } from "./wizard-stages";
-import type { OnboardingStep } from "@/lib/types";
+import { ONBOARDING_STEPS } from "@/lib/types";
+import type { AgencySize, AgencyType, OnboardingStep, PricingModel } from "@/lib/types";
 
 // The wizard's current step lives in profiles.onboarding.step — this page just
-// renders whatever the DB says, so refresh, re-login, and the GitHub OAuth
-// round-trip all resume at the right step.
+// renders whatever the DB says, so refresh, re-login, and OAuth round-trips all
+// resume at the right step.
 export const metadata = { title: "Welcome" };
 
-export default async function OnboardingPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>;
-}) {
+const AVATAR_SIGNED_URL_TTL = 60 * 60 * 24; // outlives any cached render
+
+export default async function OnboardingPage() {
   const profile = await getCurrentProfile();
-  const { error: oauthError } = await searchParams;
 
   if (!profile) {
     const supabase = await createClient();
@@ -54,36 +50,62 @@ export default async function OnboardingPage({
 
   // ?? {} — tolerates a DB that hasn't run migration 0053 yet.
   const ob = profile.onboarding ?? {};
-  let step: OnboardingStep = ob.step ?? "path";
+  // A step the wizard no longer knows about — a builder stranded mid-flow when
+  // the steps changed — restarts at identity instead of rendering nothing. The
+  // wizard's switch has no case for it, and the page they'd get back has no Back
+  // or Skip to escape with, so an unrecognized value can't be trusted here.
+  const step: OnboardingStep = ONBOARDING_STEPS.includes(ob.step as OnboardingStep)
+    ? (ob.step as OnboardingStep)
+    : "identity";
   const admin = createAdminClient();
 
-  // Per-step data, always scoped to this builder.
-  let project: WizardProps["project"] = null;
-  if (ob.project_id) {
-    const { data } = await admin
-      .from("projects")
-      .select("id, name")
-      .eq("id", ob.project_id)
-      .eq("owner_id", profile.id)
-      .maybeSingle();
-    project = (data ?? null) as WizardProps["project"];
+  // The builder's answers so far, so every step renders prefilled and resume-safe.
+  const { data: bp } = await admin
+    .from("builder_profiles")
+    .select("agency_name, agency_role, agency_website, agency_type, agency_size, pricing_model, default_hourly_rate, avatar_storage_path")
+    .eq("user_id", profile.id)
+    .maybeSingle();
+
+  let avatarUrl: string | null = null;
+  if (bp?.avatar_storage_path) {
+    const { data: signed } = await admin.storage
+      .from("avatars")
+      .createSignedUrl(bp.avatar_storage_path as string, AVATAR_SIGNED_URL_TTL);
+    avatarUrl = signed?.signedUrl ?? null;
   }
 
+  // default_hourly_rate is NOT NULL with a column default of 45 (0058), so a
+  // builder who has never reached the charging step still reads a number back —
+  // and the wizard presented it as their own answer, pre-filled and badged "Set".
+  // Clicking straight through then seeded every future quote with a rate nobody
+  // typed. pricing_model is the other half of that same question and starts
+  // null, so it tells a schema default apart from a real answer.
+  const pricingModel = (bp?.pricing_model as PricingModel | null) ?? null;
+
+  const builderProfile: OnboardingBuilderProfile = {
+    displayName: profile.display_name ?? "",
+    agencyName: (bp?.agency_name as string | null) ?? null,
+    agencyRole: (bp?.agency_role as string | null) ?? null,
+    agencyWebsite: (bp?.agency_website as string | null) ?? null,
+    agencyType: (bp?.agency_type as AgencyType | null) ?? null,
+    agencySize: (bp?.agency_size as AgencySize | null) ?? null,
+    pricingModel,
+    hourlyRate: pricingModel ? ((bp?.default_hourly_rate as number | null) ?? null) : null,
+    avatarUrl,
+  };
+
+  // The optional client step: an engagement + invite from a prior wizard attempt.
   let engagement: WizardProps["engagement"] = null;
   let inviteToken: string | null = null;
   if (ob.engagement_id) {
     const { data } = await admin
       .from("engagements")
-      .select("id, title, operator_id, github_repo_full_name")
+      .select("id, title, operator_id")
       .eq("id", ob.engagement_id)
       .eq("builder_id", profile.id)
       .maybeSingle();
     if (data) {
-      engagement = {
-        id: data.id as string,
-        title: data.title as string,
-        repoFullName: (data.github_repo_full_name as string | null) ?? null,
-      };
+      engagement = { id: data.id as string, title: data.title as string };
       if (step === "client" && !data.operator_id) {
         const { data: invite } = await admin
           .from("invitations")
@@ -97,29 +119,12 @@ export default async function OnboardingPage({
     }
   }
 
-  // If the entity a step depends on disappeared (deleted mid-wizard), fall
-  // back to the step that recreates it.
-  if (step === "handoff" && !project) step = "prospect";
-  if ((step === "repo" || step === "tasks" || step === "docs") && !engagement) step = "client";
-
-  let github: WizardProps["github"] = { connected: false, repos: [] };
-  if (step === "repo") {
-    const connection = await getUserGithubConnection(profile.id);
-    github = {
-      connected: !!connection,
-      repos: connection ? await fetchGithubRepos(connection.token) : [],
-    };
-  }
-
   return (
     <OnboardingWizard
       step={step}
-      path={ob.path}
-      oauthError={oauthError}
-      project={project}
       engagement={engagement}
       inviteToken={inviteToken}
-      github={github}
+      profile={builderProfile}
     />
   );
 }

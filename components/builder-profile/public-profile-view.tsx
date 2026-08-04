@@ -225,35 +225,45 @@ export function PublicProfileContent({ data, token }: PublicProfileViewProps) {
       )}
 
       {/* Education */}
-      {data.educationSchool && (
+      {data.education.length > 0 && (
         <section className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-neutral-900">Education</h2>
-          <div className="flex items-start gap-3">
-            {/* Grey tile holding the bare school logo, or a graduation cap
-                when the school isn't a known university. */}
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-neutral-100">
-              {findUniversityDomain(data.educationSchool) ? (
-                <BrandLogo
-                  domain={findUniversityDomain(data.educationSchool)}
-                  name={data.educationSchool}
-                  size={20}
-                  plain
-                />
-              ) : (
-                <GraduationCap className="h-5 w-5 text-neutral-500" />
-              )}
-            </span>
-            <div>
-              <p className="text-sm font-semibold text-neutral-900">{data.educationSchool}</p>
-              {(data.educationMajor || data.educationYear) && (
-                <p className="mt-0.5 text-xs text-neutral-500">
-                  {data.educationMajor}
-                  {data.educationMajor && data.educationYear ? " · " : ""}
-                  {data.educationYear}
-                </p>
-              )}
-            </div>
-          </div>
+          <ul className="space-y-4">
+            {data.education.map((entry) => {
+              const degree = [entry.level, entry.field_of_study].filter(Boolean).join(", ");
+              const start = [entry.start_month, entry.start_year].filter(Boolean).join(" ");
+              const end = [entry.end_month, entry.end_year].filter(Boolean).join(" ");
+              // Legacy 0049 rows carry a freeform label in end_year with no
+              // start ("Class of 2027"), which reads correctly on its own.
+              const range = start ? `${start} – ${end || "Present"}` : end;
+              const domain = findUniversityDomain(entry.school);
+              return (
+                <li key={entry.id} className="flex items-start gap-3">
+                  {/* Grey tile holding the bare school logo, or a graduation
+                      cap when the school isn't a known university. */}
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-neutral-100">
+                    {domain ? (
+                      <BrandLogo domain={domain} name={entry.school} size={20} plain />
+                    ) : (
+                      <GraduationCap className="h-5 w-5 text-neutral-500" />
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-neutral-900">
+                      {degree || entry.school}
+                    </p>
+                    {(degree || range) && (
+                      <p className="mt-0.5 text-xs text-neutral-500">
+                        {degree ? entry.school : ""}
+                        {degree && range ? " · " : ""}
+                        {range}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </section>
       )}
 

@@ -19,6 +19,7 @@ import {
   CODING_TOOL_CATEGORIES,
   type BuilderProfile,
   type BuilderProfileCodingTool,
+  type BuilderProfileEducation,
   type BuilderProfileExperience,
   type BuilderProfileProject,
 } from "@/lib/types";
@@ -42,6 +43,7 @@ export interface BuilderProfileBundle {
   profile: BuilderProfile;
   projects: BuilderProfileProject[];
   experience: BuilderProfileExperience[];
+  education: BuilderProfileEducation[];
   codingTools: BuilderProfileCodingTool[];
   githubConnected: boolean;
   githubUsername: string | null;
@@ -106,29 +108,39 @@ export async function getOrCreateBuilderProfile(): Promise<BuilderProfileBundle 
     }
   }
 
-  const [{ data: projects }, { data: experience }, { data: codingTools }, { data: connection }] =
-    await Promise.all([
-      supabase
-        .from("builder_profile_projects")
-        .select("*")
-        .eq("builder_profile_id", row.id)
-        .order("display_order", { ascending: true }),
-      supabase
-        .from("builder_profile_experience")
-        .select("*")
-        .eq("builder_profile_id", row.id)
-        .order("display_order", { ascending: true }),
-      supabase
-        .from("builder_profile_coding_tools")
-        .select("*")
-        .eq("builder_profile_id", row.id)
-        .order("display_order", { ascending: true }),
-      createAdminClient()
-        .from("github_connections")
-        .select("github_username")
-        .eq("user_id", profile.id)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: projects },
+    { data: experience },
+    { data: education },
+    { data: codingTools },
+    { data: connection },
+  ] = await Promise.all([
+    supabase
+      .from("builder_profile_projects")
+      .select("*")
+      .eq("builder_profile_id", row.id)
+      .order("display_order", { ascending: true }),
+    supabase
+      .from("builder_profile_experience")
+      .select("*")
+      .eq("builder_profile_id", row.id)
+      .order("display_order", { ascending: true }),
+    supabase
+      .from("builder_profile_education")
+      .select("*")
+      .eq("builder_profile_id", row.id)
+      .order("display_order", { ascending: true }),
+    supabase
+      .from("builder_profile_coding_tools")
+      .select("*")
+      .eq("builder_profile_id", row.id)
+      .order("display_order", { ascending: true }),
+    createAdminClient()
+      .from("github_connections")
+      .select("github_username")
+      .eq("user_id", profile.id)
+      .maybeSingle(),
+  ]);
 
   // Not exported: signing arbitrary caller-supplied paths would be an IDOR.
   let avatarUrl: string | null = null;
@@ -141,6 +153,7 @@ export async function getOrCreateBuilderProfile(): Promise<BuilderProfileBundle 
 
   const projectList = (projects ?? []) as BuilderProfileProject[];
   const experienceList = (experience ?? []) as BuilderProfileExperience[];
+  const educationList = (education ?? []) as BuilderProfileEducation[];
   const codingToolList = (codingTools ?? []) as BuilderProfileCodingTool[];
 
   // Drop any derived tag the builder already added by hand so it isn't shown
@@ -149,9 +162,7 @@ export async function getOrCreateBuilderProfile(): Promise<BuilderProfileBundle 
   const autoTags = deriveProfileTags({
     headline: row.headline,
     bio: row.bio,
-    educationSchool: row.education_school,
-    educationMajor: row.education_major,
-    educationYear: row.education_year,
+    education: educationList,
     experience: experienceList,
     projects: projectList,
     codingTools: codingToolList,
@@ -161,6 +172,7 @@ export async function getOrCreateBuilderProfile(): Promise<BuilderProfileBundle 
     profile: row,
     projects: projectList,
     experience: experienceList,
+    education: educationList,
     codingTools: codingToolList,
     githubConnected: !!connection,
     githubUsername: connection?.github_username ?? null,
@@ -234,17 +246,6 @@ const basicsSchema = z.object({
   linkedin_url: z.string().trim().max(500).nullable().optional(),
   github_url: z.string().trim().max(500).nullable().optional(),
   portfolio_url: z.string().trim().max(500).nullable().optional(),
-  education_school: z
-    .string()
-    .trim()
-    .max(120, "School must be 120 characters or fewer.")
-    .optional(),
-  education_major: z
-    .string()
-    .trim()
-    .max(120, "Major must be 120 characters or fewer.")
-    .optional(),
-  education_year: z.string().trim().max(40, "Year must be 40 characters or fewer.").optional(),
 });
 
 export async function updateProfileBasics(input: {
@@ -254,9 +255,6 @@ export async function updateProfileBasics(input: {
   linkedin_url?: string | null;
   github_url?: string | null;
   portfolio_url?: string | null;
-  education_school?: string;
-  education_major?: string;
-  education_year?: string;
 }): Promise<{ success?: boolean; error?: string }> {
   const { profile, error: roleError } = await requireBuilder();
   if (!profile) return { error: roleError! };
@@ -271,12 +269,6 @@ export async function updateProfileBasics(input: {
   if (parsed.data.display_name !== undefined) updates.display_name = parsed.data.display_name || null;
   if (parsed.data.headline !== undefined) updates.headline = parsed.data.headline || null;
   if (parsed.data.bio !== undefined) updates.bio = parsed.data.bio || null;
-  if (parsed.data.education_school !== undefined)
-    updates.education_school = parsed.data.education_school || null;
-  if (parsed.data.education_major !== undefined)
-    updates.education_major = parsed.data.education_major || null;
-  if (parsed.data.education_year !== undefined)
-    updates.education_year = parsed.data.education_year || null;
   if (parsed.data.linkedin_url !== undefined) {
     if (parsed.data.linkedin_url) {
       const normalized = normalizeUrl(parsed.data.linkedin_url);
@@ -898,6 +890,207 @@ export async function reorderExperience(
 }
 
 // ============================================================
+// Education
+// ============================================================
+
+// Level and the month labels are free text (validated only by length) so the
+// option lists in EDUCATION_LEVELS / EDUCATION_MONTHS can grow without a
+// migration, and a builder can type a credential we never listed.
+const educationSchema = z.object({
+  school: z.string().trim().min(1, "School is required.").max(120),
+  level: z.string().trim().max(60).optional(),
+  field_of_study: z.string().trim().max(120).optional(),
+  start_month: z.string().trim().max(20).optional(),
+  start_year: z.string().trim().max(40).optional(),
+  end_month: z.string().trim().max(20).optional(),
+  end_year: z.string().trim().max(40).optional(),
+});
+
+export interface EducationInput {
+  school: string;
+  level?: string;
+  field_of_study?: string;
+  start_month?: string;
+  start_year?: string;
+  end_month?: string;
+  end_year?: string;
+}
+
+export async function addEducation(
+  input: EducationInput
+): Promise<{ success?: boolean; entry?: BuilderProfileEducation; error?: string }> {
+  const { profile, error: roleError } = await requireBuilder();
+  if (!profile) return { error: roleError! };
+
+  const parsed = educationSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const row = await getOwnedProfile(profile.id);
+  if (!row) return { error: "Profile not found." };
+
+  const supabase = await getClient(profile.id);
+  const { data: maxRow } = await supabase
+    .from("builder_profile_education")
+    .select("display_order")
+    .eq("builder_profile_id", row.id)
+    .order("display_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data, error } = await supabase
+    .from("builder_profile_education")
+    .insert({
+      builder_profile_id: row.id,
+      school: parsed.data.school,
+      level: parsed.data.level || null,
+      field_of_study: parsed.data.field_of_study || null,
+      start_month: parsed.data.start_month || null,
+      start_year: parsed.data.start_year || null,
+      end_month: parsed.data.end_month || null,
+      end_year: parsed.data.end_year || null,
+      display_order: (maxRow?.display_order ?? -1) + 1,
+    })
+    .select("*")
+    .single();
+  if (error) return { error: error.message };
+
+  revalidateProfile(row.token);
+  return { success: true, entry: data as BuilderProfileEducation };
+}
+
+export async function updateEducation(
+  id: string,
+  input: Partial<EducationInput>
+): Promise<{ success?: boolean; error?: string }> {
+  const { profile, error: roleError } = await requireBuilder();
+  if (!profile) return { error: roleError! };
+
+  if (!z.string().uuid().safeParse(id).success) return { error: "Invalid ID." };
+  const parsed = educationSchema.partial().safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const row = await getOwnedProfile(profile.id);
+  if (!row) return { error: "Profile not found." };
+
+  const updates: Record<string, unknown> = {};
+  if (parsed.data.school !== undefined) updates.school = parsed.data.school;
+  if (parsed.data.level !== undefined) updates.level = parsed.data.level || null;
+  if (parsed.data.field_of_study !== undefined)
+    updates.field_of_study = parsed.data.field_of_study || null;
+  if (parsed.data.start_month !== undefined) updates.start_month = parsed.data.start_month || null;
+  if (parsed.data.start_year !== undefined) updates.start_year = parsed.data.start_year || null;
+  if (parsed.data.end_month !== undefined) updates.end_month = parsed.data.end_month || null;
+  if (parsed.data.end_year !== undefined) updates.end_year = parsed.data.end_year || null;
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("builder_profile_education")
+    .update(updates)
+    .eq("id", id)
+    .eq("builder_profile_id", row.id);
+  if (error) return { error: error.message };
+
+  revalidateProfile(row.token);
+  return { success: true };
+}
+
+export async function deleteEducation(id: string): Promise<{ success?: boolean; error?: string }> {
+  const { profile, error: roleError } = await requireBuilder();
+  if (!profile) return { error: roleError! };
+
+  if (!z.string().uuid().safeParse(id).success) return { error: "Invalid ID." };
+
+  const row = await getOwnedProfile(profile.id);
+  if (!row) return { error: "Profile not found." };
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from("builder_profile_education")
+    .delete()
+    .eq("id", id)
+    .eq("builder_profile_id", row.id);
+  if (error) return { error: error.message };
+
+  revalidateProfile(row.token);
+  return { success: true };
+}
+
+export async function reorderEducation(
+  orderedIds: string[]
+): Promise<{ success?: boolean; error?: string }> {
+  const { profile, error: roleError } = await requireBuilder();
+  if (!profile) return { error: roleError! };
+
+  const parsed = z.array(z.string().uuid()).max(100).safeParse(orderedIds);
+  if (!parsed.success) return { error: "Invalid order." };
+
+  const row = await getOwnedProfile(profile.id);
+  if (!row) return { error: "Profile not found." };
+
+  const supabase = await getClient(profile.id);
+  for (let i = 0; i < parsed.data.length; i++) {
+    await supabase
+      .from("builder_profile_education")
+      .update({ display_order: i })
+      .eq("id", parsed.data[i])
+      .eq("builder_profile_id", row.id);
+  }
+
+  revalidateProfile(row.token);
+  return { success: true };
+}
+
+// ============================================================
+// Public visibility (the per-card "eye")
+// ============================================================
+
+// One action across all four collections rather than four near-identical ones.
+// The kind is a closed set mapped to table names here, so a caller can never
+// steer the update at an arbitrary table.
+const HIDEABLE_TABLES = {
+  project: "builder_profile_projects",
+  experience: "builder_profile_experience",
+  education: "builder_profile_education",
+  tool: "builder_profile_coding_tools",
+} as const;
+
+export type HideableKind = keyof typeof HIDEABLE_TABLES;
+
+const hideSchema = z.object({
+  kind: z.enum(Object.keys(HIDEABLE_TABLES) as [HideableKind, ...HideableKind[]]),
+  id: z.string().uuid(),
+  hidden: z.boolean(),
+});
+
+/** Show or hide one profile item on the public share page. The row stays in the
+    editor either way — hiding only filters it out of PublicBuilderProfile. */
+export async function setProfileItemHidden(input: {
+  kind: HideableKind;
+  id: string;
+  hidden: boolean;
+}): Promise<{ success?: boolean; error?: string }> {
+  const { profile, error: roleError } = await requireBuilder();
+  if (!profile) return { error: roleError! };
+
+  const parsed = hideSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
+
+  const row = await getOwnedProfile(profile.id);
+  if (!row) return { error: "Profile not found." };
+
+  const supabase = await getClient(profile.id);
+  const { error } = await supabase
+    .from(HIDEABLE_TABLES[parsed.data.kind])
+    .update({ is_hidden: parsed.data.hidden })
+    .eq("id", parsed.data.id)
+    .eq("builder_profile_id", row.id);
+  if (error) return { error: error.message };
+
+  revalidateProfile(row.token);
+  return { success: true };
+}
+
+// ============================================================
 // Coding tools
 // ============================================================
 
@@ -1463,12 +1656,33 @@ export async function importFromPortfolio(input?: { url?: string }): Promise<{
     projectsImported = freshProjects.length;
   }
 
-  // --- Basics / links / education: only fill fields that are still blank —
-  // never overwrite the builder's own words with AI output.
+  // --- Education: append a row only when the builder has none. Education is a
+  // list now, but the parser still returns one school, so a second import
+  // would otherwise duplicate it.
+  let educationUpdated = false;
+  if (parsed.education_school) {
+    const { data: existingEducation } = await supabase
+      .from("builder_profile_education")
+      .select("id")
+      .eq("builder_profile_id", row.id)
+      .limit(1);
+    if ((existingEducation ?? []).length === 0) {
+      const { error } = await supabase.from("builder_profile_education").insert({
+        builder_profile_id: row.id,
+        school: parsed.education_school,
+        field_of_study: parsed.education_major || null,
+        end_year: parsed.education_year || null,
+        display_order: 0,
+      });
+      educationUpdated = !error;
+    }
+  }
+
+  // --- Basics / links: only fill fields that are still blank — never
+  // overwrite the builder's own words with AI output.
   const updates: Record<string, unknown> = {};
   let basicsUpdated = false;
   let linksUpdated = false;
-  let educationUpdated = false;
 
   if (!row.headline?.trim() && parsed.headline) {
     updates.headline = parsed.headline;
@@ -1491,26 +1705,12 @@ export async function importFromPortfolio(input?: { url?: string }): Promise<{
     updates.portfolio_url = url;
     linksUpdated = true;
   }
-  if (!row.education_school?.trim() && parsed.education_school) {
-    updates.education_school = parsed.education_school;
-    educationUpdated = true;
-  }
-  if (!row.education_major?.trim() && parsed.education_major) {
-    updates.education_major = parsed.education_major;
-    educationUpdated = true;
-  }
-  if (!row.education_year?.trim() && parsed.education_year) {
-    updates.education_year = parsed.education_year;
-    educationUpdated = true;
-  }
-
   if (Object.keys(updates).length > 0) {
     updates.updated_at = new Date().toISOString();
     const { error } = await supabase.from("builder_profiles").update(updates).eq("id", row.id);
     if (error) {
       basicsUpdated = false;
       linksUpdated = false;
-      educationUpdated = false;
     }
   }
 

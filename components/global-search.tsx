@@ -243,10 +243,9 @@ export function GlobalSearch({ role }: GlobalSearchProps) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
-        <button type="button" className="krowe-tb-search" aria-label="Search (⌘K)">
-          <Search size={15} strokeWidth={2} style={{ color: "var(--faint-foreground)" }} />
-          <span className="krowe-tb-search-ph">Search anything…</span>
-          <span className="krowe-kbd">⌘K</span>
+        <button type="button" className="krowe-field-shell krowe-tb-search" aria-label="Search (⌘K)">
+          <Search size={15} strokeWidth={2} style={{ color: "var(--muted-foreground)" }} />
+          <span className="krowe-tb-search-ph">Jump to…</span>
         </button>
       </DialogPrimitive.Trigger>
 

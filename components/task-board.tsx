@@ -1,14 +1,22 @@
 "use client";
 
-import { useState, useTransition, useOptimistic } from "react";
+import { useEffect, useState, useTransition, useOptimistic } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { toast } from "sonner";
-import { CheckCircle2, ChevronUp, Plus } from "lucide-react";
+import { CheckCircle2, CheckSquare, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { TaskCard } from "@/components/task-card";
 import { openNewTask } from "@/components/add-task-button";
 import { TaskDetailSheet } from "@/components/task-detail-sheet";
 import { useTaskSort } from "@/components/task-sort-context";
-import { updateTaskStatus, reorderTask } from "@/lib/actions/tasks";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { updateTaskStatus, reorderTask, deleteTasks } from "@/lib/actions/tasks";
+import {
+  pollCommitTaskMatches,
+  confirmMatchedTaskDone,
+  dismissTaskCommitMatch,
+} from "@/lib/actions/commit-task-matches";
+import type { PendingCommitMatch } from "@/lib/actions/get-commit-task-matches";
+import { commitDoneDeliverable } from "@/lib/tasks/commit-done-deliverable";
 import { useRequestDone } from "@/components/done-deliverable-provider";
 import {
   isAwaitingApproval,
@@ -32,7 +40,8 @@ const COLUMNS: { status: TaskStatus; label: string }[] = [
 type DropTarget = { taskId: string; position: "before" | "after" };
 type OptimisticAction =
   | { type: "status"; taskId: string; status: TaskStatus }
-  | { type: "reorder"; taskId: string; sort_order: number };
+  | { type: "reorder"; taskId: string; sort_order: number }
+  | { type: "remove"; taskIds: string[] };
 
 interface TaskBoardProps {
   tasks: Task[];
@@ -40,6 +49,8 @@ interface TaskBoardProps {
   currentUserId: string;
   branchesByEngagement?: Record<string, PreloadedBranches>;
   stagingGroupsByEngagement?: Record<string, StagingGroup[]>;
+  /** Unresolved "a commit on main looks like it finished this" suggestions, by task id. */
+  commitMatches?: Record<string, PendingCommitMatch>;
 }
 
 export function TaskBoard({
@@ -48,6 +59,7 @@ export function TaskBoard({
   currentUserId,
   branchesByEngagement,
   stagingGroupsByEngagement,
+  commitMatches,
 }: TaskBoardProps) {
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const requestDone = useRequestDone();
@@ -59,6 +71,8 @@ export function TaskBoard({
   const [draggingTask, setDraggingTask] = useState<Task | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [showAllDone, setShowAllDone] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirm, confirmDialog] = useConfirm();
   const [, startTransition] = useTransition();
 
   const [optimisticTasks, dispatchOptimistic] = useOptimistic(
@@ -68,11 +82,73 @@ export function TaskBoard({
         return current.map((t) => t.id === action.taskId ? { ...t, status: action.status } : t);
       if (action.type === "reorder")
         return current.map((t) => t.id === action.taskId ? { ...t, sort_order: action.sort_order } : t);
+      if (action.type === "remove")
+        return current.filter((t) => !action.taskIds.includes(t.id));
       return current;
     }
   );
 
   const selectedTask = optimisticTasks.find((t) => t.id === selectedId) ?? null;
+
+  // ── "You forgot to mark this done" ──
+  // Scan new default-branch commits against the open tasks once per mount. Cheap
+  // by design: commits already scanned are filtered out server-side before the
+  // model runs, so an unchanged repo costs one cached GitHub call and no AI.
+  // Refresh only when something new actually matched.
+  const [clearedMatches, setClearedMatches] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const ids = engagements.map((e) => e.id);
+    // Nothing to match against unless something is still open.
+    if (ids.length === 0 || !tasks.some((t) => t.status !== "done")) return;
+    let cancelled = false;
+    pollCommitTaskMatches(ids)
+      .then((r) => {
+        if (!cancelled && r.taskIds.length > 0) router.refresh();
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // Mount-only; engagements and router are stable for the life of the board.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function restoreMatch(taskId: string) {
+    setClearedMatches((prev) => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+  }
+
+  // Confirm goes straight to Done and skips approval — the commit was read off
+  // the default branch, so the work is already on main and there's nothing left
+  // for an operator to gate.
+  function confirmMatch(task: Task) {
+    setClearedMatches((prev) => new Set(prev).add(task.id));
+    startTransition(async () => {
+      dispatchOptimistic({ type: "status", taskId: task.id, status: "done" });
+      const r = await confirmMatchedTaskDone(task.id);
+      if ("error" in r) {
+        toast.error(r.error);
+        restoreMatch(task.id);
+      } else {
+        toast.success("Marked done — shipped to main");
+      }
+    });
+  }
+
+  function dismissMatch(task: Task) {
+    setClearedMatches((prev) => new Set(prev).add(task.id));
+    startTransition(async () => {
+      const r = await dismissTaskCommitMatch(task.id);
+      if ("error" in r) {
+        toast.error(r.error);
+        restoreMatch(task.id);
+      }
+    });
+  }
 
   // Sort lives in the header (next to Staging / Tasks from meeting) via a shared
   // context so the control and the board stay in sync — see TaskSortProvider.
@@ -96,16 +172,40 @@ export function TaskBoard({
   }
 
   function setEngagementFilter(value: string | null) {
+    // Drop any selection when the visible set changes — otherwise a bulk delete
+    // could remove tasks the new filter no longer shows.
+    setSelectedIds(new Set());
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set("engagement", value); else params.delete("engagement");
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
   }
 
+  // "Mark as done" from any board trigger (advance button, right-click menu,
+  // drag-to-Done): open the deliverable dialog, then commit inside the board's
+  // optimistic transition so the card jumps to Done the instant Save is clicked
+  // and holds until the server reconciles — no dialog "Saving…" wait.
+  function markDoneFlow(task: Task) {
+    if (task.status === "done") return;
+    requestDone({
+      task,
+      onSubmit: (payload) =>
+        startTransition(async () => {
+          dispatchOptimistic({ type: "status", taskId: task.id, status: "done" });
+          await commitDoneDeliverable(task, payload);
+        }),
+    });
+  }
+
   // Plain status move (card advance button + right-click menu), routed through
   // the same optimistic dispatch the drag-and-drop uses so the card jumps
   // columns instantly instead of waiting on the server round-trip + revalidate.
-  // Done/approval moves keep their dialog flows and don't come through here.
+  // Done routes through the deliverable dialog; approval keeps its own flow.
   function moveStatus(taskId: string, status: TaskStatus) {
+    if (status === "done") {
+      const task = optimisticTasks.find((t) => t.id === taskId);
+      if (task) markDoneFlow(task);
+      return;
+    }
     startTransition(async () => {
       dispatchOptimistic({ type: "status", taskId, status });
       const r = await updateTaskStatus(taskId, status);
@@ -124,15 +224,7 @@ export function TaskBoard({
     if (status === "done") {
       const droppedTask = optimisticTasks.find((t) => t.id === taskId);
       if (droppedTask && droppedTask.status !== "done") {
-        const priorStatus = droppedTask.status;
-        startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: "done" }); });
-        requestDone({
-          task: droppedTask,
-          onCommit: () => {},
-          onCancel: () => {
-            startTransition(() => { dispatchOptimistic({ type: "status", taskId, status: priorStatus }); });
-          },
-        });
+        markDoneFlow(droppedTask);
         return;
       }
     }
@@ -194,6 +286,57 @@ export function TaskBoard({
     startTransition(async () => {
       dispatchOptimistic({ type: "reorder", taskId, sort_order: newOrder });
       await reorderTask(taskId, newOrder);
+    });
+  }
+
+  // ── Multi-select + bulk delete ──
+  const selectionMode = selectedIds.size > 0;
+  const allVisibleSelected =
+    visibleTasks.length > 0 && visibleTasks.every((t) => selectedIds.has(t.id));
+
+  function toggleSelect(task: Task) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(task.id)) next.delete(task.id);
+      else next.add(task.id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(visibleTasks.map((t) => t.id)));
+  }
+
+  async function bulkDelete() {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const label = `${ids.length} task${ids.length === 1 ? "" : "s"}`;
+    if (
+      !(await confirm({
+        title: `Delete ${label}?`,
+        description: "This permanently removes the selected tasks. This can’t be undone.",
+        confirmText: `Delete ${label}`,
+        cancelText: "Cancel",
+        icon: Trash2,
+        tone: "danger",
+      }))
+    )
+      return;
+    // Clear the selection up front so the bar and checkboxes drop away instantly;
+    // the optimistic remove then vanishes the cards inside the transition.
+    setSelectedIds(new Set());
+    startTransition(async () => {
+      dispatchOptimistic({ type: "remove", taskIds: ids });
+      const r = await deleteTasks(ids);
+      if (r && "error" in r && r.error) {
+        toast.error(r.error);
+        // The optimistic revert brings the cards back — restore the selection
+        // too so the user can just retry instead of re-picking everything.
+        setSelectedIds(new Set(ids));
+      } else if (r && "deletedIds" in r) {
+        const n = r.deletedIds.length;
+        toast.success(`Deleted ${n} task${n === 1 ? "" : "s"}`);
+      }
     });
   }
 
@@ -294,6 +437,14 @@ export function TaskBoard({
                         onStatusMove={moveStatus}
                         onDragStart={(t) => setDraggingTask(t)}
                         onDragEnd={() => { setDraggingTask(null); setDropTarget(null); }}
+                        selected={selectedIds.has(task.id)}
+                        selectionMode={selectionMode}
+                        onToggleSelect={toggleSelect}
+                        commitMatch={
+                          clearedMatches.has(task.id) ? undefined : commitMatches?.[task.id]
+                        }
+                        onConfirmMatch={confirmMatch}
+                        onDismissMatch={dismissMatch}
                       />
                       {dropTarget?.taskId === task.id && dropTarget.position === "after" && (
                         <div className="krowe-drop-indicator" />
@@ -327,6 +478,30 @@ export function TaskBoard({
         })}
       </div>
       )}
+      {selectionMode && (
+        <div className="krowe-bulk-bar" role="toolbar" aria-label="Selected tasks">
+          <span className="krowe-bulk-count">
+            {selectedIds.size} selected
+          </span>
+          <button type="button" className="krowe-bulk-btn" onClick={toggleSelectAll}>
+            <CheckSquare width={14} height={14} strokeWidth={2} />
+            {allVisibleSelected ? "Deselect all" : "Select all"}
+          </button>
+          <span className="krowe-bulk-sep" />
+          <button type="button" className="krowe-bulk-btn danger" onClick={bulkDelete}>
+            <Trash2 width={14} height={14} strokeWidth={2} />
+            Delete {selectedIds.size}
+          </button>
+          <button
+            type="button"
+            className="krowe-bulk-btn icon"
+            aria-label="Clear selection"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            <X width={15} height={15} strokeWidth={2} />
+          </button>
+        </div>
+      )}
       <TaskDetailSheet
         task={selectedTask}
         role="builder"
@@ -336,6 +511,7 @@ export function TaskBoard({
         branchesByEngagement={branchesByEngagement}
         stagingGroupsByEngagement={stagingGroupsByEngagement}
       />
+      {confirmDialog}
     </>
   );
 }

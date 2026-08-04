@@ -32,6 +32,12 @@ interface Props {
   prds: ContractDocOption[];
   defaultQuoteId?: string | null;
   defaultPrdId?: string | null;
+  /** Regenerate mode: the existing draft this run replaces. The drafted contract
+      overwrites that document in place — same id, same share link — instead of
+      creating a new one. Absent ⇒ the ordinary new-contract flow. */
+  regenerateId?: string | null;
+  /** Regenerate: the notes the draft was originally written from. */
+  initialNotes?: string | null;
 }
 
 export function NewContractForm({
@@ -42,6 +48,8 @@ export function NewContractForm({
   prds,
   defaultQuoteId,
   defaultPrdId,
+  regenerateId = null,
+  initialNotes,
 }: Props) {
   const router = useRouter();
   const [title, setTitle] = useState(initialTitle ?? "");
@@ -102,6 +110,7 @@ export function NewContractForm({
           so the selected ids (or "" for none) post with the form. */}
       <input type="hidden" name="quoteId" value={quoteId} />
       <input type="hidden" name="prdId" value={prdId} />
+      {regenerateId && <input type="hidden" name="replaceId" value={regenerateId} />}
 
       <Section title="About this document">
         <Field label="Contract title" required>
@@ -153,6 +162,7 @@ export function NewContractForm({
           <textarea
             name="notes"
             rows={5}
+            defaultValue={initialNotes ?? undefined}
             placeholder={`e.g. Client owns the code once paid in full. 30-day warranty. Texas law.`}
             className="w-full rounded border border-neutral-200 px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-1 focus:ring-neutral-400"
           />
@@ -183,7 +193,9 @@ export function NewContractForm({
             >
               Cancel
             </Button>
-            <Button type="submit">Generate contract draft</Button>
+            <Button type="submit">
+              {regenerateId ? "Regenerate contract draft" : "Generate contract draft"}
+            </Button>
           </>
         )}
       </div>
