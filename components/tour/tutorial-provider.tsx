@@ -59,6 +59,7 @@ export function TutorialProvider({
   const tourNavRef = useRef(false); // true while the tour itself is navigating
   const finishedRef = useRef(false); // guards against double status writes
   const autoStartedRef = useRef(false);
+  const autoStartTimerRef = useRef<number | null>(null);
   // Only dismiss on pathname *changes* — the effect also runs after auto-start on
   // the initial mount, which previously marked the tour dismissed before step 1.
   const prevPathnameRef = useRef(pathname);
@@ -143,12 +144,25 @@ export function TutorialProvider({
   }, [projectId, hasProject, router, finish]);
 
   // Auto-start once, desktop only, after the initial mount.
+  //
+  // Arming a timer, and marking the once-guard only when that timer fires, is
+  // what makes this survive a remount. Reaching /b by router.push — which is how
+  // the onboarding wizard hands off — mounts this provider, unmounts it, and
+  // mounts it again. The old shape set the guard on that first mount and let the
+  // unmount cleanup destroy the tour, so the remount found the guard already
+  // spent and never restarted: the builder landed on an empty board and the tour
+  // only turned up on their *next* visit, which made it look like a routing bug.
+  // A fresh document load mounts once, which is why that path always worked.
   useEffect(() => {
     if (!autoStart || autoStartedRef.current) return;
     if (typeof window === "undefined") return;
     if (!window.matchMedia("(min-width: 768px)").matches) return;
-    autoStartedRef.current = true;
-    start();
+    const timer = window.setTimeout(() => {
+      autoStartedRef.current = true;
+      start();
+    }, 0);
+    autoStartTimerRef.current = timer;
+    return () => window.clearTimeout(timer);
   }, [autoStart, start]);
 
   // Relaunch bus — the top-bar Help button dispatches this.
@@ -174,9 +188,10 @@ export function TutorialProvider({
     finish("dismissed");
   }, [pathname, finish]);
 
-  // Tear down on unmount.
+  // Tear down on unmount — including an auto-start still waiting on its task.
   useEffect(() => {
     return () => {
+      if (autoStartTimerRef.current !== null) window.clearTimeout(autoStartTimerRef.current);
       driverRef.current?.destroy();
     };
   }, []);
