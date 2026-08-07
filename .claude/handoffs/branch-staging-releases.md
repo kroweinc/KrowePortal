@@ -1,9 +1,9 @@
 # Handoff — Branch staging → release tracking
 
-**Status:** Phase 11 of 11 complete · **Last updated:** 2026-08-01
+**Status:** Phase 12 of 12 complete · **Last updated:** 2026-08-07
 **Repo / branch:** `/Users/stevenortega/KrowePortal` · `dev`
-**Next up:** Nothing blocking. Review the working-tree diff and commit when ready.
-One open question for Steven in Phase 11 — which client a gap lands under when
+**Next up:** Nothing blocking. Phase 12 is working-tree only — review and commit.
+One open question for Steven from Phase 11 — which client a gap lands under when
 several engagements share a repo.
 
 ## Phases
@@ -20,6 +20,7 @@ several engagements share a repo.
 | 9 | Split the 80-task Jul 31 blob into real pushes | ✅ done |
 | 10 | Group Shipped by day + name each push by its merge | ✅ done |
 | 11 | Detect work that shipped with no task (migration 0086) | ✅ done |
+| 12 | Make "Check for pushes" actually check | ✅ done |
 
 ## What this solved
 
@@ -539,11 +540,59 @@ gone and still gone after reload. **Steady state proven against `ai_usage`:
 
 **Open / blocked:** see the shared-repo question in Open / follow-ups below.
 
+## Phase 12 — Make "Check for pushes" actually check (2026-08-07)
+
+**Done:** The button was a no-op in the case it exists for — pressed right after
+a push. Three fixes, all on that one gesture.
+
+1. **An explicit check bypasses the GitHub cache.** `getDefaultBranchTip` takes
+   `{ fresh }`, and `pollMainMerges` passes it through to `shipPushedTasks`. The
+   client sends `fresh: pollTick > 0` — mount rides the cache, a press does not.
+2. **A push that carried no queued work is reported.** `shipPushedTasks` pushes
+   its `ShippedPush` unconditionally instead of only when `taskIds.length > 0`.
+3. **The check says what it found.** A manual pass with no results toasts "No new
+   pushes", or an error if the poll threw. Previously: spinner, then silence.
+
+**Why:** `getDefaultBranchTip` reads `cachedFetchBranchCommits` — 300s, shared
+with the commit scan and warmed by *every* builder page (the layout sweep, the
+board, the staging page itself). So the tip was almost always cached when the
+button was pressed, and "did anything just ship?" was answered with a tip from up
+to five minutes ago. Nothing detected, nothing toasted, nothing on screen — a
+dead button. Phase 8's background sweep made this worse, not better: it keeps the
+cache permanently warm.
+
+**Files touched:** `lib/github/recent-commits.ts`, `lib/actions/tasks.ts`,
+`components/staging-board.tsx`.
+
+**Verified by:** driven live in Chromium against the dev server (`dev_role=builder`,
+scratchpad `check-pushes.mjs`) — button found, label flips to "Checking…", two
+server-action POSTs, toast "No new pushes / Nothing new on main since the last
+check." Cache bypass proven by the dev log on a second run with a warm cache:
+`pollMainMerges(…, {"fresh":false})` **508ms** (cached) vs
+`pollMainMerges(…, {"fresh":true})` **1191ms** (went to GitHub). 237 tests pass,
+`npx tsc --noEmit --incremental false` clean, eslint 0 errors.
+
+**Decisions:**
+- **Only the button bypasses the cache.** Mount would cost a GitHub request per
+  engagement on every navigation to `/b/staging`, and the layout sweep already
+  covers the lazy case. A press is the one moment someone is asserting "it just
+  shipped, go look".
+- **The fresh read doesn't repopulate the shared entry.** `unstable_cache` tags
+  are static per wrapper, so busting per-repo would mean rebuilding the wrapper
+  per call. The ledger is what matters and the window is ≤300s.
+- **The zero-task toast doesn't claim the push lands under Shipped** — a release
+  with no tasks *and* no gaps is dropped from the timeline
+  (`staging-grouping.ts:200`), so it names the gap scan as what happens next.
+
+**Gotchas:** the mount pass must stay silent — a "no new pushes" toast on every
+board load would be noise. `manual` (`pollTick > 0`) gates the reporting, not just
+the freshness.
+
 ## Open / follow-ups
 
-- **Nothing is committed.** All code changes across Phases 5–10 are working-tree
-  only; the DB writes (migrations 0084 + 0085, the sweep, the re-date, the
-  Phase 9 split, the Phase 10 subject backfill) are live in prod.
+- **Phases 1–11 are committed** (`4f91b78`…`9e7b51f` on `dev`); the DB writes
+  (migrations 0084 + 0085 + 0086, the sweep, the re-date, the Phase 9 split, the
+  Phase 10 subject backfill) are live in prod. Phase 12 is working-tree only.
 - **`/o/changelog` still labels a release `title ?? branch_name`** — it never got
   the `merge_subject` fallback, deliberately: a merge subject is builder-facing
   shorthand, not client copy. `setReleaseNotes` is the client-facing surface.
@@ -562,4 +611,3 @@ gone and still gone after reload. **Steady state proven against `ai_usage`:
   accepting files the task (and its changelog entry) under that client. Options
   if it misfires: prefer the engagement with the most tasks already on that push,
   or let the card pick a client before creating. Needs Steven's call.
-- **Nothing is committed.** All changes are working-tree only.
