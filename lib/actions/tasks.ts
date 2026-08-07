@@ -768,7 +768,8 @@ type ShippedPush = { branch: string | null; taskIds: string[]; releaseId: string
  *  can share it — `redirect()` is not callable from `after()`. */
 async function shipPushedTasks(
   profileId: string,
-  engagementIds: string[]
+  engagementIds: string[],
+  opts: { fresh?: boolean } = {}
 ): Promise<ShippedPush[]> {
   const admin = createAdminClient();
   const shipped: ShippedPush[] = [];
@@ -785,7 +786,7 @@ async function shipPushedTasks(
     // and with no release row there is nowhere to hang the untracked-work scan
     // (0086). The read is cached for 300s and already shared with the commit
     // scan, so an unchanged repo costs one indexed lookup.
-    const tip = await getDefaultBranchTip(repo);
+    const tip = await getDefaultBranchTip(repo, { fresh: opts.fresh });
     if (!tip) continue;
 
     // Claim the push on the releases ledger. This is set membership over every
@@ -879,21 +880,30 @@ async function shipPushedTasks(
           }))
         )
       );
-      shipped.push({
-        branch: parseMergedBranch(tip.message),
-        taskIds,
-        releaseId: release.id as string,
-      });
     }
+    // Reported even when it moved nothing. The release row is the find — the
+    // Shipped timeline renders it whether or not a task rode along — so
+    // withholding it left a detected push invisible until a full reload, and
+    // left the button with nothing to say about a push it had just recorded.
+    shipped.push({
+      branch: parseMergedBranch(tip.message),
+      taskIds,
+      releaseId: release.id as string,
+    });
   }
 
   return shipped;
 }
 
-/** Staging-board load and the "Check for pushes" button. Returns what it shipped
- *  so the client can toast (with Undo). */
+/** Staging-board load and the "Check for pushes" button. Returns every push it
+ *  recorded so the client can toast (with Undo).
+ *
+ *  `fresh` is the button: an explicit check bypasses the 300s GitHub cache the
+ *  mount read and the background sweep share, so pressing it right after a push
+ *  sees the push instead of a five-minute-old tip. */
 export async function pollMainMerges(
-  engagementIds: string[]
+  engagementIds: string[],
+  opts?: { fresh?: boolean }
 ): Promise<ShippedPush[]> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -901,7 +911,9 @@ export async function pollMainMerges(
   const parsed = pollMainMergesSchema.safeParse(engagementIds);
   if (!parsed.success || parsed.data.length === 0) return [];
 
-  const shipped = await shipPushedTasks(profile.id, parsed.data);
+  const shipped = await shipPushedTasks(profile.id, parsed.data, {
+    fresh: opts?.fresh === true,
+  });
   if (shipped.length > 0) {
     revalidatePath("/b");
     revalidatePath("/b/staging");

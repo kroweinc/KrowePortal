@@ -234,38 +234,59 @@ export function StagingBoard({
     const ids = engagements.map((e) => e.id);
     if (ids.length === 0) return;
     let cancelled = false;
+    let failed = false;
+    // A tick past 0 is the button. Mount rides the cached read the layout sweep
+    // already warmed; a press means "go and look now", and is also the only pass
+    // that reports back when it found nothing — silence on mount is correct,
+    // silence after a click is indistinguishable from a dead button.
+    const manual = pollTick > 0;
     setChecking(true);
 
-    // Nothing to MOVE unless something is queued for the next push — the branch
-    // is a label, so an untagged task counts just the same. The gap scan below
-    // runs either way: a push where the builder queued nothing at all is
-    // precisely the one it exists to catch.
-    const hasStaged = tasks.some((t) => !t.pushed_to_main);
-    const detect = hasStaged
-      ? pollMainMerges(ids)
-      : Promise.resolve([] as Awaited<ReturnType<typeof pollMainMerges>>);
-
-    detect
+    // Runs even with Next push empty. Skipping the poll when nothing is queued
+    // looks like a free win — there'd be no task to move — but the poll is also
+    // what writes the release row, and a push carrying no queued work is exactly
+    // the one the gap scan below exists to catch. The GitHub read is cached for
+    // 300s and shared with the commit scan, so the "wasted" call is a lookup.
+    pollMainMerges(ids, { fresh: manual })
       .then((results) => {
         if (cancelled) return [];
         for (const r of results) {
-          toast.success(
-            `Shipped ${plural(r.taskIds.length, "task")} to main${
-              r.branch ? ` via ${r.branch}` : ""
-            }`,
-            {
-              action: {
-                label: "Undo",
-                onClick: () =>
-                  setTasksPushedToMain(r.taskIds, false).then(() => router.refresh()),
-              },
-            }
-          );
+          const via = r.branch ? ` via ${r.branch}` : "";
+          if (r.taskIds.length === 0) {
+            // A real push that carried nothing queued. Deliberately doesn't
+            // claim it lands under Shipped — a release with no tasks and no gaps
+            // is dropped from the timeline — so it names what happens next
+            // instead: the gap scan below is what can make it appear.
+            toast.success(`New push to main${via}`, {
+              description: "Nothing was queued for it — scanning what went out.",
+            });
+            continue;
+          }
+          toast.success(`Shipped ${plural(r.taskIds.length, "task")} to main${via}`, {
+            action: {
+              label: "Undo",
+              onClick: () =>
+                setTasksPushedToMain(r.taskIds, false).then(() => router.refresh()),
+            },
+          });
         }
         return results;
       })
-      .catch(() => [])
+      .catch(() => {
+        failed = true;
+        return [];
+      })
       .then(async (results) => {
+        if (manual && !cancelled && results.length === 0) {
+          if (failed)
+            toast.error("Couldn't reach GitHub", {
+              description: "The push check didn't run. Try again in a moment.",
+            });
+          else
+            toast.message("No new pushes", {
+              description: "Nothing new on main since the last check.",
+            });
+        }
         // The fast half is done; release the button before the scan, which is an
         // AI call and takes seconds.
         if (!cancelled) setChecking(false);

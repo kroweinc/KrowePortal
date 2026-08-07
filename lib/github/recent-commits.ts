@@ -86,16 +86,19 @@ const cachedFetchBranchCommits = unstable_cache(fetchBranchCommits, ["branch-com
  * mostly do not go through a pull request (the builder merges locally and pushes
  * the branch), so the PR API reports nothing happened. Shares the cache entry
  * with the commit scan below, so on a board that has already loaded this is free.
+ *
+ * `fresh` skips that shared entry. The window is 300s and every builder page
+ * warms it (the layout sweep, the commit scan, the board itself), so a cached
+ * read answers "did anything just ship?" with a tip from up to five minutes ago —
+ * which is exactly the moment someone presses "Check for pushes". An explicit
+ * check has to actually go and look; the background sweep still reads the cache.
  */
 export async function getDefaultBranchTip(
-  repo: Pick<EngagementRepo, "token" | "owner" | "name" | "defaultBranch">
+  repo: Pick<EngagementRepo, "token" | "owner" | "name" | "defaultBranch">,
+  opts: { fresh?: boolean } = {}
 ): Promise<ScannedCommit | null> {
-  const commits = await cachedFetchBranchCommits(
-    repo.token,
-    repo.owner,
-    repo.name,
-    repo.defaultBranch
-  );
+  const read = opts.fresh ? fetchBranchCommits : cachedFetchBranchCommits;
+  const commits = await read(repo.token, repo.owner, repo.name, repo.defaultBranch);
   return commits[0] ?? null;
 }
 
