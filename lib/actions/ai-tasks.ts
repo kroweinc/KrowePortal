@@ -70,6 +70,7 @@ export async function generateTaskDraft(input: {
     }, { userId: profile.id, operation: "generate_tasks" });
     return result;
   } catch (err) {
+    console.error("[generateTaskDraft]", err);
     return { error: friendlyAiError(err) };
   }
 }
@@ -172,6 +173,7 @@ export async function regenerateTask(
       { userId: profile.id, operation: "regenerate_task", engagementId }
     );
   } catch (err) {
+    console.error("[regenerateTask]", err);
     return { error: friendlyAiError(err) };
   }
 

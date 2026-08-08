@@ -52,6 +52,7 @@ export async function simplifyOperatorTasks(input: {
     const result = await simplifyTasks({ tasks: parsed.data.tasks });
     return result;
   } catch (err) {
+    console.error("[simplifyOperatorTasks]", err);
     return { error: friendlyAiError(err) };
   }
 }

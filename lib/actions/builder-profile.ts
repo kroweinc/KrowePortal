@@ -1484,6 +1484,7 @@ export async function importFromResume(): Promise<{
       operation: "parse_resume",
     });
   } catch (err) {
+    console.error("[importFromResume]", err);
     return { error: friendlyAiError(err) };
   }
   if (!parsed) return { error: "Couldn't extract anything from the resume. Try again in a moment." };
@@ -1584,6 +1585,7 @@ export async function importFromPortfolio(input?: { url?: string }): Promise<{
   try {
     parsed = await parsePortfolio(site.content, url, profile.id);
   } catch (err) {
+    console.error("[importFromPortfolio]", err);
     return { error: friendlyAiError(err) };
   }
   if (!parsed) return { error: "Couldn't extract anything from that site. Try again in a moment." };
