@@ -1,22 +1,33 @@
 "use client";
 
-import { useEffect, useOptimistic, useState, useTransition } from "react";
+import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   AlignLeft,
   ArrowRight,
+  ArrowUpRight,
+  AudioLines,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   GitBranch,
+  History,
   Info,
   Link2,
   MessageSquare,
-  Paperclip,
+  Pencil,
   RotateCcw,
+  Shapes,
+  SignalHigh,
   Sparkles,
+  Tag,
+  Timer,
   WandSparkles,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { TaskAuditLog } from "@/components/task-audit-log";
 import { TaskBuildPrompt } from "@/components/task-build-prompt";
@@ -46,19 +57,32 @@ import { TaskAttachments } from "@/components/task-attachments";
 import {
   TaskCommentsProvider,
   TaskCommentThread,
-  TaskCommentPreview,
+  TaskDiscussionSection,
   TaskCommentCount,
 } from "@/components/task-comments";
 import { TaskSubtasks } from "@/components/task-subtasks";
+import { MeetingPanel, MeetingPanelSkeleton } from "@/components/granola/meeting-panel";
+import { getGranolaMeeting } from "@/lib/actions/granola-meetings";
+import type { GranolaMeetingDetail } from "@/lib/actions/granola-meetings";
+import { formatCallDate } from "@/lib/granola/format";
 import { TaskRegenerate } from "@/components/task-regenerate";
 import { useTaskView, usePlainEnglish } from "@/components/plain-english-context";
 import { PlainEnglishToggle } from "@/components/plain-english-toggle";
 import { ApprovalPill } from "@/components/approval-pill";
-import { TaskTags } from "@/components/task-type-badge";
+import { PriorityBars } from "@/components/design-atoms";
+import { SubmitterAvatar } from "@/components/submitter-avatar";
+import {
+  TaskTags,
+  TaskTypeBadge,
+  WorkKindBadge,
+  TASK_TYPE_ICONS,
+  WORK_KIND_ICONS,
+} from "@/components/task-type-badge";
 import {
   TASK_TYPE_OPTIONS,
   getTaskAdvance,
   getActiveChangeRequest,
+  isCodeWork,
   relativeTime,
   submitterName,
 } from "@/lib/utils";
@@ -91,6 +115,24 @@ function formatTaskId(id: string) {
   return `KRW-${tail || "TASK"}`;
 }
 
+/** Split a description into the lines the read view bullets.
+ *
+ *  Descriptions arrive two ways: hand-written with real line breaks (often
+ *  already bulleted), or as one AI-generated paragraph of two or three
+ *  sentences. Honour explicit lines when they exist, otherwise break on
+ *  sentence boundaries — a period followed by a capital or an opening quote,
+ *  which leaves "e.g." and decimals alone. */
+function descriptionLines(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const lines = trimmed
+    .split(/\r?\n+/)
+    .map((l) => l.replace(/^\s*(?:[-•*]|\d+[.)])\s+/, "").trim())
+    .filter(Boolean);
+  if (lines.length > 1) return lines;
+  return (lines[0] ?? "").split(/(?<=\.)\s+(?=[A-Z“"'])/).filter(Boolean);
+}
+
 interface TaskDetailSheetProps {
   task: Task | null;
   role: Role;
@@ -118,19 +160,40 @@ export function TaskDetailSheet({
   siblingIds,
   onNavigate,
 }: TaskDetailSheetProps) {
+  // The board clears `task` (and with it the engagement title) the moment the
+  // sheet closes, but Radix keeps the panel mounted through its exit animation
+  // — rendering off the live props would slide an empty panel off screen. Hold
+  // the last pair until it's gone.
+  const [last, setLast] = useState({ task, engagementTitle });
+  if (task && (task !== last.task || engagementTitle !== last.engagementTitle)) {
+    setLast({ task, engagementTitle });
+  }
+  const shown = task ?? last.task;
+  const shownTitle = task ? engagementTitle : last.engagementTitle;
+
   return (
     <Sheet open={!!task} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         className="krowe-task-sheet"
         showCloseButton={false}
+        // Escape inside a field cancels that edit and nothing more. Radix listens
+        // for Escape in the capture phase on the document, so a field can't stop
+        // the sheet from closing on its own — it has to be waved off here, and
+        // preventDefault leaves the keypress free to reach the field itself.
+        onEscapeKeyDown={(e) => {
+          const active = document.activeElement;
+          if (active instanceof HTMLElement && active.closest("input, textarea, [contenteditable='true']")) {
+            e.preventDefault();
+          }
+        }}
       >
-        {task && (
+        {shown && (
           <TaskDetailBody
-            task={task}
+            task={shown}
             role={role}
             currentUserId={currentUserId}
-            engagementTitle={engagementTitle}
+            engagementTitle={shownTitle}
             onOpenChange={onOpenChange}
             branchesByEngagement={branchesByEngagement}
             stagingGroupsByEngagement={stagingGroupsByEngagement}
@@ -176,9 +239,27 @@ function TaskDetailBody({
   const displayDescription = showSimplified
     ? view.description ?? ""
     : task.description ?? "";
+  const descriptionBullets = useMemo(
+    () => descriptionLines(displayDescription),
+    [displayDescription],
+  );
 
   const [toast, setToast] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "comments" | "build" | "audit">("overview");
+  // "From meeting" reads the call here first — a sub-view over the whole body,
+  // not a tab, because it belongs to one property row rather than to the task.
+  // The fetched call is held out here (not in the panel) so stepping back to
+  // the task and in again is free.
+  const [meetingOpen, setMeetingOpen] = useState(false);
+  const [meetingState, setMeetingState] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "ready"; meeting: GranolaMeetingDetail }
+    | { status: "error" }
+  >({ status: "idle" });
+  // The description reads as flat prose, so its edit affordance is the Edit
+  // button in the section head rather than a box around the text.
+  const [editingDesc, setEditingDesc] = useState(false);
   // Optimistic status drives the pipeline + hero pill so a move paints on click
   // instead of waiting on the server action and the router.refresh() that
   // follows it. Resets to task.status once the refresh brings the real value.
@@ -192,7 +273,43 @@ function TaskDetailBody({
 
   useEffect(() => {
     setTab("overview");
+    setEditingDesc(false);
+    setMeetingOpen(false);
+    setMeetingState({ status: "idle" });
   }, [task.id]);
+
+  // Builder-only: /b/meetings is a builder route, and granola_imports_select
+  // never matches an operator, so the embed is null for them anyway.
+  const meetingImport = role !== "operator" ? task.granola_import ?? null : null;
+  const meetingHref = meetingImport
+    ? `/b/meetings/${meetingImport.id}?from=${task.id}`
+    : null;
+
+  function openMeeting() {
+    if (!meetingImport) return;
+    setMeetingOpen(true);
+    // One read per task — the snapshot is immutable text, and the panel is
+    // re-entered often enough that refetching it would be busywork.
+    if (meetingState.status !== "idle") return;
+    setMeetingState({ status: "loading" });
+    getGranolaMeeting(meetingImport.id).then(
+      (meeting) =>
+        setMeetingState(meeting ? { status: "ready", meeting } : { status: "error" }),
+      () => setMeetingState({ status: "error" }),
+    );
+  }
+
+  // After a "Try again" — the sheet holds the fetched call, so the action's
+  // revalidatePath can't reach it. Swaps in the new copy on arrival without
+  // dropping back to the skeleton, and stays quiet on failure: the retry
+  // button reports its own outcome.
+  function refetchMeeting() {
+    if (!meetingImport) return;
+    getGranolaMeeting(meetingImport.id).then(
+      (meeting) => meeting && setMeetingState({ status: "ready", meeting }),
+      () => {},
+    );
+  }
 
   // Prev/next stepping through the sibling tasks the board is showing. The ids
   // arrive in on-screen order; a missing/empty list simply disables the arrows.
@@ -317,6 +434,10 @@ function TaskDetailBody({
     (a) => a.is_deliverable,
   );
   const hasDeliverable = task.status === "done";
+  // Non-code work (migration 0089) has no branch and no commits, so the
+  // GitHub half of the deliverable stays hidden — an email doesn't ship on a
+  // branch. Tasks that were never asked read as code and keep the full block.
+  const codeWork = isCodeWork(task);
   const hasDeliverableSummary =
     task.pushed_to_main || task.completion_note || deliverableAttachments.length > 0;
 
@@ -393,7 +514,23 @@ function TaskDetailBody({
         </div>
       </div>
 
-      {/* ── Tabs strip ── */}
+      {/* ── Sub-bar (reading the call) or the tabs strip ── */}
+      {meetingOpen && meetingHref ? (
+        <div className="krowe-task-sheet-subbar">
+          <button
+            type="button"
+            className="krowe-task-subbar-back"
+            onClick={() => setMeetingOpen(false)}
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Back to task
+          </button>
+          <Link href={meetingHref} className="krowe-task-subbar-open">
+            Open full page
+            <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      ) : (
       <div className="krowe-task-sheet-tabs">
         <button
           type="button"
@@ -429,10 +566,34 @@ function TaskDetailBody({
           </button>
         )}
       </div>
+      )}
 
       {/* ── Scrollable body ── */}
       <div className="krowe-task-sheet-body">
-        {tab === "comments" ? (
+        {meetingOpen && meetingHref ? (
+          meetingState.status === "ready" ? (
+            <MeetingPanel
+              meeting={meetingState.meeting}
+              fromTaskId={task.id}
+              onOpenTask={onNavigate}
+              openableTaskIds={siblingIds}
+              onRefreshed={refetchMeeting}
+            />
+          ) : meetingState.status === "error" ? (
+            <div className="krowe-mtg-note">
+              <Info size={17} strokeWidth={2} aria-hidden="true" />
+              <p>
+                This call couldn&rsquo;t be read here.{" "}
+                <Link href={meetingHref} className="krowe-mtg-jump">
+                  Open it on its own page
+                </Link>
+                .
+              </p>
+            </div>
+          ) : (
+            <MeetingPanelSkeleton />
+          )
+        ) : tab === "comments" ? (
           <TaskCommentThread />
         ) : tab === "audit" && role === "operator" ? (
           <TaskAuditLog taskId={task.id} />
@@ -440,24 +601,9 @@ function TaskDetailBody({
           <TaskBuildPrompt task={task} />
         ) : (
         <>
-        {/* HERO */}
+        {/* HERO — the title leads; status moved down into the stepper and the
+            Stage property row, so nothing competes with it at the top. */}
         <header className="krowe-task-hero">
-          <div className="krowe-task-hero-top">
-            <span className={`krowe-status-pill ${optimisticStatus}`}>
-              <span className="pulse" aria-hidden />
-              {statusLabel(optimisticStatus)}
-            </span>
-            <span className={`krowe-prio-dot ${task.priority}`}>
-              <span className="d" aria-hidden />
-              {task.priority} priority
-            </span>
-            {(task.approval_sent_at || task.approval_approved_at) && (
-              <span className="krowe-task-hero-approval">
-                <ApprovalPill task={task} role={role} onUnsent={() => router.refresh()} />
-              </span>
-            )}
-          </div>
-
           <h1 className="krowe-task-hero-title">
             <span className="krowe-task-hero-title-text">
               <InlineText
@@ -477,6 +623,27 @@ function TaskDetailBody({
               </span>
             )}
           </h1>
+          <div className="krowe-task-byline">
+            <span className="krowe-card-submitter">
+              <SubmitterAvatar creator={task.creator} />
+              {submitterName(task.creator)}
+            </span>
+            <span className="dot" aria-hidden="true" />
+            <span>
+              opened{" "}
+              {new Date(task.created_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                timeZone: "UTC",
+              })}
+            </span>
+            {(task.approval_sent_at || task.approval_approved_at) && (
+              <span className="krowe-task-hero-approval">
+                <ApprovalPill task={task} role={role} onUnsent={() => router.refresh()} />
+              </span>
+            )}
+          </div>
         </header>
 
         {/* STATUS PIPELINE */}
@@ -489,6 +656,18 @@ function TaskDetailBody({
           </div>
         )}
 
+        {/* PROPERTIES — Linear's right rail, laid flat. Sits directly under the
+            stepper so the task's shape reads before its prose. */}
+        <TaskProps
+          task={task}
+          role={role}
+          onPriority={(v) => saveField("priority", v)}
+          onType={(v) => saveField("type", v)}
+          onEstimate={saveEstimate}
+          meetingHref={meetingHref}
+          onOpenMeeting={openMeeting}
+        />
+
         {/* CHANGES REQUESTED — operator sent the deliverable back; stays visible
             until the builder re-submits for approval */}
         {changeRequest && (
@@ -498,6 +677,7 @@ function TaskDetailBody({
                 <RotateCcw className="h-3 w-3" />
                 Changes requested
               </span>
+              <span className="rule" />
             </div>
             <div className="krowe-changes-block">
               <p className="krowe-changes-head">
@@ -523,16 +703,40 @@ function TaskDetailBody({
               <AlignLeft className="h-3 w-3" />
               Description
             </span>
+            <span className="rule" />
+            {role !== "operator" && !editingDesc && (
+              <button
+                type="button"
+                className="krowe-task-mini"
+                onClick={() => setEditingDesc(true)}
+              >
+                <Pencil className="h-3 w-3" />
+                Edit
+              </button>
+            )}
           </div>
-          <div className="krowe-task-desc">
-            <InlineTextarea
-              value={displayDescription}
-              onSave={(v) => saveField("description", v)}
-              readOnly={role === "operator"}
-              placeholder="No description"
-              className="krowe-desc-inline-text"
-            />
-          </div>
+          {/* Read mode splits the prose into bullets so a multi-clause brief
+              scans; editing falls back to the raw textarea, which is what
+              actually round-trips to the column. */}
+          {!editingDesc && descriptionBullets.length > 0 ? (
+            <ul className="krowe-task-bullets">
+              {descriptionBullets.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <div className="krowe-task-desc">
+              <InlineTextarea
+                value={displayDescription}
+                onSave={(v) => saveField("description", v)}
+                readOnly={role === "operator"}
+                placeholder="No description"
+                className="krowe-desc-inline-text"
+                editing={editingDesc}
+                onEditingChange={setEditingDesc}
+              />
+            </div>
+          )}
         </section>
 
         {/* REGENERATE — builder-only: rewrite the task (and reconcile its
@@ -544,6 +748,7 @@ function TaskDetailBody({
                 <WandSparkles className="h-3 w-3" />
                 Regenerate
               </span>
+              <span className="rule" />
             </div>
             <TaskRegenerate
               key={`regen-${task.id}`}
@@ -558,9 +763,15 @@ function TaskDetailBody({
           <section className="krowe-task-section">
             <div className="krowe-task-section-h">
               <span className="label">
-                <GitBranch className="h-3 w-3" />
+                {(() => {
+                  const Icon = codeWork
+                    ? GitBranch
+                    : WORK_KIND_ICONS[task.work_kind ?? "other"];
+                  return <Icon className="h-3 w-3" />;
+                })()}
                 Deliverable
               </span>
+              <span className="rule" />
             </div>
             {hasDeliverableSummary && (task.pushed_to_main || task.completion_note) && (
               <div className="krowe-deliverable-block">
@@ -575,17 +786,19 @@ function TaskDetailBody({
                 )}
               </div>
             )}
-            <TaskBranchField
-              key={`branch-${task.id}`}
-              taskId={task.id}
-              branch={task.branch_name}
-              readOnly={role === "operator"}
-              preloaded={
-                task.engagement_id
-                  ? branchesByEngagement?.[task.engagement_id]
-                  : undefined
-              }
-            />
+            {codeWork && (
+              <TaskBranchField
+                key={`branch-${task.id}`}
+                taskId={task.id}
+                branch={task.branch_name}
+                readOnly={role === "operator"}
+                preloaded={
+                  task.engagement_id
+                    ? branchesByEngagement?.[task.engagement_id]
+                    : undefined
+                }
+              />
+            )}
             {task.engagement_id && (
               <TaskStagingField
                 key={`staging-${task.id}`}
@@ -597,11 +810,13 @@ function TaskDetailBody({
                 groups={stagingGroupsByEngagement?.[task.engagement_id]}
               />
             )}
-            <TaskCommits
-              key={`commits-${task.id}`}
-              taskId={task.id}
-              canUnlink={role === "builder"}
-            />
+            {codeWork && (
+              <TaskCommits
+                key={`commits-${task.id}`}
+                taskId={task.id}
+                canUnlink={role === "builder"}
+              />
+            )}
             {deliverableAttachments.length > 0 && (
               <TaskAttachments
                 key={`deliverable-attachments-${task.id}`}
@@ -616,66 +831,54 @@ function TaskDetailBody({
           </section>
         )}
 
-        {/* META */}
+        {/* ATTACHMENTS — the component draws its own section head (label, rule
+            and the Add action together), so the sheet only frames the band. */}
         <section className="krowe-task-section">
-          <div className="krowe-task-section-h">
-            <span className="label">
-              <Info className="h-3 w-3" />
-              Details
-            </span>
-          </div>
-          <MetaCard
-            task={task}
+          <TaskAttachments
+            key={`attachments-${task.id}`}
+            taskId={task.id}
             role={role}
-            onPriority={(v) => saveField("priority", v)}
-            onType={(v) => saveField("type", v)}
-            onEstimate={saveEstimate}
+            currentUserId={currentUserId}
+            initial={[]}
+            isDeliverable={false}
           />
         </section>
 
-        {/* ATTACHMENTS */}
+        {/* SUBTASKS — likewise owns its head (Generate / Add). */}
         <section className="krowe-task-section">
-          <div className="krowe-task-section-h">
-            <span className="label">
-              <Paperclip className="h-3 w-3" />
-              Attachments
-            </span>
-          </div>
-          <div className="krowe-attach-frame">
-            <TaskAttachments
-              key={`attachments-${task.id}`}
-              taskId={task.id}
-              role={role}
-              currentUserId={currentUserId}
-              initial={[]}
-              isDeliverable={false}
-            />
-          </div>
-        </section>
-
-        {/* SUBTASKS */}
-        <section className="krowe-task-section">
-          <div className="krowe-subs-card">
-            <TaskSubtasks key={`subtasks-${task.id}`} taskId={task.id} task={task} />
-          </div>
+          <TaskSubtasks key={`subtasks-${task.id}`} taskId={task.id} task={task} />
         </section>
 
         {/* DISCUSSION — the newest message or approval event, and a way into the
-            full thread. Everything you can write lives in the Comments tab. */}
+            full thread. Renders nothing until the thread has an entry, and
+            everything you can write lives in the Comments tab. */}
+        <TaskDiscussionSection onOpenThread={() => setTab("comments")} />
+
+        {/* ACTIVITY — the newest few events. Self-fetching, so it sits last in
+            the DOM and its request never delays the sheet's first paint. The
+            full ledger (digest, filters, day grouping) lives in the Audit tab. */}
         <section className="krowe-task-section">
           <div className="krowe-task-section-h">
             <span className="label">
-              <MessageSquare className="h-3 w-3" />
-              Discussion
+              <History className="h-3 w-3" />
+              Activity
             </span>
+            <span className="rule" />
           </div>
-          <TaskCommentPreview onOpenThread={() => setTab("comments")} />
+          <TaskAuditLog
+            key={`activity-${task.id}`}
+            taskId={task.id}
+            compact
+            onViewAll={role === "operator" ? () => setTab("audit") : undefined}
+          />
         </section>
         </>
         )}
       </div>
 
-      {/* ── Sticky footer ── */}
+      {/* ── Sticky footer ── Task verbs only, so it stands down while the call
+          is on screen; the sub-bar carries that view's own two actions. */}
+      {!meetingOpen && (
       <footer className="krowe-task-sheet-footer">
         <DeleteTaskButton
           taskId={task.id}
@@ -683,6 +886,15 @@ function TaskDetailBody({
           variant="ghost"
           onSuccess={() => onOpenChange(false)}
         />
+        <span className="krowe-task-sheet-footer-spacer" />
+        <button
+          type="button"
+          className="krowe-btn-pill"
+          onClick={() => setTab("comments")}
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          Comment
+        </button>
         {role === "operator"
           ? awaitingApproval && (
               <button
@@ -719,6 +931,7 @@ function TaskDetailBody({
               </button>
             )}
       </footer>
+      )}
 
       {toast && <div className="krowe-toast">{toast}</div>}
     </TaskCommentsProvider>
@@ -751,7 +964,11 @@ function StatusPipeline({
             aria-pressed={i === active}
             style={interactive ? undefined : { cursor: "default", pointerEvents: "none" }}
           >
-            <span className="num">{String(i + 1).padStart(2, "0")}</span>
+            {/* A cleared stage checks off; the current one wears the same
+                half-filled disc the card in that column shows. */}
+            <span className="tick" aria-hidden="true">
+              {i < active && <Check width={9} height={9} strokeWidth={3.5} />}
+            </span>
             <span className="lbl">{s.label}</span>
           </button>
         );
@@ -760,82 +977,149 @@ function StatusPipeline({
   );
 }
 
-function MetaCard({
+function Prop({
+  icon: Icon,
+  label,
+  mono = false,
+  wide = false,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  mono?: boolean;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`krowe-task-prop ${wide ? "wide" : ""}`}>
+      <span className="k">
+        <Icon width={14} height={14} strokeWidth={1.9} aria-hidden="true" />
+        {label}
+      </span>
+      <span className={`v ${mono ? "mono" : ""}`}>{children}</span>
+    </div>
+  );
+}
+
+/** Property rows, paired two-up. Each row is self-contained (no positional
+ *  :nth-child separators), so rows can be reordered or dropped freely.
+ *
+ *  Deliberately absent: Stage, Submitted by, Created. All three already read
+ *  off the stepper and the byline directly above, and repeating them here was
+ *  what made this block nine rows tall. */
+function TaskProps({
   task,
   role,
   onPriority,
   onType,
   onEstimate,
+  meetingHref,
+  onOpenMeeting,
 }: {
   task: Task;
   role: Role;
   onPriority: (v: string) => Promise<void>;
   onType: (v: string) => Promise<void>;
   onEstimate: (hours: number) => Promise<void>;
+  /** Null when this task didn't come from a call, or for an operator. */
+  meetingHref: string | null;
+  onOpenMeeting: () => void;
 }) {
   // Legacy/unclassified tasks have no type yet — offer an "Untyped" placeholder
   // so the read-only operator view and the builder's select both render cleanly.
   const typeOptions = task.type
     ? TASK_TYPE_OPTIONS
     : [{ value: "", label: "Untyped" }, ...TASK_TYPE_OPTIONS];
+
   return (
-    <div className="krowe-meta-card">
-      <div className="krowe-meta-cell">
-        <span className="k">Type</span>
-        <span className="v">
-          <InlineSelect
-            value={task.type ?? ""}
-            options={typeOptions}
-            onSave={onType}
-            readOnly={role === "operator"}
-          />
-        </span>
-      </div>
+    <div className="krowe-task-props">
+      <Prop icon={SignalHigh} label="Priority">
+        <PriorityBars priority={task.priority} />
+        <InlineSelect
+          value={task.priority}
+          options={PRIORITY_OPTIONS}
+          onSave={onPriority}
+          readOnly={role === "operator"}
+          label="Priority"
+        />
+      </Prop>
 
-      <div className="krowe-meta-cell">
-        <span className="k">Priority</span>
-        <span className="v">
-          <InlineSelect
-            value={task.priority}
-            options={PRIORITY_OPTIONS}
-            onSave={onPriority}
-            readOnly={role === "operator"}
-          />
-        </span>
-      </div>
+      {/* The value is the same chip the card wears, so the type reads identically
+          in both places; the picker sits transparently over it. */}
+      <Prop icon={task.type ? TASK_TYPE_ICONS[task.type] : Shapes} label="Type">
+        <InlineSelect
+          variant="chip"
+          face={
+            task.type ? (
+              <TaskTypeBadge type={task.type} />
+            ) : (
+              <span className="krowe-chip krowe-chip-tag">Untyped</span>
+            )
+          }
+          value={task.type ?? ""}
+          options={typeOptions}
+          onSave={onType}
+          readOnly={role === "operator"}
+          label="Type"
+        />
+      </Prop>
 
-      <div className="krowe-meta-cell">
-        <span className="k">Estimate</span>
-        <span className="v mono">
-          <InlineEstimate
-            low={task.builder_estimate_low_hours}
-            high={task.builder_estimate_high_hours}
-            fallback={task.builder_estimate_hours}
-            onSave={onEstimate}
-            readOnly={role === "operator"}
-          />
-        </span>
-      </div>
+      {/* Chosen in the approval dialog, not here — null means the question was
+          never asked, so the row stays out rather than claiming "Code". */}
+      {task.work_kind && (
+        <Prop icon={WORK_KIND_ICONS[task.work_kind]} label="Work">
+          <WorkKindBadge kind={task.work_kind} />
+        </Prop>
+      )}
 
-      <div className="krowe-meta-cell">
-        <span className="k">Submitted by</span>
-        <span className="v">{submitterName(task.creator)}</span>
-      </div>
+      <Prop icon={Tag} label="Labels">
+        {task.tags.length > 0 ? (
+          <TaskTags tags={task.tags} />
+        ) : (
+          <span className="none">None</span>
+        )}
+      </Prop>
 
-      <div className="krowe-meta-cell">
-        <span className="k">Added</span>
-        <span className="v mono muted">
-          {new Date(task.created_at).toLocaleDateString()}
-        </span>
-      </div>
+      <Prop icon={Timer} label="Estimate" mono>
+        <InlineEstimate
+          low={task.builder_estimate_low_hours}
+          high={task.builder_estimate_high_hours}
+          fallback={task.builder_estimate_hours}
+          onSave={onEstimate}
+          readOnly={role === "operator"}
+        />
+      </Prop>
 
-      {task.tags.length > 0 && (
-        <div className="krowe-meta-cell" style={{ gridColumn: "1 / -1" }}>
-          <span className="k">Labels</span>
-          <span className="v" style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-            <TaskTags tags={task.tags} />
+      {/* From meeting — reads the call in the sheet, one step from the task it
+          drafted, and keeps the page as its href so ⌘/middle-click still opens
+          it in a tab. Spans both columns: a call title plus its date never fits
+          in half a row. */}
+      {meetingHref && task.granola_import && (
+        <Link
+          href={meetingHref}
+          className="krowe-task-prop krowe-task-prop-link wide"
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
+            onOpenMeeting();
+          }}
+        >
+          <span className="k">
+            <AudioLines width={14} height={14} strokeWidth={1.9} aria-hidden="true" />
+            From meeting
           </span>
-        </div>
+          <span className="v">
+            <span className="t">
+              {task.granola_import.granola_note_title ?? "Untitled call"}
+            </span>
+            {formatCallDate(task.granola_import.granola_created_at) && (
+              <span className="when">
+                {formatCallDate(task.granola_import.granola_created_at)}
+              </span>
+            )}
+            <ChevronRight width={14} height={14} strokeWidth={2} className="go" aria-hidden="true" />
+          </span>
+        </Link>
       )}
     </div>
   );

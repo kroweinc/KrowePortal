@@ -147,7 +147,19 @@ Stagger offset: `80ms` per item. Duration per item: `--duration-slower`.
 **Supporting line fade**
 Subtitle text beneath a hero headline fades in at `--duration-slower` with a `200ms` delay after the headline clip completes.
 
-**Global rule:** Animate `transform` and `opacity` only. Never animate `width`, `height`, `margin`, or `color` directly — use pseudo-element overlays or CSS variable transitions instead.
+**Side panel / sheet (task detail, drawers)**
+The panel slides in from its edge `(translate 100% → 0, opacity 0 → 1)` at `--duration-normal`, over a backdrop that fades in across the same beat; the direction comes from `data-side` via `--sheet-from-x` / `--sheet-from-y`.
+
+Leaving is a dissolve, not a reversal: the panel fades out while drifting only `16%` back toward its edge, and the backdrop fades on the same clock so the dim never clears out from under it. Same `--duration-normal` — the easing front-loads the change, so an exit already reads faster than an entrance of equal length; shortening it to `--duration-fast` spends the fade inside ~70ms and reads as a blink. A full slide-out is wrong here: once opacity has carried the panel away, the remaining travel is just a yank across the screen.
+
+Trigger: opening the panel (e.g. clicking a task card). The panel keeps its content until the exit finishes; never slide an emptied shell off screen.
+
+**Sidebar rail entrance (app shell)**
+The rail slides in from the left edge `(translateX -100% → 0, opacity 0 → 1)` at `--duration-slow`; brand, section cap, nav links, and footer items then fade up behind it (`fade-up-in`) at `--duration-normal` with a `40ms` stagger starting at `120ms`. Desktop only — below `768px` the same translate is the off-canvas drawer's resting position, so the entrance is suppressed to avoid flashing the menu open. Trigger: page load (the rail lives in the layout, so client-side navigation doesn't replay it).
+
+**Global rule:** Animate `transform` and `opacity` for anything that moves or reveals. Never animate `width`, `height`, or `margin` — they force layout on every frame; use pseudo-element overlays or CSS variable transitions instead.
+
+`color` and `border-color` **may** ease, on hover and focus only, and only on the element already under the pointer — a link tinting to `--primary`, a button's border warming, a tab label lifting to full contrast. They compose, not lay out, so they cost nothing per frame, and a swatch that snaps while everything around it eases reads as a bug. Everything else about a colour change is still off-limits: never ease a colour to signal state (loading, error, success), and never ease `background-color` across a large surface.
 
 ---
 
@@ -386,6 +398,37 @@ Used in onboarding question flows where the user picks from a grid of options.
 Content layout: centered icon (48px) + label (Body M, `--foreground`) stacked vertically with `--space-lg` gap.
 The variants are selected, unselected, and null.
 
+#### Task Card ("Signal")
+
+The build-board card. Dense by design — a column has to show many at once — so it
+takes `--radius-md`, not the `--radius-lg` a roomy card gets. **This is the rule for
+any list-dense card: `--radius-md` at or below ~44px of vertical padding, `--radius-lg`
+above it.** A card at `--radius-lg` in a tight column reads as an over-rounded pill.
+
+| Property | Value |
+|---|---|
+| Radius | `--radius-md` (10px) |
+| Padding | 11px 12px |
+| Background | `--card-bg` (white; `color-mix(--surface-subtle 70%, white)` on hover) |
+| Border | 1px `--border` → `--border-strong` on hover |
+| Shadow | none — the card lifts by border and fill, never by elevation |
+| Gutter | `--card-gutter`, 24px (53px when the board offers multi-select) |
+
+**Internal structure (top to bottom):**
+
+1. Title row — state glyph (15px: dashed ring / solid ring / half disc / filled check),
+   title, then pin + approval pill
+2. Description — 2-line clamp, indented to `--card-gutter`
+3. Callout blocks (changes requested, commit match) — full-bleed, they carry their own edge
+4. Delivery chips — indented to the gutter
+5. Meta line — priority bars · type chip · labels ……… date · submitter avatar
+
+The meta line is **one line**. Hover actions are lifted out of flow and painted over the
+line's slack with a `--card-bg` fade, so revealing them never reflows the card.
+
+Status is carried by the state glyph, not by tinting the card: a done card mutes its
+title so a full Done column stays quiet.
+
 #### Verdict Card
 
 Displayed on the report/results screen to communicate the AI's recommendation.
@@ -403,9 +446,9 @@ Ensure that the user has actions to take upon seeing this card.
 **Internal structure (top to bottom):**
 
 1. Semantic badge — pill label in one of three states:
-   - **Proceed** → `--success-light` background, `--success` text
-   - **Pivot** → `--warning-light` background, `--warning` text
-   - **Rethink** → `--danger-light` background, `--danger` text
+   - **Proceed** → `--success-soft` background, `--success` text
+   - **Pivot** → `--warning-soft` background, `--warning` text
+   - **Rethink** → `--danger-soft` background, `--danger` text
 2. Verdict headline — Display L (56px) Instrument Serif Italic
 3. Summary body — Body L (18px) Geist, `--muted-foreground`
 4. Divider — 1px `--border`
@@ -488,7 +531,7 @@ Two states: **empty** and **rewrite**.
 Full-section states that replace primary content when data is absent or broken.
 
 **Error shell**
-- Background: `--danger-light`
+- Background: `--danger-soft`
 - Border: 1px `--danger` at 30% opacity
 - Icon: 24px warning icon, `--danger`
 - Heading: H3, `--danger`
@@ -496,7 +539,7 @@ Full-section states that replace primary content when data is absent or broken.
 - Action: Secondary button ("Try again")
 
 **Warning shell**
-- Background: `--warning-light`
+- Background: `--warning-soft`
 - Border: 1px `--warning` at 30% opacity
 - Icon: 24px info icon, `--warning`
 - Heading: H3, `--warning`

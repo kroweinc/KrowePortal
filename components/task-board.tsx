@@ -22,6 +22,7 @@ import {
   isAwaitingApproval,
   sortWithApprovalPin,
   sortTasksByKey,
+  STATUS_LABELS,
 } from "@/lib/utils";
 import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 import type { Task, Engagement, TaskStatus, StagingGroup } from "@/lib/types";
@@ -90,6 +91,21 @@ export function TaskBoard({
 
   const selectedTask = optimisticTasks.find((t) => t.id === selectedId) ?? null;
 
+  // ?task= is seeded into state at mount, which is enough for a cold load but
+  // not for a link followed while the board is already up — a soft navigation
+  // to the same route doesn't remount. Mirroring it keeps every /b?task=<id>
+  // link live (the meeting panel's sibling rows, the meeting page, a pasted
+  // link) and hands the sheet to browser Back/Forward. Adjusted during render
+  // rather than in an effect, so the sheet never paints a frame on the old id;
+  // syncSelected's own router.replace lands here as a no-op, having set the
+  // same id already.
+  const taskParam = searchParams.get("task");
+  const [lastTaskParam, setLastTaskParam] = useState(taskParam);
+  if (taskParam !== lastTaskParam) {
+    setLastTaskParam(taskParam);
+    setSelectedId(taskParam);
+  }
+
   // ── "You forgot to mark this done" ──
   // Scan new default-branch commits against the open tasks once per mount. Cheap
   // by design: commits already scanned are filtered out server-side before the
@@ -124,8 +140,11 @@ export function TaskBoard({
 
   // Confirm goes straight to Done and skips approval — the commit was read off
   // the default branch, so the work is already on main and there's nothing left
-  // for an operator to gate.
+  // for an operator to gate. On an auto-applied match the task is already done;
+  // confirming only stands behind it, which is what releases the operator's
+  // "delivered" mail.
   function confirmMatch(task: Task) {
+    const match = commitMatches?.[task.id];
     setClearedMatches((prev) => new Set(prev).add(task.id));
     startTransition(async () => {
       dispatchOptimistic({ type: "status", taskId: task.id, status: "done" });
@@ -134,18 +153,29 @@ export function TaskBoard({
         toast.error(r.error);
         restoreMatch(task.id);
       } else {
-        toast.success("Marked done — shipped to main");
+        toast.success(match?.autoApplied ? "Kept as done" : "Marked done — shipped to main");
       }
     });
   }
 
+  // On an auto-applied match this is an undo, not a dismissal: the server puts
+  // the task back where it was, so the card flies back to its old column rather
+  // than just losing its card. priorStatus comes from the same row the card
+  // rendered from, so the optimistic move matches what the server will do.
   function dismissMatch(task: Task) {
+    const match = commitMatches?.[task.id];
+    const priorStatus = match?.autoApplied ? match.priorStatus : null;
     setClearedMatches((prev) => new Set(prev).add(task.id));
     startTransition(async () => {
+      if (priorStatus) {
+        dispatchOptimistic({ type: "status", taskId: task.id, status: priorStatus });
+      }
       const r = await dismissTaskCommitMatch(task.id);
       if ("error" in r) {
         toast.error(r.error);
         restoreMatch(task.id);
+      } else if (r.restoredStatus) {
+        toast.success(`Moved back to ${STATUS_LABELS[r.restoredStatus]}`);
       }
     });
   }
@@ -153,6 +183,23 @@ export function TaskBoard({
   // Sort lives in the header (next to Staging / Tasks from meeting) via a shared
   // context so the control and the board stay in sync — see TaskSortProvider.
   const { sortKey } = useTaskSort();
+
+  /**
+   * A task the scan marked done on its own goes to the head of its column, above
+   * whatever the sort says, because it's the one card asking the builder a
+   * question. That also keeps it clear of the DONE_PREVIEW_COUNT cut, so it can
+   * never end up hidden behind "N more done".
+   *
+   * Applied here rather than inside sortWithApprovalPin (lib/utils.ts): the pin
+   * has to hold under every sort key including the pure ones, and the operator's
+   * list shares that util and has no auto-done concept.
+   */
+  function liftAutoDone(columnTasks: Task[]): Task[] {
+    const isAuto = (t: Task) =>
+      !clearedMatches.has(t.id) && commitMatches?.[t.id]?.autoApplied === true;
+    if (!columnTasks.some(isAuto)) return columnTasks;
+    return [...columnTasks.filter(isAuto), ...columnTasks.filter((t) => !isAuto(t))];
+  }
 
   // null = All, "personal" = tasks with no engagement, otherwise an engagement id
   const engagementFilter = searchParams.get("engagement");
@@ -387,7 +434,9 @@ export function TaskBoard({
       ) : (
       <div className="krowe-board">
         {COLUMNS.map(({ status, label }) => {
-          const columnTasks = sortTasksByKey(visibleTasks.filter((t) => t.status === status), sortKey);
+          const columnTasks = liftAutoDone(
+            sortTasksByKey(visibleTasks.filter((t) => t.status === status), sortKey)
+          );
           // Done stays capped at a top-3 preview unless expanded.
           const collapseDone =
             status === "done" && !showAllDone && columnTasks.length > DONE_PREVIEW_COUNT;
