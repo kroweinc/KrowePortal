@@ -34,6 +34,7 @@ import { GranolaTaskReview } from "@/components/granola/granola-task-review";
 import { GrSelect } from "@/components/granola/gr-select";
 import { streamTaskDrafts } from "@/lib/ai/stream-client";
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
+import { formatCallDate } from "@/lib/granola/format";
 import type { ExtractedTaskDraft } from "@/lib/ai/schemas";
 import type { ProjectSopTranscript } from "@/lib/types";
 
@@ -67,13 +68,6 @@ function callGroup(createdAt: string | null): (typeof GROUP_ORDER)[number] {
   if (d.toDateString() === now.toDateString()) return "Today";
   if (now.getTime() - d.getTime() < 7 * 24 * 60 * 60 * 1000) return "This week";
   return "Earlier";
-}
-
-function formatCallDate(createdAt: string | null) {
-  if (!createdAt) return null;
-  const d = new Date(createdAt);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function ImportFromGranolaDialog({
