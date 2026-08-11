@@ -6,6 +6,7 @@
     "dev:stop": "lsof -ti:3030 | xargs kill -9 2>/dev/null || true",
     "dev": "npm run dev:stop && NODE_OPTIONS='--max-http-header-size=98304' next dev --port 3030",
     "dev:webpack": "npm run dev:stop && NODE_OPTIONS='--max-http-header-size=98304' next dev --port 3030 --webpack",
+    "dev:log": "npm run dev 2>&1 | tee /tmp/krowe-dev.log",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
