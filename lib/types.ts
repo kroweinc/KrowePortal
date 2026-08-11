@@ -32,6 +32,15 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export const TASK_TYPES = ["feature", "bug", "change"] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
+// What a task actually IS, as opposed to what kind of change it makes
+// (migration 0089). Not every task ends in a branch — plenty of builder work is
+// asking the client a question or sending an email, and forcing that through
+// the code-shaped approval flow made it read half-finished. Chosen by the
+// builder in the Submit-for-Approval dialog; null on anything never asked, which
+// lays out like "code" but renders no chip.
+export const WORK_KINDS = ["code", "question", "email", "other"] as const;
+export type WorkKind = (typeof WORK_KINDS)[number];
+
 // Fixed taxonomy of area labels the AI classifier may assign. A task gets
 // exactly ONE of these (stored as a single-element tasks.tags array) — the
 // closed list keeps labels consistent and prevents one-off free-form tags like
@@ -147,6 +156,10 @@ export interface Task {
   source: TaskSource;
   // Linear-style change type and AI-generated area labels (migration 0064).
   type: TaskType | null;
+  // Code vs. non-code work (migration 0089). Set when the task is sent for
+  // approval; null on tasks that predate the question. Only "code" carries a
+  // branch — the other kinds hide the branch/commit UI entirely.
+  work_kind: WorkKind | null;
   tags: string[];
   status: TaskStatus;
   priority: TaskPriority;
@@ -186,6 +199,24 @@ export interface Task {
   release_id: string | null;
   shipped_at: string | null;
   release?: Release | null;
+  // The Granola call this task was drafted from (migration 0088). Nullable —
+  // hand-written tasks, operator requests and paste/upload drafts have none.
+  // ON DELETE SET NULL, so releasing a failed import's ledger claim unlinks its
+  // tasks rather than stranding them. Links to /b/meetings/[granola_import_id].
+  granola_import_id: string | null;
+  // The verbatim line the AI drafted this task from (ExtractedTaskDraft
+  // .sourceQuote, <= 300 chars). Discarded at approval before 0088, so
+  // backfilled tasks have none — every surface must render it optionally.
+  granola_source_quote: string | null;
+  // Embedded meeting header, only present when the query selects it (the builder
+  // board does, to label the "From meeting" link without a second read). Yields
+  // null for operators — granola_imports_select is builder-only, and a blocked
+  // embed returns null rather than erroring.
+  granola_import?: {
+    id: string;
+    granola_note_title: string | null;
+    granola_created_at: string | null;
+  } | null;
   engagement?: Engagement;
   // The person who submitted the task, joined on created_by. Surfaced in place of
   // the old operator/builder source badge. Absent unless the query selects it.
@@ -596,6 +627,10 @@ export interface GranolaConnection {
 // project AND an engagement, never twice into the same container.
 export type GranolaImportTarget = "project" | "engagement";
 
+// Why granola_imports.transcript is what it is (migration 0088). Filled by the
+// post-approve snapshot capture; null = never attempted (any pre-0088 import).
+export type GranolaTranscriptStatus = "captured" | "plan_gated" | "not_ready" | "failed";
+
 export interface GranolaImport {
   id: string;
   user_id: string;
@@ -609,6 +644,15 @@ export interface GranolaImport {
   tasks_created: number; // engagement imports: approved task count
   imported_via: "manual" | "cron";
   created_at: string;
+  // ── Call snapshot (0088), engagement targets ONLY ──
+  // Granola exposes no shareable URL, so /b/meetings/[id] renders from these
+  // rather than linking out or re-fetching. Project imports keep the same text
+  // in project_sop_transcripts.content and leave these null on purpose.
+  summary: string | null;
+  transcript: string | null;
+  participants: string | null;
+  transcript_status: GranolaTranscriptStatus | null;
+  snapshot_fetched_at: string | null; // stamped on every attempt, success or not
 }
 
 // ── Product Feedback ───────────────────────────────────────────────────
@@ -966,6 +1010,10 @@ export interface TaskAttachment {
   is_deliverable: boolean;
   created_at: string;
   uploader?: Pick<Profile, "id" | "display_name" | "role">;
+  // Not a column. A short-lived signed URL minted at read time for image
+  // attachments (see withPreviewUrls) so the UI can paint the file inline
+  // instead of offering only a download.
+  preview_url?: string | null;
 }
 
 // A message in a task's comment thread (migration 0082). Rendered in the detail

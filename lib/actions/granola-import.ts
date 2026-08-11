@@ -21,6 +21,7 @@ import {
   GranolaNotFoundError,
   GranolaRateLimitError,
 } from "@/lib/granola/client";
+import { captureGranolaMeetingSnapshot } from "@/lib/granola/meeting-snapshot";
 import {
   getClient,
   granolaTargetSchema,
@@ -418,7 +419,8 @@ function draftDescription(item: ApprovedTaskDraft): string {
 async function createDraftTasks(
   profileId: string,
   engagementId: string,
-  items: ApprovedTaskDraft[]
+  items: ApprovedTaskDraft[],
+  granolaImportId: string | null = null
 ): Promise<{ created: number; firstError: string | null }> {
   const supabase = await getClient(profileId);
   const { data, error } = await supabase
@@ -438,6 +440,13 @@ async function createDraftTasks(
         // explicit null, NOT the column default), so the default is filled in
         // here — 'backlog' matches the tasks.status DB default (migration 0065).
         status: item.status ?? "backlog",
+        // Provenance (migration 0088): which call this came from, and the line
+        // it came from. Both set on every row for the same unify-the-columns
+        // reason as status — null on the paste/upload path, which has no call.
+        // sourceQuote was generated and thrown away before 0088; keeping it is
+        // what lets the meeting page point at the exact transcript line.
+        granola_import_id: granolaImportId,
+        granola_source_quote: item.sourceQuote?.slice(0, 300) ?? null,
       }))
     )
     .select("id");
@@ -519,7 +528,9 @@ export async function approveExtractedTasks(input: {
   const { created, firstError } = await createDraftTasks(
     profile.id,
     parsed.data.engagementId,
-    parsed.data.items
+    parsed.data.items,
+    // No Granola note backs these, so no meeting to link to.
+    null
   );
   if (created === 0) {
     return { error: firstError ?? "Couldn't create the tasks. Please try again." };
@@ -598,12 +609,15 @@ export async function approveGranolaTasks(input: {
     ({ created, firstError } = await createDraftTasks(
       profile.id,
       parsed.data.engagementId,
-      parsed.data.items
+      parsed.data.items,
+      ledgerRow.id
     ));
   } catch (err) {
     // A throw here would strand the ledger claim — every retry would then hit
     // the unique index with zero tasks to show for it. Release it like the
-    // created === 0 branch below.
+    // created === 0 branch below. tasks.granola_import_id is ON DELETE SET NULL
+    // (0088), so any rows that did land are unlinked by the delete rather than
+    // left pointing at a meeting that no longer exists.
     console.error("[granola] createDraftTasks threw after ledger claim:", err);
     await supabase.from("granola_imports").delete().eq("id", ledgerRow.id);
     return { error: "Couldn't create the tasks. Please try again." };
@@ -624,6 +638,17 @@ export async function approveGranolaTasks(input: {
     .from("granola_imports")
     .update({ tasks_created: created })
     .eq("id", ledgerRow.id);
+
+  // Snapshot the call itself for /b/meetings/[id]. The transcript is NOT in
+  // hand here — it's fetched and discarded at DRAFT time (resolveGranolaDraft),
+  // and the client only sends back the drafts — so this needs its own Granola
+  // round-trip. It goes after the response, exactly like the hour estimates in
+  // createDraftTasks, because this path is latency-tuned (see the timer above).
+  // The ledger row already carries the title and date, so the meeting page is
+  // never blank while this runs; it renders what landed and offers a retry.
+  after(() =>
+    captureGranolaMeetingSnapshot(ledgerRow.id, profile.id, parsed.data.noteId)
+  );
 
   revalidatePath(`/b/engagements/${parsed.data.engagementId}`);
   revalidatePath("/b");
