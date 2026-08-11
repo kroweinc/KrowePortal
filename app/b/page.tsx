@@ -15,6 +15,7 @@ import { getSubmitterAvatarMap, attachCreatorAvatars } from "@/lib/submitter-ava
 import { getBranchesByEngagement } from "@/lib/actions/get-engagement-branches";
 import { getStagingGroupsByEngagement } from "@/lib/actions/staging-groups";
 import { getPendingCommitMatches } from "@/lib/actions/get-commit-task-matches";
+import { getBoardSort } from "@/lib/actions/board-sort";
 import type { Task } from "@/lib/types";
 
 export const metadata = { title: "Tasks" };
@@ -71,10 +72,13 @@ export default async function BuilderDashboard({
   // task detail sheet's deliverable chips paint with no fetch. commitMatches
   // carries the "a commit on main looks like it finished this" suggestions —
   // scoped to still-open tasks, so a done card can never render one.
-  const [branchesByEngagement, stagingGroupsByEngagement, commitMatches] = await Promise.all([
+  // boardSort rides along here so the header's Sort dropdown paints the user's
+  // saved choice on the first frame — it's their account's, not this browser's.
+  const [branchesByEngagement, stagingGroupsByEngagement, commitMatches, boardSort] = await Promise.all([
     getBranchesByEngagement(engagementList),
     getStagingGroupsByEngagement(engagementIds),
     getPendingCommitMatches(tasks.filter((t) => t.status !== "done").map((t) => t.id)),
+    getBoardSort(),
   ]);
   const firstEngagement = engagementList[0];
 
@@ -85,7 +89,7 @@ export default async function BuilderDashboard({
   return (
     <main className="krowe-page krowe-page-grid">
       <div className="krowe-page-inner">
-        <TaskSortProvider>
+        <TaskSortProvider initialSort={boardSort}>
           <div className="krowe-board-head">
             <div className="krowe-board-titlewrap">
               <h1 className="krowe-board-title">Build Board</h1>
