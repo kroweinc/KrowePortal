@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
-import type { TaskChangeRequest, TaskPriority, TaskStatus, TaskType } from "@/lib/types";
+import type { TaskChangeRequest, TaskPriority, TaskStatus, TaskType, WorkKind } from "@/lib/types";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -152,6 +152,24 @@ export const TASK_TYPE_OPTIONS: { value: TaskType; label: string }[] = [
   { value: "bug", label: "Bug" },
   { value: "change", label: "Change" },
 ];
+
+// Work kind (migration 0089). "Code" is the implicit default for null, so it is
+// deliberately the first chip and the only kind that keeps the branch picker.
+export const WORK_KIND_LABELS: Record<WorkKind, string> = {
+  code: "Code",
+  question: "Question",
+  email: "Email",
+  other: "Other",
+};
+
+/** Whether a task is the code kind — the only kind that has a branch, a commit
+ *  list, or a place in a push. Null reads as "code" because that was the
+ *  implicit answer for every task written before the question existed. Single
+ *  source of truth for the branch-shaped UI, from the approval dialogs to the
+ *  staging board's split between branches and actions. */
+export function isCodeWork(task: { work_kind: WorkKind | null }): boolean {
+  return (task.work_kind ?? "code") === "code";
+}
 
 /** Display name of whoever submitted a task (joined as `creator`). Falls back to
  *  a capitalized role, then "Unknown" — used in place of the old source badge. */

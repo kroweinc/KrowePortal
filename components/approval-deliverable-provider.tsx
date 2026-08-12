@@ -1,11 +1,14 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react";
-import { ApprovalDeliverableDialog } from "@/components/approval-deliverable-dialog";
-import type { Task } from "@/lib/types";
+import {
+  ApprovalDeliverableDialog,
+  type ApprovalTask,
+} from "@/components/approval-deliverable-dialog";
+import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 
 type RequestApprovalOptions = {
-  task: Pick<Task, "id" | "title">;
+  task: ApprovalTask;
   onCommit?: () => void;
   onCancel?: () => void;
 };
@@ -14,8 +17,14 @@ type RequestApprovalFn = (opts: RequestApprovalOptions) => void;
 
 const ApprovalDeliverableContext = createContext<RequestApprovalFn | null>(null);
 
-export function ApprovalDeliverableProvider({ children }: { children: ReactNode }) {
-  const [pendingTask, setPendingTask] = useState<Pick<Task, "id" | "title"> | null>(null);
+export function ApprovalDeliverableProvider({
+  children,
+  branchesByEngagement = {},
+}: {
+  children: ReactNode;
+  branchesByEngagement?: Record<string, PreloadedBranches>;
+}) {
+  const [pendingTask, setPendingTask] = useState<ApprovalTask | null>(null);
   const callbacksRef = useRef<{ onCommit?: () => void; onCancel?: () => void }>({});
   const committedRef = useRef(false);
 
@@ -52,6 +61,11 @@ export function ApprovalDeliverableProvider({ children }: { children: ReactNode 
         open={!!pendingTask}
         onOpenChange={handleOpenChange}
         task={pendingTask}
+        preloaded={
+          pendingTask?.engagement_id
+            ? branchesByEngagement[pendingTask.engagement_id]
+            : undefined
+        }
         onSaved={handleSaved}
       />
     </ApprovalDeliverableContext.Provider>

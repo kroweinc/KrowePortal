@@ -17,7 +17,7 @@ import {
 import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
 import type { Task } from "@/lib/types";
 
-type PendingTask = Pick<Task, "id" | "title" | "engagement_id">;
+type PendingTask = Pick<Task, "id" | "title" | "engagement_id" | "branch_name" | "work_kind">;
 
 type RequestDoneOptions = {
   task: PendingTask;

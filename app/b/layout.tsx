@@ -15,7 +15,7 @@ import { sweepMainPushes } from "@/lib/actions/tasks";
 
 const BUILDER_TABS = [
   { label: "Tasks", href: "/b", icon: "list-checks", tour: "nav-tasks" },
-  { label: "Clients", href: "/b/engagements", icon: "briefcase", tour: "nav-engagements" },
+  { label: "Clients", href: "/b/engagements", icon: "building-2", tour: "nav-engagements" },
   { label: "Repo", href: "/b/github", icon: "git-branch" },
   { label: "Documents", href: "/b/projects", icon: "file-text", tour: "nav-documents" },
   { label: "Profile", href: "/b/profile", icon: "user-round" },
@@ -80,7 +80,7 @@ export default async function BuilderLayout({ children }: { children: React.Reac
       <div className="krowe-main">
         <Nav profile={profile} />
         <DoneDeliverableProvider branchesByEngagement={branchesByEngagement}>
-          <ApprovalDeliverableProvider>
+          <ApprovalDeliverableProvider branchesByEngagement={branchesByEngagement}>
             <TutorialProvider
               autoStart={autoStartTour}
               projectId={tourProjectId}

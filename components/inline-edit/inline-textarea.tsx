@@ -11,6 +11,10 @@ interface InlineTextareaProps {
   readOnly?: boolean;
   className?: string;
   placeholder?: string;
+  /** Controlled editing, so a control outside the field (a section head's "Edit")
+   *  can open it. Omit both to keep the default click-the-text behaviour. */
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
 }
 
 export function InlineTextarea({
@@ -19,8 +23,15 @@ export function InlineTextarea({
   readOnly,
   className,
   placeholder = "Add a description",
+  editing: controlledEditing,
+  onEditingChange,
 }: InlineTextareaProps) {
-  const [editing, setEditing] = useState(false);
+  const [uncontrolledEditing, setUncontrolledEditing] = useState(false);
+  const editing = controlledEditing ?? uncontrolledEditing;
+  const setEditing = (next: boolean) => {
+    setUncontrolledEditing(next);
+    onEditingChange?.(next);
+  };
   const [localValue, setLocalValue] = useState(value);
   const [, startTransition] = useTransition();
   const ref = useRef<HTMLTextAreaElement>(null);

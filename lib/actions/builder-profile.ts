@@ -1,7 +1,7 @@
 "use server";
 
 import { randomBytes } from "crypto";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
@@ -15,6 +15,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { fetchRepoShowcaseStats } from "@/lib/github/profile-stats";
 import { RateLimitError, AuthError } from "@/lib/github/types";
 import { deriveProfileTags } from "@/lib/builder-profile/derive-tags";
+import { SUBMITTER_AVATAR_TAG } from "@/lib/submitter-avatars";
 import {
   CODING_TOOL_CATEGORIES,
   type BuilderProfile,
@@ -1423,6 +1424,11 @@ export async function uploadAvatar(
     await admin.storage.from(AVATARS_BUCKET).remove([previousPath]);
   }
 
+  // The boards cache this photo by profile id for an hour; a new one should
+  // reach the task cards on the next render, not on the next hour. updateTag
+  // rather than revalidateTag — this is a server action, and the builder who
+  // just uploaded should see their own photo immediately.
+  updateTag(SUBMITTER_AVATAR_TAG);
   revalidateProfile(row.token);
   return { success: true };
 }
@@ -1445,6 +1451,7 @@ export async function deleteAvatar(): Promise<{ success?: boolean; error?: strin
   const adminClient = createAdminClient();
   await adminClient.storage.from(AVATARS_BUCKET).remove([row.avatar_storage_path]);
 
+  updateTag(SUBMITTER_AVATAR_TAG);
   revalidateProfile(row.token);
   return { success: true };
 }

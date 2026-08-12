@@ -1237,6 +1237,12 @@ textarea:focus-visible {
   padding: 1px 5px; border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success);
 }
+/* Hand-added branch → neutral tag, so a branch the builder typed never reads as
+   one GitHub confirmed. */
+.krowe-branch-chip-tag.is-local {
+  background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
+  color: var(--muted-foreground);
+}
 /* Selected feature branch → staged (amber) */
 .krowe-branch-chip.active {
   background: var(--warning-soft); color: var(--warning);
@@ -1255,6 +1261,58 @@ textarea:focus-visible {
 .krowe-branch-chip.is-none.active {
   background: var(--foreground); color: var(--background); border-color: var(--foreground);
 }
+/* "Add branch" — dashed, so it reads as an empty slot to fill rather than as a
+   branch that already exists. */
+.krowe-branch-chip.is-add {
+  font-family: var(--font-sans);
+  border-style: dashed;
+}
+/* A local chip pairs with its own remove button — the only way back from a
+   typo, since nothing on GitHub will ever sweep a hand-added branch. Kept as a
+   sibling rather than nested (a button inside a button is invalid), and sized
+   to sit inside the chip row's rhythm. */
+.krowe-branch-chip-pair {
+  display: inline-flex; align-items: center; gap: 2px;
+  min-width: 0; max-width: 100%;
+}
+.krowe-branch-chip-pair .krowe-branch-chip { min-width: 0; }
+.krowe-branch-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: var(--radius-full);
+  border: none; background: transparent; color: var(--faint-foreground);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-chip-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.krowe-branch-chip-remove:disabled { opacity: 0.5; cursor: default; }
+
+/* Inline "name the branch" input. Typing target → 1px focus border, no halo. */
+.krowe-branch-add { display: inline-flex; align-items: center; gap: 6px; }
+.krowe-branch-add-input {
+  font-family: var(--font-mono); font-size: 11.5px;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--foreground);
+  width: 190px; max-width: 100%;
+}
+.krowe-branch-add-input::placeholder { color: var(--faint-foreground); }
+.krowe-branch-add-input:focus { outline: none; border-color: var(--border-focus); }
+.krowe-branch-add-input:disabled { opacity: 0.5; }
+.krowe-branch-add-save {
+  font-family: var(--font-sans); font-size: 11.5px; font-weight: 500;
+  padding: 4px 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--foreground); background: var(--foreground);
+  color: var(--background); cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-add-save:hover:not(:disabled) { opacity: 0.88; }
+.krowe-branch-add-save:active:not(:disabled) { transform: scale(0.97); }
+.krowe-branch-add-save:disabled { opacity: 0.5; cursor: default; }
+
 .krowe-branch-refresh {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: var(--radius-full);
@@ -1266,6 +1324,7 @@ textarea:focus-visible {
 .krowe-branch-refresh:hover:not(:disabled) { color: var(--foreground); border-color: var(--border-strong); }
 .krowe-branch-refresh:disabled { opacity: 0.5; cursor: default; }
 .krowe-branch-chips-hint { font-size: 12px; color: var(--muted-foreground); }
+.krowe-branch-chips-error { font-size: 12px; color: var(--danger); }
 .krowe-branch-chips-purpose { font-family: var(--font-serif); font-style: italic; color: var(--faint-foreground); }
 @keyframes krowe-spin { to { transform: rotate(360deg); } }
 .krowe-spin { animation: krowe-spin 0.7s linear infinite; }
@@ -1422,7 +1481,8 @@ textarea:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .krowe-spin { animation: none; }
-  .krowe-branch-chip:active:not(:disabled) { transform: none; }
+  .krowe-branch-chip:active:not(:disabled),
+  .krowe-branch-add-save:active:not(:disabled) { transform: none; }
 }
 
 /* ── Card — "Signal" (Build Board v2) ──
@@ -6908,13 +6968,18 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-gr-task:hover { box-shadow: var(--shadow-2); }
 .krowe-gr-task.off { background: var(--surface-subtle); box-shadow: none; }
-.krowe-gr-task.off .krowe-gr-title-input, .krowe-gr-task.off .krowe-gr-task-rail { opacity: 0.5; }
+.krowe-gr-task.off .krowe-gr-task-rail { opacity: 0.5; }
+/* An unchecked row is the one you most need to read to decide on it, so the
+   title stays legible — the subtle surface and empty checkbox carry the "off". */
+.krowe-gr-task.off .krowe-gr-title-input { opacity: 0.72; }
 .krowe-gr-task-rail { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; transition: background 160ms var(--ease-out-smooth); }
 .krowe-gr-task.prio-urgent .krowe-gr-task-rail { background: var(--danger); }
 .krowe-gr-task.prio-high   .krowe-gr-task-rail { background: var(--warning); }
 .krowe-gr-task.prio-medium .krowe-gr-task-rail { background: var(--primary-accent); }
 .krowe-gr-task.prio-low    .krowe-gr-task-rail { background: var(--success); }
-.krowe-gr-task-top { display: flex; align-items: center; gap: 11px; }
+/* Top aligned, not centered: the title wraps to two or three lines on a long
+   draft and the check/Details controls stay pinned to its first line. */
+.krowe-gr-task-top { display: flex; align-items: flex-start; gap: 11px; }
 .krowe-gr-check {
   width: 20px; height: 20px; flex-shrink: 0; border: 1.5px solid var(--border-strong);
   border-radius: 6px; background: white; display: inline-flex; align-items: center; justify-content: center;
@@ -6923,21 +6988,40 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-gr-check:hover { border-color: var(--primary); }
 .krowe-gr-check.on { background: var(--primary); border-color: var(--primary); }
+/* A textarea, not an input: its height is driven from scrollHeight by
+   TaskTitleField, so overflow stays hidden and resize is off. */
 .krowe-gr-title-input {
   flex: 1; min-width: 0; border: none; background: none; outline: none;
-  font-family: var(--font-sans); font-size: 14px; font-weight: 600; color: var(--foreground);
+  font-family: var(--font-sans); font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--foreground);
   padding: 3px 5px; margin: -3px -5px; border-radius: 6px;
+  resize: none; overflow: hidden; text-wrap: pretty;
   transition: box-shadow 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth);
 }
 .krowe-gr-title-input:focus { background: var(--surface-subtle); }
+/* Faint = "not editable yet" (drafts still streaming in). An unchecked row is
+   disabled too, but you have to read it to decide on it — .off keeps it dark. */
 .krowe-gr-title-input:disabled { color: var(--faint-foreground); }
+.krowe-gr-task.off .krowe-gr-title-input:disabled { color: var(--foreground); }
 .krowe-gr-details-btn {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
   border: none; background: none; color: var(--muted-foreground);
-  font-size: 11.5px; font-weight: 500; padding: 5px 8px; border-radius: var(--radius-full); cursor: pointer;
+  font-size: 11.5px; font-weight: 500; padding: 5px 8px; margin-top: -3px;
+  border-radius: var(--radius-full); cursor: pointer;
   transition: all 150ms var(--ease-out-smooth);
 }
 .krowe-gr-details-btn:hover { color: var(--foreground); background: var(--surface-subtle); }
+/* Owner / duplicate / confidence pills, on their own row under the title and
+   indented past the checkbox (20px + 11px gap) so they line up with it. However
+   many a draft carries, none of them squeeze the title. */
+.krowe-gr-task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 8px 0 0 31px; }
+/* The draft's description while the row is collapsed — enough to tell what the
+   task is asking for without opening Details. */
+.krowe-gr-task-desc {
+  margin: 7px 0 0 31px; font-size: 12.5px; line-height: 1.5; color: var(--muted-foreground);
+  text-wrap: pretty;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.krowe-gr-task.off .krowe-gr-task-desc { opacity: 0.75; }
 .krowe-gr-task-controls {
   display: flex; align-items: flex-end; gap: 12px; margin-top: 13px;
   padding-left: 31px; padding-top: 12px;
@@ -6947,12 +7031,14 @@ button.krowe-desc-inline-text:hover {
 .krowe-gr-field { display: flex; flex-direction: column; gap: 5px; }
 .krowe-gr-field-cap { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--faint-foreground); padding-left: 3px; }
 .krowe-gr-details { margin: 13px 0 2px 31px; display: flex; flex-direction: column; gap: 11px; animation: fade-up-in 200ms var(--ease-out-smooth) both; }
+/* Height is driven from scrollHeight by TaskDescriptionField (capped, then it
+   scrolls), so the drag handle would only fight it. */
 .krowe-gr-desc {
   width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--surface-subtle); padding: 9px 11px;
   font-family: var(--font-sans); font-size: 12.5px; line-height: 1.5; color: var(--foreground);
-  resize: vertical; outline: none;
-  transition: all 150ms var(--ease-out-smooth);
+  resize: none; outline: none;
+  transition: border-color 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth);
 }
 /* The surface lift stays; the quiet border comes from the global text rule. */
 .krowe-gr-desc:focus { background: white; }

@@ -277,6 +277,25 @@ export const CommitTaskMatchResult = z.object({
 // same way every other draft in this file is. assumptions/followUp are omitted
 // for the ExtractedTaskDraft reason: strict mode forces every key into
 // `required`, so keeping them would make the model emit both on every item.
+// Drop the entries that can't pass the element bounds, then cap — the same
+// posture as ChecklistList, and load-bearing here rather than defensive.
+// Strict mode strips minLength/maxLength from the wire schema (see
+// STRIP_KEYWORDS in strict-schema.ts), so the model can and does emit a junk
+// entry: an observed run put "c4?" in a sha list, another put two migration
+// FILE PATHS there. Validating those in place fails the array, which fails the
+// item, which fails the whole response — four sound proposals thrown away over
+// one bad string. Filtering first is what makes the comment below true.
+const boundedStrings = (min: number, max: number, cap: number) =>
+  z.preprocess(
+    (v) =>
+      Array.isArray(v)
+        ? v
+            .filter((s) => typeof s === "string" && s.length >= min && s.length <= max)
+            .slice(0, cap)
+        : v,
+    z.array(z.string().min(min).max(max)).max(cap)
+  );
+
 export const UntrackedWorkItem = TaskDraft.omit({
   assumptions: true,
   followUp: true,
@@ -285,16 +304,10 @@ export const UntrackedWorkItem = TaskDraft.omit({
   // the CommitTaskMatchResult reason: a hallucinated sha is filtered against the
   // caller's whitelist anyway, and failing safeParse would throw away the real
   // proposals alongside it (lib/tasks/untracked-filter.ts).
-  shas: z.preprocess(
-    (v) => (Array.isArray(v) ? v.slice(0, 20) : v),
-    z.array(z.string().min(7).max(64)).max(20)
-  ).default([]),
+  shas: boundedStrings(7, 64, 20).default([]),
   // The paths that make the case, echoed back on the card so the builder can
   // see what the claim rests on without opening GitHub.
-  files: z.preprocess(
-    (v) => (Array.isArray(v) ? v.slice(0, 10) : v),
-    z.array(z.string().min(1).max(200)).max(10)
-  ).default([]),
+  files: boundedStrings(1, 200, 10).default([]),
   // How sure the model is that this was a real, separate piece of work nobody
   // tracked. "low" never reaches the builder — the filter drops it.
   confidence: z.enum(DRAFT_CONFIDENCE).default("medium"),
@@ -304,8 +317,21 @@ export const UntrackedWorkResult = z.object({
   // Soft-truncate rather than relying on .max() alone (strict mode strips
   // maxItems), same posture as ExtractTasksResult. The filter cuts this to
   // MAX_GAPS_PER_PUSH afterwards; the cap here only stops a runaway response.
+  //
+  // Items are also salvaged one at a time: a proposal that still fails after
+  // boundedStrings (a description under the 20-char floor, say) is dropped on
+  // its own rather than taking its siblings with it. One unusable item in a
+  // response of four is not a reason to report that this push shipped nothing —
+  // and a scanned push is never revisited (gaps_scanned_at), so anything lost
+  // here is lost for good.
   items: z
-    .preprocess((v) => (Array.isArray(v) ? v.slice(0, 6) : v), z.array(UntrackedWorkItem).max(6))
+    .preprocess(
+      (v) =>
+        Array.isArray(v)
+          ? v.slice(0, 6).filter((item) => UntrackedWorkItem.safeParse(item).success)
+          : v,
+      z.array(UntrackedWorkItem).max(6)
+    )
     .default([]),
 });
 

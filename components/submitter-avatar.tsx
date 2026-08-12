@@ -19,6 +19,7 @@ export function SubmitterAvatar({ creator }: { creator: Task["creator"] }) {
         src={src}
         alt={submitterName(creator)}
         referrerPolicy="no-referrer"
+        draggable={false}
         onError={() => setFailed(true)}
       />
     );

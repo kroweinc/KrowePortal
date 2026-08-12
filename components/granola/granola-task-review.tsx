@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AudioLines,
   Check,
@@ -75,6 +75,92 @@ interface ReviewRow extends ExtractedTaskDraft {
   selected: boolean;
   expanded: boolean;
   status: LandingStatus;
+}
+
+// Sizes a textarea to its own content so a review row never hides text behind a
+// fixed height. `max` caps the growth — past it the field scrolls rather than
+// letting one long draft push everything else off screen.
+function useAutoGrow(value: string, max?: number) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // Collapse first so the measured scrollHeight is the content's, not the
+    // previous (taller) box's. Re-runs on resize because the wrap point moves
+    // with the modal's width.
+    const fit = () => {
+      el.style.height = "auto";
+      const overflows = max !== undefined && el.scrollHeight > max;
+      el.style.height = `${overflows ? max : el.scrollHeight}px`;
+      el.style.overflowY = overflows ? "auto" : "hidden";
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [value, max]);
+
+  return ref;
+}
+
+// Extracted titles run long, and a one-line <input> hid the tail of them behind
+// whatever pills the draft happened to carry. A textarea sized to its own
+// content wraps instead, so the whole title is readable while staying editable.
+function TaskTitleField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+}) {
+  const ref = useAutoGrow(value);
+
+  return (
+    <textarea
+      ref={ref}
+      className="krowe-gr-title-input"
+      rows={1}
+      value={value}
+      // A title is one line of text; paste keeps its words, not its newlines.
+      onChange={(e) => onChange(e.target.value.replace(/\s*\n+\s*/g, " "))}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.preventDefault();
+      }}
+      disabled={disabled}
+      aria-label="Task title"
+    />
+  );
+}
+
+// Past ~11 lines a description is long enough that scrolling it beats pushing
+// the rest of the review out of reach.
+const DESC_MAX_HEIGHT = 220;
+
+function TaskDescriptionField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (next: string) => void;
+}) {
+  const ref = useAutoGrow(value, DESC_MAX_HEIGHT);
+
+  return (
+    <textarea
+      ref={ref}
+      className="krowe-gr-desc"
+      rows={2}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      placeholder="Add a description…"
+      aria-label="Task description"
+    />
+  );
 }
 
 // The builder's own work starts checked; action items the call assigned to
@@ -185,6 +271,9 @@ export function GranolaTaskReview({
 
         {rows.map((row, i) => {
           const AreaIcon = row.tags[0] ? TAG_ICON[row.tags[0]] : Circle;
+          const dupe = duplicateMatches[normalizeTitle(row.title)];
+          const hasMeta =
+            !isBuilderOwnedDraft(row.owner) || !!dupe || row.confidence !== "high";
           return (
             <div key={i} className={`krowe-gr-task prio-${row.priority}${row.selected ? "" : " off"}`}>
               <span className="krowe-gr-task-rail" />
@@ -200,37 +289,11 @@ export function GranolaTaskReview({
                 >
                   {row.selected && <Check size={13} strokeWidth={3} />}
                 </button>
-                <input
-                  className="krowe-gr-title-input"
+                <TaskTitleField
                   value={row.title}
-                  onChange={(e) => patchRow(i, { title: e.target.value })}
                   disabled={submitting || streaming || !row.selected}
-                  aria-label="Task title"
+                  onChange={(title) => patchRow(i, { title })}
                 />
-                {!isBuilderOwnedDraft(row.owner) && (
-                  <span
-                    className="krowe-gr-owner"
-                    title={`The call assigned this to ${row.owner} — it starts unchecked and only lands on your board if you include it.`}
-                  >
-                    <User size={11} strokeWidth={2} /> {row.owner}
-                  </span>
-                )}
-                {duplicateMatches[normalizeTitle(row.title)] && (
-                  <span
-                    className="krowe-gr-dupe"
-                    title={`Looks like an existing task: "${duplicateMatches[normalizeTitle(row.title)].title}". Unchecked by default — include it only if it's genuinely new.`}
-                  >
-                    <TriangleAlert size={11} strokeWidth={2} /> Possible duplicate
-                  </span>
-                )}
-                {row.confidence !== "high" && (
-                  <span
-                    className={`krowe-gr-conf${row.confidence === "low" ? " low" : ""}`}
-                    title="The AI wasn't fully sure this was explicitly assigned — double-check it against the call."
-                  >
-                    {row.confidence} confidence
-                  </span>
-                )}
                 <button
                   type="button"
                   className="krowe-gr-details-btn"
@@ -245,6 +308,43 @@ export function GranolaTaskReview({
                   Details{row.checklist.length > 0 ? ` (${row.checklist.length})` : ""}
                 </button>
               </div>
+
+              {/* Qualifiers sit on their own row so however many a draft carries,
+                  none of them steal width from the title. */}
+              {hasMeta && (
+                <div className="krowe-gr-task-meta">
+                  {!isBuilderOwnedDraft(row.owner) && (
+                    <span
+                      className="krowe-gr-owner"
+                      title={`The call assigned this to ${row.owner} — it starts unchecked and only lands on your board if you include it.`}
+                    >
+                      <User size={11} strokeWidth={2} /> {row.owner}
+                    </span>
+                  )}
+                  {dupe && (
+                    <span
+                      className="krowe-gr-dupe"
+                      title={`Looks like an existing task: "${dupe.title}". Unchecked by default — include it only if it's genuinely new.`}
+                    >
+                      <TriangleAlert size={11} strokeWidth={2} /> Possible duplicate
+                    </span>
+                  )}
+                  {row.confidence !== "high" && (
+                    <span
+                      className={`krowe-gr-conf${row.confidence === "low" ? " low" : ""}`}
+                      title="The AI wasn't fully sure this was explicitly assigned — double-check it against the call."
+                    >
+                      {row.confidence} confidence
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Collapsed rows still say what the task is — Details opens it for
+                  editing rather than being the only way to read it. */}
+              {!row.expanded && row.description.trim().length > 0 && (
+                <p className="krowe-gr-task-desc">{row.description}</p>
+              )}
 
               <div className="krowe-gr-task-controls">
                 <label className="krowe-gr-field">
@@ -296,14 +396,10 @@ export function GranolaTaskReview({
 
               {row.expanded && (
                 <div className="krowe-gr-details">
-                  <textarea
-                    className="krowe-gr-desc"
-                    rows={2}
+                  <TaskDescriptionField
                     value={row.description}
-                    onChange={(e) => patchRow(i, { description: e.target.value })}
                     disabled={submitting || streaming || !row.selected}
-                    placeholder="Add a description…"
-                    aria-label="Task description"
+                    onChange={(description) => patchRow(i, { description })}
                   />
                   {row.checklist.length > 0 && (
                     <ul className="krowe-gr-checklist" aria-label="Checklist">

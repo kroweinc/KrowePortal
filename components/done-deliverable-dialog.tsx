@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
+  addLocalBranch,
+  removeLocalBranch,
   getEngagementBranchesCached,
   refreshEngagementBranches,
   type EngagementBranch,
@@ -30,6 +32,7 @@ import {
   ALLOWED_ATTACHMENT_EXTENSIONS,
   ATTACHMENT_ACCEPT,
 } from "@/lib/attachments-constants";
+import { isCodeWork } from "@/lib/utils";
 import type { Task } from "@/lib/types";
 import { CommitPicker, type PickedCommit } from "@/components/done-deliverable-dialog/commit-picker";
 
@@ -45,7 +48,7 @@ function formatBytes(bytes: number) {
 interface DoneDeliverableDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task: Pick<Task, "id" | "title" | "engagement_id"> | null;
+  task: Pick<Task, "id" | "title" | "engagement_id" | "branch_name" | "work_kind"> | null;
   // Server-preloaded branch list for the task's engagement, so the picker paints
   // instantly with no on-open fetch. Falls back to the cached fetch when absent.
   preloaded?: PreloadedBranches;
@@ -82,9 +85,21 @@ export function DoneDeliverableDialog({
   // stomp a branch they already chose.
   const pickedRef = useRef<PickedBranch>({ picked: false, value: null });
 
+  // Non-code work (a question asked, an email sent — migration 0089) has no
+  // branch and no commits, so the whole code-shaped half of this dialog stays
+  // out of the way. Tasks that were never asked read as code.
+  const codeWork = !task || isCodeWork(task);
+  // The effects below key on these primitives, never on `task` itself — a new
+  // task object with the same id (a router refresh while the dialog is open)
+  // must not re-run the reset and wipe a half-written note.
+  const taskId = task?.id ?? null;
+  const taskBranch = task?.branch_name ?? null;
   const branchIsDefault = isDefaultBranch(branch, defaultBranch);
-  const pushedToMain =
-    branchState === "no_repo" ? noRepoPushed : branchIsDefault;
+  const pushedToMain = !codeWork
+    ? false
+    : branchState === "no_repo"
+      ? noRepoPushed
+      : branchIsDefault;
 
   useEffect(() => {
     if (open) {
@@ -92,21 +107,25 @@ export function DoneDeliverableDialog({
       setNote("");
       setPickedCommits([]);
       setShowNoteFallback(false);
-      setBranch(null);
+      // A branch chosen back at approval is a deliberate pick — start from it
+      // instead of snapping to main, which would silently re-file the work.
+      setBranch(taskBranch);
       setDefaultBranch(null);
       setBranches([]);
       setBranchState("idle");
       setNoRepoPushed(false);
       setRefreshing(false);
-      pickedRef.current = { picked: false, value: null };
+      pickedRef.current = taskBranch
+        ? { picked: true, value: taskBranch }
+        : { picked: false, value: null };
     }
-  }, [open]);
+  }, [open, taskId, taskBranch]);
 
   // Load the engagement repo's branches so the deliverable can be filed under
   // the branch it shipped on — the repo default is pre-selected, which counts as
   // "pushed to main". Degrades to a hidden picker when the task has no repo.
   useEffect(() => {
-    if (!open || !task) return;
+    if (!open || !taskId || !codeWork) return;
 
     // Instant paint: when the server preheated this engagement's cached branch
     // list, hydrate straight from it — no fetch, no "Loading branches…" flash.
@@ -114,8 +133,10 @@ export function DoneDeliverableDialog({
     if (snapshot) {
       setBranches(snapshot.branches);
       setDefaultBranch(snapshot.defaultBranch);
-      // Default to "main" so the common case is one click away.
-      setBranch(snapshot.defaultBranch);
+      // Default to "main" so the common case is one click away — but never over
+      // a deliberate pick (named at approval, or clicked since this opened), so
+      // a fresh snapshot arriving mid-dialog can't re-file the work.
+      if (!pickedRef.current.picked) setBranch(snapshot.defaultBranch);
       setBranchState("ready");
     } else {
       setBranchState("loading");
@@ -125,7 +146,7 @@ export function DoneDeliverableDialog({
     // snapshot from whenever the page last rendered, so a branch deleted on
     // GitHub since then would otherwise stay clickable for the life of the tab.
     let cancelled = false;
-    getEngagementBranchesCached(task.id)
+    getEngagementBranchesCached(taskId)
       .then((res) => {
         if (cancelled) return;
         if (!res.hasRepo || res.branches.length === 0) {
@@ -155,7 +176,7 @@ export function DoneDeliverableDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, task, preloaded]);
+  }, [open, taskId, codeWork, preloaded]);
 
   function selectBranch(next: string | null, pushed: boolean) {
     pickedRef.current = { picked: true, value: next };
@@ -164,6 +185,35 @@ export function DoneDeliverableDialog({
     if (!pushed) {
       setPickedCommits([]);
       setShowNoteFallback(false);
+    }
+  }
+
+  // Name a branch GitHub has never seen — the branch a solo builder has been
+  // committing to without ever pushing it. It behaves like any other chip until
+  // the push, at which point the sync folds it into the real branch.
+  async function handleAddBranch(name: string): Promise<string | null> {
+    if (!task) return "No task selected.";
+    try {
+      const res = await addLocalBranch(task.id, name);
+      if ("error" in res) return res.error;
+      setBranches(res.branches);
+      setDefaultBranch(res.defaultBranch);
+      setBranchState("ready");
+      return null;
+    } catch {
+      return "Couldn't add that branch. Try again.";
+    }
+  }
+
+  async function handleRemoveBranch(name: string): Promise<string | null> {
+    if (!task) return "No task selected.";
+    try {
+      const res = await removeLocalBranch(task.id, name);
+      if ("error" in res) return res.error;
+      setBranches(res.branches);
+      return null;
+    } catch {
+      return "Couldn't remove that branch. Try again.";
     }
   }
 
@@ -250,7 +300,10 @@ export function DoneDeliverableDialog({
           <DialogTitle>Mark as done</DialogTitle>
           {task && (
             <DialogDescription>
-              &ldquo;{task.title}&rdquo; &mdash; optionally attach the deliverable or note where it shipped.
+              &ldquo;{task.title}&rdquo; &mdash;{" "}
+              {codeWork
+                ? "optionally attach the deliverable or note where it shipped."
+                : "optionally attach anything that shows it happened, or just say what came of it."}
             </DialogDescription>
           )}
         </DialogHeader>
@@ -322,15 +375,17 @@ export function DoneDeliverableDialog({
 
           {/* Pushed to main */}
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Deliverable</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              {codeWork ? "Deliverable" : "Outcome"}
+            </p>
 
             {/* Branch: one-click chips. The repo default (main) is pre-selected
                 and counts as "pushed to main"; other branches stage for the next
                 push. Falls back to a Shipped/Not-yet toggle when there's no repo. */}
-            {branchState === "loading" && (
+            {codeWork && branchState === "loading" && (
               <p className="text-xs text-neutral-400">Loading branches…</p>
             )}
-            {branchState === "ready" && (
+            {codeWork && branchState === "ready" && (
               <div className="space-y-1">
                 <p className="flex items-center gap-1.5 text-xs text-neutral-600">
                   <GitBranch className="h-3.5 w-3.5" />
@@ -343,11 +398,13 @@ export function DoneDeliverableDialog({
                   onChange={selectBranch}
                   onRefresh={handleRefreshBranches}
                   refreshing={refreshing}
+                  onAddBranch={handleAddBranch}
+                  onRemoveBranch={handleRemoveBranch}
                 />
               </div>
             )}
 
-            {branchState === "no_repo" && (
+            {codeWork && branchState === "no_repo" && (
               <div
                 className="krowe-branch-chips"
                 role="group"
@@ -403,7 +460,11 @@ export function DoneDeliverableDialog({
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="What did you deliver? e.g. PR #123, a Figma link, or a short note"
+                placeholder={
+                  codeWork
+                    ? "What did you deliver? e.g. PR #123, a Figma link, or a short note"
+                    : "What came of it? e.g. Dana confirmed the 25th — invoicing updated"
+                }
                 maxLength={2000}
                 rows={2}
                 className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm text-neutral-700 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 resize-none"

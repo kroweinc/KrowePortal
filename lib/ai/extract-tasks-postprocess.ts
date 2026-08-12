@@ -249,8 +249,12 @@ export interface ReconstructContext {
 }
 
 /** Curly quotes and whitespace runs are the only variance a "verbatim" model
-    quote realistically has against the source document. */
-function normalizeForMatch(text: string): string {
+    quote realistically has against the source document.
+    Exported because the meeting page anchors the same quotes into the same
+    transcript (lib/granola/transcript-view.ts) — a second, subtly different
+    copy would make the highlight disagree with the quote the task was
+    extracted against. */
+export function normalizeForMatch(text: string): string {
   return text
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")

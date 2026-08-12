@@ -8,6 +8,7 @@ import { assetUrl } from "@/lib/asset-url";
 import {
   ListChecks,
   Briefcase,
+  Building2,
   GitBranch,
   FileText,
   UserRound,
@@ -27,6 +28,7 @@ const COLLAPSE_KEY = "krowe:sidebar-collapsed";
 const ICONS: Record<string, LucideIcon> = {
   "list-checks": ListChecks,
   briefcase: Briefcase,
+  "building-2": Building2,
   "git-branch": GitBranch,
   "file-text": FileText,
   "user-round": UserRound,

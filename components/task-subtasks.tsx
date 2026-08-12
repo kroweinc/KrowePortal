@@ -237,49 +237,60 @@ export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) 
 
   return (
     <>
-      <div className="krowe-subs-h">
-        <div className="krowe-subs-progress">
-          <ProgressRing done={done} total={subtasks.length} />
-          <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.09em] text-neutral-500">
-              <ListTodo className="h-3 w-3" />
-              Sub-tasks
-            </p>
-            <p className="krowe-subs-meta">
-              <strong>{done}</strong> of {subtasks.length} complete
-            </p>
-          </div>
-        </div>
-        <div className="krowe-subs-actions">
-          <button
-            type="button"
-            className="krowe-mini-btn ai"
-            onClick={handleGenerate}
-            disabled={generating || isPending}
-            title="Generate sub-tasks with AI from this task and its repo"
-          >
-            {generating ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Sparkles className="h-3 w-3" />
-            )}
-            {generating ? "Generating…" : "Generate"}
-          </button>
-          <button
-            type="button"
-            className="krowe-mini-btn"
-            onClick={() => setAdding(true)}
-            disabled={isPending || generating}
-          >
-            <Plus className="h-3 w-3" /> Add
-          </button>
-        </div>
+      {/* The sheet's standard section head — label, rule, then the actions. It
+          lives here rather than in the sheet so there is exactly one of it. */}
+      <div className="krowe-task-section-h">
+        <span className="label">
+          <ListTodo className="h-3 w-3" />
+          Sub-tasks
+        </span>
+        <span className="rule" />
+        <button
+          type="button"
+          className="krowe-task-mini accent"
+          onClick={handleGenerate}
+          disabled={generating || isPending}
+          title="Generate sub-tasks with AI from this task and its repo"
+        >
+          {generating ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : (
+            <Sparkles className="h-3 w-3" />
+          )}
+          {generating ? "Generating…" : "Generate"}
+        </button>
+        <button
+          type="button"
+          className="krowe-task-mini"
+          onClick={() => setAdding(true)}
+          disabled={isPending || generating}
+        >
+          <Plus className="h-3 w-3" /> Add
+        </button>
       </div>
+
+      {subtasks.length > 0 && (
+        <div className="krowe-subs-h">
+          <span className="krowe-subs-n">
+            {done}/{subtasks.length}
+          </span>
+          <span
+            className="krowe-subs-bar"
+            role="progressbar"
+            aria-valuenow={done}
+            aria-valuemin={0}
+            aria-valuemax={subtasks.length}
+            aria-label="Sub-tasks complete"
+          >
+            <i style={{ width: `${(done / subtasks.length) * 100}%` }} />
+          </span>
+        </div>
+      )}
 
       <ul className="krowe-sub-list">
         {subtasks.length === 0 && !adding && (
-          <li className="px-3 py-2 text-xs italic text-neutral-400">
-            No sub-tasks yet
+          <li className="krowe-task-empty-soft">
+            No sub-tasks yet — break this down when you start.
           </li>
         )}
 
@@ -392,53 +403,8 @@ export function TaskSubtasks({ taskId, initial = [], task }: TaskSubtasksProps) 
   );
 }
 
-function ProgressRing({
-  done,
-  total,
-  size = 32,
-}: {
-  done: number;
-  total: number;
-  size?: number;
-}) {
-  const r = size / 2 - 3;
-  const C = 2 * Math.PI * r;
-  const pct = total === 0 ? 0 : done / total;
-  const offset = C * (1 - pct);
-  return (
-    <div className="krowe-progress-ring" style={{ width: size, height: size }}>
-      <svg width={size} height={size}>
-        <circle
-          className="track"
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          strokeWidth={3}
-        />
-        <circle
-          className="fill"
-          cx={size / 2}
-          cy={size / 2}
-          r={r}
-          fill="none"
-          strokeWidth={3}
-          strokeLinecap="round"
-          strokeDasharray={C}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div className="pct">{Math.round(pct * 100)}</div>
-    </div>
-  );
-}
-
 function EstimateChip({ subtask }: { subtask: Subtask }) {
   const chip = formatEstimate(subtask.ai_est_low_min, subtask.ai_est_high_min);
   if (!chip) return null;
-  return (
-    <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[11px] font-medium text-neutral-500">
-      {chip}
-    </span>
-  );
+  return <span className="krowe-chip krowe-chip-tag shrink-0">{chip}</span>;
 }

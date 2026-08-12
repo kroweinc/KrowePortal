@@ -17,7 +17,13 @@ import { getDefaultBranchTip } from "@/lib/github/recent-commits";
 import { parseMergedBranch, mergeSubject } from "@/lib/github/merge-subject";
 import { isUniqueViolation } from "@/lib/supabase/errors";
 import { findSimilarTitles } from "@/lib/tasks/dedupe";
-import { TASK_TAGS, type TaskStatus, type TaskTag } from "@/lib/types";
+import {
+  TASK_TAGS,
+  WORK_KINDS,
+  type TaskStatus,
+  type TaskTag,
+  type WorkKind,
+} from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -421,6 +427,11 @@ export async function markTaskDone(
     // confirmMatchedTaskDone, which has the default-branch commit in hand. Two
     // tasks confirmed against the same commit then share one release.
     ship?: ShipRef | null;
+    // Whether to email the operator that the work was delivered. Defaults on;
+    // the auto-apply path (commit-task-matches) turns it off because a task the
+    // scan marked done on its own is still awaiting the builder's word, and an
+    // email can't be unsent when they reject it. Their Keep releases it.
+    notify?: boolean;
   }
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
@@ -543,7 +554,9 @@ export async function markTaskDone(
 
     // Email the operator that the task was delivered — only on an actual
     // transition into done, so re-marking an already-done task doesn't re-notify.
-    if (before && before.status !== "done") {
+    // The audit rows above still write when notify is off: the trail should
+    // record the auto-move, it's only the outward-facing mail that waits.
+    if (before && before.status !== "done" && payload.notify !== false) {
       await notifyTaskEvent({
         taskId,
         actor: profile,
@@ -961,11 +974,23 @@ export async function sweepMainPushes(): Promise<void> {
 const markForApprovalSchema = z.object({
   taskId: z.string().uuid(),
   note: z.string().trim().max(2000).nullish(),
+  // What kind of work this was (migration 0089). Only "code" carries a branch;
+  // the other kinds are the ones that used to be squeezed through a
+  // deliverable-shaped dialog they had no deliverable for.
+  workKind: z.enum(WORK_KINDS).optional(),
+  // Omitted (undefined) leaves whatever the task already had — only the code
+  // chip, with a real repo behind it, sends a value. Explicit null is "no
+  // branch" and does clear it.
+  branchName: z.string().trim().max(255).nullish(),
 });
 
 export async function markTaskForApproval(
   taskId: string,
-  payload: { note: string | null }
+  payload: {
+    note: string | null;
+    workKind?: WorkKind;
+    branchName?: string | null;
+  }
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -985,6 +1010,16 @@ export async function markTaskForApproval(
   if (parsed.data.note) {
     updates.completion_note = parsed.data.note;
   }
+  if (parsed.data.workKind) {
+    updates.work_kind = parsed.data.workKind;
+    // A task that isn't code can't be on a branch. Clearing here matters on a
+    // re-submit: a task first sent as code and corrected to "email" would
+    // otherwise keep the branch it was filed under.
+    if (parsed.data.workKind !== "code") updates.branch_name = null;
+  }
+  if (parsed.data.branchName !== undefined && parsed.data.workKind === "code") {
+    updates.branch_name = parsed.data.branchName || null;
+  }
 
   const supabase = await getClient(profile.id);
 
@@ -996,7 +1031,13 @@ export async function markTaskForApproval(
     taskId,
     actorId: profile.id,
     action: "task.sent_for_approval",
-    metadata: parsed.data.note ? { note: parsed.data.note } : null,
+    metadata:
+      parsed.data.note || parsed.data.workKind
+        ? {
+            ...(parsed.data.note ? { note: parsed.data.note } : {}),
+            ...(parsed.data.workKind ? { work_kind: parsed.data.workKind } : {}),
+          }
+        : null,
   });
 
   // Email the operator that a task is ready for their review — deferred so the

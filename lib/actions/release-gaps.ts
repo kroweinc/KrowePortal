@@ -12,9 +12,9 @@ import { getPushContents } from "@/lib/github/push-contents";
 import { findUntrackedWork } from "@/lib/ai/find-untracked-work";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { writeAuditEntries } from "@/lib/actions/audit-log";
-import { isEngagementMember } from "@/lib/actions/task-access";
+import { isEngagementMemberEmbed } from "@/lib/actions/task-access";
 import type { TitleCandidate } from "@/lib/tasks/dedupe";
-import type { ReleaseGapCommit } from "@/lib/types";
+import type { Profile, ReleaseGapCommit, Task } from "@/lib/types";
 
 /**
  * The safeguard for work that shipped with no task behind it.
@@ -294,35 +294,47 @@ type FullGapRow = {
   tags: string[] | null;
   evidence: unknown;
   releases: { shipped_at: string; branch_name: string | null } | null;
+  engagements: unknown;
 };
 
-/** Load the gap plus the push it belongs to, and confirm the caller may act on
- *  it. Builder-only: a gap is a builder's own bookkeeping, never an operator's. */
+/**
+ * Load the gap plus the push it belongs to and the caller's identity, and
+ * confirm they may act on it. Builder-only: a gap is a builder's own
+ * bookkeeping, never an operator's.
+ *
+ * Three reads collapsed to one round trip's worth of wall clock, because all of
+ * this sits on a click. Who is asking doesn't change which row to read, so the
+ * identity lookup runs alongside it rather than in front of it; and the
+ * engagement the membership check needs is embedded in the same select instead
+ * of fetched afterwards.
+ */
 async function loadWritableGap(
-  gapId: string,
-  profileId: string,
-  role: string
-): Promise<{ gap: FullGapRow } | { error: string }> {
-  if (role !== "builder") return { error: "Only the builder can resolve these." };
-
+  gapId: string
+): Promise<{ gap: FullGapRow; profile: Profile } | { error: string }> {
   const admin = createAdminClient();
-  const { data } = await admin
-    .from("release_gaps")
-    .select(
-      "id, release_id, engagement_id, repo_full_name, title, description, priority, type, tags, evidence, releases(shipped_at, branch_name)"
-    )
-    .eq("id", gapId)
-    .eq("state", "pending")
-    .maybeSingle();
+  const [profile, { data }] = await Promise.all([
+    getCurrentProfile(),
+    admin
+      .from("release_gaps")
+      .select(
+        "id, release_id, engagement_id, repo_full_name, title, description, priority, type, tags, evidence, releases(shipped_at, branch_name), engagements(builder_id, operator_id)"
+      )
+      .eq("id", gapId)
+      .eq("state", "pending")
+      .maybeSingle(),
+  ]);
+
+  if (!profile) redirect("/login");
+  if (profile.role !== "builder") return { error: "Only the builder can resolve these." };
 
   if (!data) return { error: "That suggestion is no longer available." };
   const gap = data as unknown as FullGapRow;
 
   if (!gap.engagement_id) return { error: "That suggestion is no longer available." };
-  if (!(await isEngagementMember(gap.engagement_id, profileId)))
+  if (!isEngagementMemberEmbed(gap.engagements, profile.id))
     return { error: "You don't have access to this client." };
 
-  return { gap };
+  return { gap, profile };
 }
 
 function evidenceCommits(value: unknown): ReleaseGapCommit[] {
@@ -348,16 +360,13 @@ function evidenceCommits(value: unknown): ReleaseGapCommit[] {
 export async function acceptReleaseGap(
   gapId: string,
   edits?: { title?: string; description?: string }
-): Promise<{ taskId: string } | { error: string }> {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
-
+): Promise<{ task: Task } | { error: string }> {
   const parsed = acceptSchema.safeParse({ gapId, ...edits });
   if (!parsed.success) return { error: "Invalid input" };
 
-  const access = await loadWritableGap(parsed.data.gapId, profile.id, profile.role);
+  const access = await loadWritableGap(parsed.data.gapId);
   if ("error" in access) return access;
-  const { gap } = access;
+  const { gap, profile } = access;
 
   const admin = createAdminClient();
   const shippedAt = gap.releases?.shipped_at ?? new Date().toISOString();
@@ -386,11 +395,20 @@ export async function acceptReleaseGap(
       branch_name: gap.releases?.branch_name ?? null,
       updated_at: now,
     })
-    .select("id")
+    // The whole row, not just the id: the card the builder is looking at paints
+    // this task in place the moment it exists, rather than waiting on the
+    // revalidated board to bring it back. `creator` is stitched on because the
+    // insert can't embed it and the meta line would otherwise read "Unknown"
+    // until the board reloads — it is this profile by construction.
+    .select("*")
     .single();
 
   if (error || !task) return { error: error?.message ?? "Couldn't create that task." };
-  const taskId = task.id as string;
+  const created: Task = {
+    ...(task as Task),
+    creator: { display_name: profile.display_name, role: profile.role },
+  };
+  const taskId = created.id;
 
   const commits = evidenceCommits(gap.evidence);
   // Written straight rather than through linkTaskCommit, which is a server
@@ -485,7 +503,7 @@ export async function acceptReleaseGap(
   revalidatePath("/b");
   revalidatePath("/b/staging");
   revalidatePath("/o/changelog");
-  return { taskId };
+  return { task: created };
 }
 
 /**
@@ -495,13 +513,11 @@ export async function acceptReleaseGap(
 export async function dismissReleaseGap(
   gapId: string
 ): Promise<{ success: true } | { error: string }> {
-  const profile = await getCurrentProfile();
-  if (!profile) redirect("/login");
-
   if (!z.string().uuid().safeParse(gapId).success) return { error: "Invalid suggestion" };
 
-  const access = await loadWritableGap(gapId, profile.id, profile.role);
+  const access = await loadWritableGap(gapId);
   if ("error" in access) return access;
+  const { profile } = access;
 
   const admin = createAdminClient();
   const { error } = await admin

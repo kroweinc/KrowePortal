@@ -7,6 +7,7 @@ import { TaskAttachments } from "@/components/task-attachments";
 import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import Link from "next/link";
 import type { Task, TaskAttachment } from "@/lib/types";
+import { withPreviewUrls } from "@/lib/attachments-preview";
 import { formatHoursRange } from "@/lib/format-estimate";
 import { STATUS_LABELS, submitterName } from "@/lib/utils";
 
@@ -41,7 +42,7 @@ export default async function BuilderTaskDetail({
 
   if (!data) notFound();
   const task = data as Task;
-  const attachments = (attachmentRows ?? []) as TaskAttachment[];
+  const attachments = await withPreviewUrls((attachmentRows ?? []) as TaskAttachment[]);
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-10 space-y-6">

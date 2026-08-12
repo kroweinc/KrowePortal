@@ -1,12 +1,15 @@
-import type { Task, StagingGroup, Release, ReleaseGap } from "@/lib/types";
+import { WORK_KINDS, type Task, type StagingGroup, type Release, type ReleaseGap, type WorkKind } from "@/lib/types";
+import { WORK_KIND_LABELS, isCodeWork } from "@/lib/utils";
 
 // A rendered bucket on the staging board. Branch mode carries a branch name
-// (for the purpose lookup), staging mode carries a group id (for rename/delete).
+// (for the purpose lookup), staging mode carries a group id (for rename/delete),
+// and the Actions section carries a work kind (for its icon and label).
 export type TaskBucket = {
   key: string;
   label: string;
   branch: string | null;
   groupId: string | null;
+  workKind: WorkKind | null;
   tasks: Task[];
 };
 
@@ -87,6 +90,7 @@ export function groupTasksByBranch(
     label: k === NO_BUCKET ? "No branch" : k,
     branch: k === NO_BUCKET ? null : k,
     groupId: null,
+    workKind: null,
     tasks,
   }));
   buckets.sort((a, b) => {
@@ -330,6 +334,7 @@ export function groupTasksByStagingGroup(
     label: g.name,
     branch: null,
     groupId: g.id,
+    workKind: null,
     tasks: list.filter((t) => t.staging_group_id === g.id),
   }));
   const ungrouped = list.filter((t) => !t.staging_group_id);
@@ -339,8 +344,62 @@ export function groupTasksByStagingGroup(
       label: "No group",
       branch: null,
       groupId: null,
+      workKind: null,
       tasks: ungrouped,
     });
   }
   return buckets;
+}
+
+/**
+ * Split done work into the half the branch grouping is about and the half it
+ * isn't (migration 0089).
+ *
+ * Sending an email or asking the client a question is finished work with no
+ * branch, no commit and nothing to push — but it still came out of the same
+ * done pipeline, so it landed in the branch view's "No branch" bucket and sat
+ * in "Next push" forever, queued behind a push that was never coming. The kind
+ * the builder chose at approval decides this, not the presence of a branch:
+ * "No branch" still means a code task whose branch nobody recorded.
+ */
+export function splitCodeWork(list: Task[]): { code: Task[]; actions: Task[] } {
+  const code: Task[] = [];
+  const actions: Task[] = [];
+  for (const t of list) (isCodeWork(t) ? code : actions).push(t);
+  return { code, actions };
+}
+
+/**
+ * What the staging board is *about*: finished code sitting on a branch that
+ * hasn't reached main yet.
+ *
+ * Non-code work is lifted out first — it answers to neither a branch nor a
+ * push — and anything already pushed belongs on the Shipped timeline, not in a
+ * queue. Both group-by modes read the queue through this one function, so the
+ * Branch tab and the Staging tab can't drift on what "waiting" means.
+ */
+export function queuedCodeWork(list: Task[]): Task[] {
+  return splitCodeWork(list).code.filter((t) => !t.pushed_to_main);
+}
+
+/**
+ * Bucket non-code work by its kind, in the fixed WORK_KINDS order so the
+ * section doesn't reshuffle as tasks land. Incoming (completed-desc) order is
+ * preserved within a bucket, and empty kinds are dropped — unlike a branch,
+ * a kind with nothing in it is not a thing waiting to be filled.
+ *
+ * Pass only what `splitCodeWork` returned as `actions`; a code task here would
+ * silently vanish, since "code" gets no bucket.
+ */
+export function groupTasksByWorkKind(list: Task[]): TaskBucket[] {
+  return WORK_KINDS.filter((kind) => kind !== "code")
+    .map((kind) => ({
+      key: `kind:${kind}`,
+      label: WORK_KIND_LABELS[kind],
+      branch: null,
+      groupId: null,
+      workKind: kind,
+      tasks: list.filter((t) => t.work_kind === kind),
+    }))
+    .filter((b) => b.tasks.length > 0);
 }

@@ -2,35 +2,28 @@
 
 import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { cn } from "@/lib/utils";
-
-const VARIANT_CLASSES: Record<string, string> = {
-  low: "bg-green-50 text-green-700",
-  medium: "bg-amber-50 text-amber-700",
-  high: "bg-red-50 text-red-700",
-  inbox: "bg-blue-50 text-blue-700",
-  in_progress: "bg-amber-50 text-amber-700",
-  blocked: "bg-red-50 text-red-700",
-  done: "bg-green-50 text-green-700",
-  // Task type override (feature/bug/change) mirrors the .krowe-chip-type colors.
-  feature: "bg-green-50 text-green-700",
-  bug: "bg-red-50 text-red-700",
-  change: "bg-blue-50 text-blue-700",
-  secondary: "bg-neutral-100 text-neutral-700",
-};
 
 export interface SelectOption {
   value: string;
   label: string;
 }
 
+/** How the picker presents itself in a property row.
+ *  - `bare` — the select is the value: borderless until the row is hovered.
+ *  - `chip` — `face` is the value (a real chip, icon and all) and the select
+ *    sits transparently over it, so editing costs the row no extra furniture. */
+type InlineSelectVariant = "bare" | "chip";
+
 interface InlineSelectProps {
   value: string;
   options: SelectOption[];
   onSave: (value: string) => Promise<void>;
   readOnly?: boolean;
+  /** Accessible name — the property row's key isn't tied to the control. */
   label?: string;
-  className?: string;
+  variant?: InlineSelectVariant;
+  /** The visible value for `chip`; also what a read-only viewer sees. */
+  face?: React.ReactNode;
 }
 
 export function InlineSelect({
@@ -39,7 +32,8 @@ export function InlineSelect({
   onSave,
   readOnly,
   label,
-  className,
+  variant = "bare",
+  face,
 }: InlineSelectProps) {
   const [localValue, setLocalValue] = useState(value);
   const [, startTransition] = useTransition();
@@ -59,48 +53,33 @@ export function InlineSelect({
     });
   }
 
-  const colorClass = VARIANT_CLASSES[localValue] ?? "bg-neutral-100 text-neutral-700";
   const currentLabel = options.find((o) => o.value === localValue)?.label ?? localValue;
 
-  const badgeBase =
-    "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium";
+  if (readOnly) return <>{variant === "chip" ? face : currentLabel}</>;
 
-  if (readOnly) {
+  const select = (
+    <select
+      className={variant === "bare" ? "krowe-prop-sel" : undefined}
+      value={localValue}
+      onChange={handleChange}
+      aria-label={label}
+    >
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  );
+
+  if (variant === "chip") {
     return (
-      <span className="flex items-center gap-1">
-        {label && <span>{label}:</span>}
-        <span className={cn(badgeBase, colorClass, className)}>{currentLabel}</span>
+      <span className="krowe-prop-pick">
+        {face}
+        {select}
       </span>
     );
   }
 
-  return (
-    <span className="flex items-center gap-1">
-      {label && <span>{label}:</span>}
-      {/* Outer span sizes to the invisible label; select fills it absolutely */}
-      <span className={cn("relative inline-flex", colorClass, "rounded-full", className)}>
-        <span
-          aria-hidden
-          className="invisible select-none px-2.5 py-0.5 text-xs font-medium whitespace-nowrap"
-        >
-          {currentLabel}
-        </span>
-        <select
-          value={localValue}
-          onChange={handleChange}
-          className={cn(
-            "absolute inset-0 w-full h-full rounded-full",
-            colorClass,
-            "appearance-none cursor-pointer border-0 bg-transparent focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:ring-offset-1 hover:opacity-80 transition-opacity text-xs font-medium text-center"
-          )}
-        >
-          {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </span>
-    </span>
-  );
+  return select;
 }

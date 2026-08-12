@@ -53,10 +53,12 @@ export default async function BuilderDashboard({
   // change_requests embeds the newest operator send-back per task so cards and
   // the detail sheet can surface "changes requested" without extra fetches —
   // see getActiveChangeRequest for when it counts as still actionable.
+  // granola_import is the call a task was drafted from (0088), embedded so the
+  // sheet's "From meeting" link can name it without a second read.
   const { data } = await supabase
     .from("tasks")
     .select(
-      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), staging_group:staging_groups(name), change_requests:task_audit_log(metadata, created_at, actor:profiles!actor_id(display_name))"
+      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), staging_group:staging_groups(name), granola_import:granola_imports(id, granola_note_title, granola_created_at), change_requests:task_audit_log(metadata, created_at, actor:profiles!actor_id(display_name))"
     )
     .or(filter)
     .eq("change_requests.action", "task.changes_requested")
@@ -70,14 +72,17 @@ export default async function BuilderDashboard({
 
   // Preload the cached repo branches + staging groups per engagement so the
   // task detail sheet's deliverable chips paint with no fetch. commitMatches
-  // carries the "a commit on main looks like it finished this" suggestions —
-  // scoped to still-open tasks, so a done card can never render one.
+  // carries the "a commit on main looks like it finished this" suggestions.
+  // Every task id goes in, not just the open ones: a match the scan applied on
+  // its own has already moved its task to done, and that card is exactly the one
+  // that still needs the builder's word. getPendingCommitMatches is what keeps a
+  // done task from picking up an ordinary suggestion.
   // boardSort rides along here so the header's Sort dropdown paints the user's
   // saved choice on the first frame — it's their account's, not this browser's.
   const [branchesByEngagement, stagingGroupsByEngagement, commitMatches, boardSort] = await Promise.all([
     getBranchesByEngagement(engagementList),
     getStagingGroupsByEngagement(engagementIds),
-    getPendingCommitMatches(tasks.filter((t) => t.status !== "done").map((t) => t.id)),
+    getPendingCommitMatches(tasks.map((t) => ({ id: t.id, status: t.status }))),
     getBoardSort(),
   ]);
   const firstEngagement = engagementList[0];

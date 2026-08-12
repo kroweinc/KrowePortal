@@ -35,43 +35,6 @@ export default async function StagingPage() {
     ? `engagement_id.in.(${engagementIds.join(",")}),${personalFilter}`
     : personalFilter;
 
-  const { data } = await supabase
-    .from("tasks")
-    .select(
-      "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), staging_group:staging_groups(name)"
-    )
-    .eq("status", "done")
-    .or(filter)
-    .order("completed_at", { ascending: false, nullsFirst: false });
-
-  const rows = (data ?? []) as Task[];
-  const avatars = await getSubmitterAvatarMap(rows.map((t) => t.created_by));
-  const tasks = attachCreatorAvatars(rows, avatars);
-
-  // Staging groups for the builder's engagements, plus the cached repo branch
-  // lists — both preloaded so the detail sheet paints with no fetch.
-  const { data: groupRows } =
-    engagementIds.length > 0
-      ? await supabase
-          .from("staging_groups")
-          .select("id, engagement_id, name, sort_order, created_at")
-          .in("engagement_id", engagementIds)
-          .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: true })
-      : { data: [] };
-  const stagingGroups = (groupRows ?? []) as StagingGroup[];
-  // The pushes those done tasks went live in — drives the Shipped timeline.
-  const releases = await getReleasesByEngagement(engagementIds);
-  // Work those pushes shipped with no task behind it. Scoped to releases the
-  // read above already authorized, which is what lets it use the admin client.
-  const gapsByRelease = await getPendingReleaseGaps(releases.map((r) => r.id));
-  // Unlike the other boards, this page *renders* a bucket per live branch — a
-  // branch deleted on GitHub would show up as an empty group. So freshen before
-  // reading rather than in `after()`: the check is two queries when the cache is
-  // current, and one GitHub request when it isn't.
-  await warmEngagementBranches();
-  const branchesByEngagement = await getBranchesByEngagement(engagementList);
-
   // Branch "purpose" one-liners for the group subtitles — read-only from the
   // cache for every repo linked to an engagement (no AI generation on load).
   const repoNames = Array.from(
@@ -81,7 +44,62 @@ export default async function StagingPage() {
         .filter((n): n is string => Boolean(n))
     )
   );
-  const purposeMaps = await Promise.all(repoNames.map((r) => getCachedBranchPurposes(r)));
+
+  // Five independent reads, run together. Nothing below needs anything else
+  // below it — only the two chains kept inside their own branch do (tasks feed
+  // the avatar lookup, releases feed the gap lookup, and the branch cache has to
+  // be warm before it is read). Awaited one after another this page paid the sum
+  // of nine round trips, one of them a GitHub sync; it now pays the longest
+  // chain. That is the whole cost of accepting a "Not tracked" card too, since
+  // the accept revalidates this route.
+  const [tasks, stagingGroups, shipped, branchesByEngagement, purposeMaps] = await Promise.all([
+    (async () => {
+      const { data } = await supabase
+        .from("tasks")
+        .select(
+          "*, task_attachments(id, is_deliverable, file_name), creator:profiles!created_by(display_name, role), staging_group:staging_groups(name), granola_import:granola_imports(id, granola_note_title, granola_created_at)"
+        )
+        .eq("status", "done")
+        .or(filter)
+        .order("completed_at", { ascending: false, nullsFirst: false });
+
+      const rows = (data ?? []) as Task[];
+      const avatars = await getSubmitterAvatarMap(rows.map((t) => t.created_by));
+      return attachCreatorAvatars(rows, avatars);
+    })(),
+    // Staging groups for the builder's engagements, preloaded so the detail
+    // sheet paints with no fetch.
+    (async () => {
+      if (engagementIds.length === 0) return [] as StagingGroup[];
+      const { data } = await supabase
+        .from("staging_groups")
+        .select("id, engagement_id, name, sort_order, created_at")
+        .in("engagement_id", engagementIds)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      return (data ?? []) as StagingGroup[];
+    })(),
+    // The pushes those done tasks went live in — drives the Shipped timeline —
+    // and the work those pushes shipped with no task behind it. The gaps are
+    // scoped to releases the read above already authorized, which is what lets
+    // them use the admin client.
+    (async () => {
+      const releases = await getReleasesByEngagement(engagementIds);
+      const gapsByRelease = await getPendingReleaseGaps(releases.map((r) => r.id));
+      return { releases, gapsByRelease };
+    })(),
+    // Unlike the other boards, this page *renders* a bucket per live branch — a
+    // branch deleted on GitHub would show up as an empty group. So freshen
+    // before reading rather than in `after()`: the check is two queries when the
+    // cache is current, and one GitHub request when it isn't.
+    (async () => {
+      await warmEngagementBranches();
+      return getBranchesByEngagement(engagementList);
+    })(),
+    Promise.all(repoNames.map((r) => getCachedBranchPurposes(r))),
+  ]);
+
+  const { releases, gapsByRelease } = shipped;
   const purposes: Record<string, string> = Object.assign({}, ...purposeMaps);
 
   return (
