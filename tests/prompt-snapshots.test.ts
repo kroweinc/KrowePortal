@@ -10,6 +10,18 @@ import {
   buildRefineQuoteSectionSystemPrompt,
 } from "@/lib/ai/refine-prompts";
 import { buildPrdPrompts } from "@/lib/ai/prd-prompts";
+import { FALLBACK_AREA_VOCABULARY, type AreaVocabulary } from "@/lib/types";
+
+// A stand-in for one repo's derived areas (repo_areas, migration 0092). Fixed
+// here rather than read from a repo so the snapshots stay deterministic.
+const REPO_AREAS: AreaVocabulary = {
+  source: "repo",
+  values: [
+    { slug: "checkout", label: "Checkout", gloss: "cart, payment, order confirmation" },
+    { slug: "reporting", label: "Reporting", gloss: "dashboards, exports, scheduled emails" },
+    { slug: "accounts", label: "Accounts", gloss: "sign-up, sign-in, roles, team members" },
+  ],
+};
 
 // Snapshots of the rendered system prompts. These make every prompt edit show up
 // as a legible diff in review, and fail loudly when a prompt changes as a side
@@ -18,8 +30,18 @@ import { buildPrdPrompts } from "@/lib/ai/prd-prompts";
 // Update deliberately with `npx vitest -u` once the diff is what you intended.
 
 test("classify task system prompt is unchanged", async () => {
-  await expect(buildClassifyTaskSystemPrompt()).toMatchFileSnapshot(
+  await expect(buildClassifyTaskSystemPrompt(FALLBACK_AREA_VOCABULARY)).toMatchFileSnapshot(
     "./__snapshots__/classify-task-system.md"
+  );
+});
+
+// The same prompt under a repo's own areas. Snapshotted separately because the
+// area list and its framing sentence are the whole point of the vocabulary
+// change — this is the diff that shows a classifier being told to file work
+// under "checkout" rather than "ui".
+test("classify task system prompt is unchanged for repo areas", async () => {
+  await expect(buildClassifyTaskSystemPrompt(REPO_AREAS)).toMatchFileSnapshot(
+    "./__snapshots__/classify-task-system-repo-areas.md"
   );
 });
 
@@ -29,29 +51,62 @@ test("estimate task system prompt is unchanged", async () => {
   );
 });
 
-// A pure function of nothing, so it is also the assertion that it STAYS one:
-// every per-push value belongs in the user prompt, or the static prefix
-// prompt_cache_key: "untracked-work-v1" is caching stops being static.
+// A pure function of the area vocabulary and nothing else, so it is also the
+// assertion that it STAYS one: every per-PUSH value belongs in the user prompt,
+// or the prefix prompt_cache_key: "untracked-work-v2-*" caches stops being
+// static. The key is keyed by vocabulary source for exactly this reason.
 test("untracked work system prompt is unchanged", async () => {
-  await expect(buildUntrackedWorkSystemPrompt()).toMatchFileSnapshot(
+  await expect(buildUntrackedWorkSystemPrompt(FALLBACK_AREA_VOCABULARY)).toMatchFileSnapshot(
     "./__snapshots__/untracked-work-system.md"
   );
 });
 
-// Both identity branches, because the builder-identity line is the ONLY per-call
-// text in this prompt — everything above it must stay a byte-identical static
-// prefix for prompt_cache_key to be worth anything. A diff that shows per-builder
-// text moving ABOVE that last line is the regression to catch.
+// Both identity branches, because the builder-identity line and the area block
+// are the ONLY per-call text in this prompt — everything above them must stay a
+// byte-identical static prefix for prompt_cache_key to be worth anything. A diff
+// that shows per-builder or per-repo text moving ABOVE those trailing blocks is
+// the regression to catch.
 test("extract tasks system prompt is unchanged", async () => {
-  await expect(buildExtractTasksSystemPrompt("Steven Ortega")).toMatchFileSnapshot(
-    "./__snapshots__/extract-tasks-system.md"
-  );
+  await expect(
+    buildExtractTasksSystemPrompt("Steven Ortega", FALLBACK_AREA_VOCABULARY)
+  ).toMatchFileSnapshot("./__snapshots__/extract-tasks-system.md");
 });
 
 test("extract tasks system prompt is unchanged without a builder name", async () => {
-  await expect(buildExtractTasksSystemPrompt(null)).toMatchFileSnapshot(
-    "./__snapshots__/extract-tasks-system-no-builder.md"
-  );
+  await expect(
+    buildExtractTasksSystemPrompt(null, FALLBACK_AREA_VOCABULARY)
+  ).toMatchFileSnapshot("./__snapshots__/extract-tasks-system-no-builder.md");
+});
+
+test("extract tasks system prompt is unchanged for repo areas", async () => {
+  await expect(
+    buildExtractTasksSystemPrompt("Steven Ortega", REPO_AREAS)
+  ).toMatchFileSnapshot("./__snapshots__/extract-tasks-system-repo-areas.md");
+});
+
+// The cache-prefix guarantee, asserted directly rather than left to a human
+// reading two snapshots side by side: the extraction instructions are re-sent on
+// every call under prompt_cache_key "granola-task-extraction-v3", so the part
+// before the per-call blocks must be identical no matter whose repo or whose
+// name is in play. Splicing a vocabulary into the base would silently drop the
+// cache hit to nothing, and nothing else in the suite would notice.
+test("extract tasks prompts share a byte-identical cacheable prefix", () => {
+  const a = buildExtractTasksSystemPrompt("Steven Ortega", FALLBACK_AREA_VOCABULARY);
+  const b = buildExtractTasksSystemPrompt(null, REPO_AREAS);
+
+  // The base is everything before the first appended block. Both prompts append
+  // the identity line first, so that marker is the boundary.
+  const MARKER = "\n\nBuilder identity:";
+  const base = a.slice(0, a.indexOf(MARKER));
+
+  expect(base.length).toBeGreaterThan(2000);
+  expect(base).toContain("You extract action items from one client call");
+  // Byte-identical across a different builder AND a different vocabulary — this
+  // is the assertion the cache key depends on.
+  expect(b.slice(0, b.indexOf(MARKER))).toBe(base);
+  // …and the base carries none of the per-call text.
+  expect(base).not.toContain("Steven Ortega");
+  expect(base).not.toContain("checkout");
 });
 
 // The refine prompts carry the rules that make a terse one-liner ("add stripe")

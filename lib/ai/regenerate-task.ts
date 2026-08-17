@@ -1,12 +1,13 @@
 import { openai, runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
-import { RegenerateTaskResult } from "./schemas";
+import { regenerateTaskResult, type RegenerateTaskResult } from "./schemas";
 import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import {
   buildTaskRegenerateSystemPrompt,
   buildTaskRegenerateUserPrompt,
 } from "./prompts";
 import type { RepoContext } from "@/lib/github/types";
+import { FALLBACK_AREA_VOCABULARY, type AreaVocabulary } from "@/lib/types";
 import { runWithTools, type RepoToolContext } from "@/lib/github/ai-tools";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type OpenAI from "openai";
@@ -29,6 +30,9 @@ export interface RegenerateTaskInput {
   changeNote: string;
   repoContext: RepoContext | null;
   toolContext?: RepoToolContext;
+  /** The label set the revised task's area is picked from — the engagement's
+      repo areas, or the generic fallback. */
+  areas?: AreaVocabulary;
 }
 
 // The revised task + up to ~30 reconciled subtask titles + a re-authored
@@ -86,10 +90,12 @@ export async function runTaskRegeneration(
   meta?: AiCallMeta
 ): Promise<RegenerateTaskResult> {
   const { repoContext, toolContext } = input;
+  const areas = input.areas ?? FALLBACK_AREA_VOCABULARY;
+  const schema = regenerateTaskResult(areas.values.map((a) => a.slug));
   const responseFormat: ResponseFormat = toolContext
     ? { type: "json_object" }
-    : jsonResponseFormat(RegenerateTaskResult, "task_regeneration");
-  const systemPrompt = buildTaskRegenerateSystemPrompt(repoContext);
+    : jsonResponseFormat(schema, "task_regeneration");
+  const systemPrompt = buildTaskRegenerateSystemPrompt(repoContext, areas);
   const userPrompt = buildTaskRegenerateUserPrompt({
     current: input.current,
     subtasks: input.subtasks,
@@ -107,8 +113,8 @@ export async function runTaskRegeneration(
     } catch {
       return null;
     }
-    const result = RegenerateTaskResult.safeParse(stripNullsDeep(parsed));
-    return result.success ? result.data : null;
+    const result = schema.safeParse(stripNullsDeep(parsed));
+    return result.success ? (result.data as RegenerateTaskResult) : null;
   };
 
   const call = () => callOnce(systemPrompt, userPrompt, responseFormat, toolContext, meta);

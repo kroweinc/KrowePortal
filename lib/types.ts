@@ -41,10 +41,16 @@ export type TaskType = (typeof TASK_TYPES)[number];
 export const WORK_KINDS = ["code", "question", "email", "other"] as const;
 export type WorkKind = (typeof WORK_KINDS)[number];
 
-// Fixed taxonomy of area labels the AI classifier may assign. A task gets
-// exactly ONE of these (stored as a single-element tasks.tags array) — the
-// closed list keeps labels consistent and prevents one-off free-form tags like
-// "pdf-forms" or "export". Edit this list to change the allowed set.
+// The FALLBACK taxonomy of area labels. A task gets exactly ONE area (stored as
+// a single-element tasks.tags array), but the allowed set is no longer fixed:
+// a repo with derived areas (repo_areas, migration 0092) supplies its own
+// product areas — "checkout", "reporting" — and this generic list is what the
+// classifiers fall back to when no repo is connected or the derivation failed.
+// See resolveAreaVocabulary in lib/tasks/area-vocabulary.ts.
+//
+// Whichever vocabulary is in play, it stays a CLOSED list: that's what prevents
+// one-off free-form tags like "pdf-forms" sitting next to "export". Edit this
+// list to change the fallback set.
 export const TASK_TAGS = [
   "ui",
   "backend",
@@ -59,6 +65,63 @@ export const TASK_TAGS = [
   "ai",
 ] as const;
 export type TaskTag = (typeof TASK_TAGS)[number];
+
+// One-line gloss per fallback label, used only to steer the classifier. Typed as
+// a Record<TaskTag, …> so adding a tag to TASK_TAGS is a compile error until its
+// gloss is written — prompt text and the enum the schema decodes against cannot
+// drift. Lives beside the taxonomy rather than in lib/ai/prompts.ts so the
+// vocabulary resolver can build the fallback without importing prompt code.
+export const TASK_TAG_DESCRIPTIONS: Record<TaskTag, string> = {
+  ui: "user-facing interface — components, layout, styling, on-screen copy",
+  backend: "server-side logic, business rules, server actions, background jobs",
+  api: "API endpoints, request/response handling, third-party API integration",
+  database: "schema, migrations, queries, data modeling, storage",
+  auth: "login, signup, sessions, permissions, access control",
+  infra: "deployment, CI/CD, env config, hosting, build tooling",
+  design: "visual design, UX, design system, branding (vs. implementation)",
+  performance: "speed, caching, query/render optimization, reducing load time",
+  docs: "documentation, README, code comments, guides",
+  growth: "marketing, SEO, analytics, onboarding, referrals, conversion",
+  ai: "LLM / model features — prompts, classification, content generation",
+};
+
+// A task's area label as STORED. Deliberately a bare string, not TaskTag: the
+// value is a slug from whichever vocabulary was resolved when the task was
+// classified, so a repo area ("checkout") and a fallback tag ("ui") are both
+// valid and both render as the same chip. Anything reading tasks.tags should use
+// this; TaskTag now only types the fallback list itself.
+export type TaskArea = string;
+
+// The shape every area slug holds, whichever vocabulary produced it: lowercase
+// kebab, no leading/trailing hyphen, ≤24 chars. Enforced on writes instead of
+// membership in a specific list — a board legitimately holds tasks classified
+// under a vocabulary that has since been refreshed, and rejecting those on edit
+// would make a task uneditable because its repo grew a new area.
+export const AREA_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const AREA_SLUG_MAX = 24;
+
+// One allowed area, with the gloss that steers the classifier toward it.
+export type AreaDefinition = { slug: TaskArea; label: string; gloss: string };
+
+// The label set one classification runs against. "repo" = areas derived from the
+// engagement's repo (repo_areas, migration 0092); "fallback" = TASK_TAGS. The
+// source is carried so the UI can say which vocabulary a chip came from and so
+// callers can tell "this repo has no areas yet" from "this repo has these areas".
+export type AreaVocabulary = {
+  source: "repo" | "fallback";
+  values: AreaDefinition[];
+};
+
+// The fallback vocabulary as an AreaVocabulary — one definition, reused by the
+// resolver and by any caller that needs a vocabulary without touching the DB.
+export const FALLBACK_AREA_VOCABULARY: AreaVocabulary = {
+  source: "fallback",
+  values: TASK_TAGS.map((slug) => ({
+    slug,
+    label: slug,
+    gloss: TASK_TAG_DESCRIPTIONS[slug],
+  })),
+};
 
 export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
 // First-time product-tour lifecycle (separate from the onboarding form wizard).
@@ -301,7 +364,7 @@ export interface ReleaseGap {
   description: string;
   priority: TaskPriority;
   type: TaskType;
-  tags: TaskTag[];
+  tags: TaskArea[];
   confidence: "high" | "medium" | "low";
   evidence: ReleaseGapCommit[];
   files: string[];

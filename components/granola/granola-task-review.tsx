@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AudioLines,
   Check,
@@ -29,12 +29,17 @@ import {
 } from "lucide-react";
 import { isBuilderOwnedDraft, type ExtractedTaskDraft } from "@/lib/ai/schemas";
 import type { ApprovedTaskDraft } from "@/lib/actions/granola-import";
-import { TASK_TAGS, type TaskStatus, type TaskTag } from "@/lib/types";
+import type { AreaDefinition, TaskStatus, TaskTag } from "@/lib/types";
 import { normalizeTitle } from "@/lib/tasks/dedupe";
 import { GrSelect } from "@/components/granola/gr-select";
 import { reconcileDraftRows } from "@/components/granola/review-reconcile";
 
-const TAG_ICON: Record<TaskTag, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
+type AreaIconComponent = React.ComponentType<{ size?: number; strokeWidth?: number }>;
+
+// Icons for the FALLBACK taxonomy only. A repo-derived area ("checkout") has no
+// icon to map to and gets the neutral Circle below — inventing an icon per slug
+// would be guessing, and a wrong glyph reads louder than no glyph.
+const TAG_ICON: Record<TaskTag, AreaIconComponent> = {
   ui: LayoutGrid,
   backend: Server,
   api: Plug,
@@ -59,10 +64,20 @@ const TYPE_OPTS = [
   { value: "bug", label: "Bug" },
   { value: "change", label: "Change" },
 ];
-const TAG_OPTS = [
-  { value: "", label: "No tag" },
-  ...TASK_TAGS.map((t) => ({ value: t, label: t })),
-];
+/** The Area select's options for a given vocabulary. "No tag" stays first: a
+    draft the call gave no area for is a real outcome, not a missing value. */
+function areaOptions(areas: AreaDefinition[]) {
+  return [{ value: "", label: "No tag" }, ...areas.map((a) => ({ value: a.slug, label: a.label }))];
+}
+
+/** The icon for one stored area. Repo areas fall through to Circle.
+ *  Uses hasOwn, not a bare index: a derived slug like "constructor" or
+ *  "toString" would otherwise resolve up the prototype chain to a truthy
+ *  non-component, slip past the `|| Circle` fallback, and white-screen the whole
+ *  review dialog with "Objects are not valid as a React child". */
+function areaIcon(slug: string | undefined): AreaIconComponent {
+  return slug && Object.hasOwn(TAG_ICON, slug) ? TAG_ICON[slug as TaskTag] : Circle;
+}
 // Creating straight into Done would skip the approval gate, so it's not offered.
 type LandingStatus = Exclude<TaskStatus, "done">;
 const STATUS_OPTS: { value: LandingStatus; label: string }[] = [
@@ -172,6 +187,7 @@ function toRow(d: ExtractedTaskDraft): ReviewRow {
 
 export function GranolaTaskReview({
   drafts,
+  areas,
   duplicateMatches = {},
   submitting,
   streaming = false,
@@ -180,6 +196,10 @@ export function GranolaTaskReview({
   onCancel,
 }: {
   drafts: ExtractedTaskDraft[];
+  /** The vocabulary the drafts were classified against, so the Area select
+      offers exactly the labels the model was allowed to pick. Empty falls the
+      select back to whatever each row already carries. */
+  areas: AreaDefinition[];
   /** Normalized draft title → an existing OPEN task it likely duplicates. Drives
       the "Possible duplicate" badge and a one-time default-uncheck. */
   duplicateMatches?: Record<string, { id: string; title: string }>;
@@ -193,6 +213,7 @@ export function GranolaTaskReview({
   onCancel: () => void;
 }) {
   const [rows, setRows] = useState<ReviewRow[]>(drafts.map(toRow));
+  const tagOpts = useMemo(() => areaOptions(areas), [areas]);
   const [prevStreaming, setPrevStreaming] = useState(streaming);
   // Titles already auto-unchecked, so re-checking a flagged row sticks instead
   // of being undone the next time matches resolve.
@@ -270,7 +291,7 @@ export function GranolaTaskReview({
         </div>
 
         {rows.map((row, i) => {
-          const AreaIcon = row.tags[0] ? TAG_ICON[row.tags[0]] : Circle;
+          const AreaIcon = areaIcon(row.tags[0]);
           const dupe = duplicateMatches[normalizeTitle(row.title)];
           const hasMeta =
             !isBuilderOwnedDraft(row.owner) || !!dupe || row.confidence !== "high";
@@ -374,8 +395,8 @@ export function GranolaTaskReview({
                   <span className="krowe-gr-field-cap">Area</span>
                   <GrSelect
                     value={row.tags[0] ?? ""}
-                    onChange={(v) => patchRow(i, { tags: v ? [v as TaskTag] : [] })}
-                    options={TAG_OPTS}
+                    onChange={(v) => patchRow(i, { tags: v ? [v] : [] })}
+                    options={tagOpts}
                     leading={<AreaIcon size={13} strokeWidth={2} />}
                     disabled={submitting || streaming || !row.selected}
                     ariaLabel="Area"

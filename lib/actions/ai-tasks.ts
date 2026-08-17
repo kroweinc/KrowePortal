@@ -9,6 +9,7 @@ import { runTaskRegeneration } from "@/lib/ai/regenerate-task";
 import { friendlyAiError } from "@/lib/ai/client";
 import { assertAiBudget } from "@/lib/ai/usage";
 import { resolveRepoForGeneration } from "@/lib/github/resolve-repo";
+import { resolveAreaVocabulary } from "@/lib/tasks/area-vocabulary";
 import { isTaskMember } from "@/lib/actions/task-access";
 import {
   reconcileSubtaskPlan,
@@ -17,7 +18,7 @@ import {
   type SubtaskReconciliation,
 } from "@/lib/tasks/reconcile-subtask-plan";
 import type { TaskOnlyResult } from "@/lib/ai/schemas";
-import type { TaskTag } from "@/lib/types";
+import type { TaskArea } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -53,13 +54,22 @@ export async function generateTaskDraft(input: {
   const budget = await assertAiBudget(profile.id);
   if (!budget.ok) return { error: budget.error };
 
-  const { repoContext, toolContext, source } = await resolveRepoForGeneration({
-    profileId: profile.id,
-    engagementId: parsed.data.engagementId,
-    logPrefix: "[generateTaskDraft]",
-  });
+  // Independent reads — the vocabulary is two indexed queries and resolving the
+  // repo costs several plus a token decrypt, so they run concurrently.
+  const [{ repoContext, toolContext, source }, areas] = await Promise.all([
+    resolveRepoForGeneration({
+      profileId: profile.id,
+      engagementId: parsed.data.engagementId,
+      logPrefix: "[generateTaskDraft]",
+    }),
+    resolveAreaVocabulary({ profileId: profile.id, engagementId: parsed.data.engagementId }),
+  ]);
 
-  console.log("[generateTaskDraft] mode:", toolContext ? `tool-loop (${source})` : "one-shot");
+  console.log(
+    "[generateTaskDraft] mode:",
+    toolContext ? `tool-loop (${source})` : "one-shot",
+    `areas=${areas.source}`
+  );
 
   try {
     const result = await generateTask({
@@ -67,6 +77,7 @@ export async function generateTaskDraft(input: {
       repoContext,
       toolContext,
       clarifications: parsed.data.clarifications,
+      areas,
     }, { userId: profile.id, operation: "generate_tasks" });
     return result;
   } catch (err) {
@@ -84,7 +95,7 @@ export interface TaskRegenerationProposal {
     description: string;
     priority: "low" | "medium" | "high" | "urgent";
     type: "feature" | "bug" | "change";
-    tags: TaskTag[];
+    tags: TaskArea[];
     assumptions: string[];
   };
   reconciliation: SubtaskReconciliation;
@@ -143,12 +154,19 @@ export async function regenerateTask(
   const hadSubtasks = current.length > 0;
   const engagementId = (task.engagement_id as string | null) ?? null;
 
-  const { repoContext, toolContext, source } = await resolveRepoForGeneration({
-    profileId: profile.id,
-    engagementId: engagementId ?? undefined,
-    logPrefix: "[regenerateTask]",
-  });
-  console.log("[regenerateTask] mode:", toolContext ? `tool-loop (${source})` : "one-shot");
+  const [{ repoContext, toolContext, source }, areas] = await Promise.all([
+    resolveRepoForGeneration({
+      profileId: profile.id,
+      engagementId: engagementId ?? undefined,
+      logPrefix: "[regenerateTask]",
+    }),
+    resolveAreaVocabulary({ profileId: profile.id, engagementId }),
+  ]);
+  console.log(
+    "[regenerateTask] mode:",
+    toolContext ? `tool-loop (${source})` : "one-shot",
+    `areas=${areas.source}`
+  );
 
   let result;
   try {
@@ -169,6 +187,7 @@ export async function regenerateTask(
         changeNote: parsed.data.changeNote,
         repoContext,
         toolContext,
+        areas,
       },
       { userId: profile.id, operation: "regenerate_task", engagementId }
     );

@@ -1,9 +1,11 @@
+import type { z } from "zod";
 import { openai, runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
-import { TaskOnlyResult } from "./schemas";
+import { taskOnlyResult, type TaskOnlyResult } from "./schemas";
 import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import { buildTaskSystemPrompt, buildTaskUserPrompt } from "./prompts";
 import type { RepoContext } from "@/lib/github/types";
+import { FALLBACK_AREA_VOCABULARY, type AreaVocabulary } from "@/lib/types";
 import { runWithTools, type RepoToolContext } from "@/lib/github/ai-tools";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type OpenAI from "openai";
@@ -19,6 +21,9 @@ interface GenerateInput {
   // Q&A from prior "strengthen" rounds, woven into the user prompt so the
   // regenerated draft reflects the user's answers.
   clarifications?: { question: string; answer: string }[];
+  /** The label set the draft's area is picked from — the engagement's repo
+      areas, or the generic fallback. */
+  areas?: AreaVocabulary;
 }
 
 async function callOpenAIOneShot(
@@ -99,12 +104,16 @@ async function repairTaskDraft(
   systemPrompt: string,
   userPrompt: string,
   invalid: string,
+  // The SAME schema the failed attempt was aimed at — repairing against a
+  // different vocabulary would "fix" the shape by rewriting a valid repo area
+  // into a fallback tag.
+  schema: z.ZodType,
   meta?: AiCallMeta
 ): Promise<string> {
   const response = await runChat({
     model: AI_MODEL,
     max_completion_tokens: 1500,
-    response_format: jsonResponseFormat(TaskOnlyResult, "task_draft"),
+    response_format: jsonResponseFormat(schema, "task_draft"),
     reasoning_effort: "none",
     prompt_cache_key: "task-draft-repair-v1",
     messages: [
@@ -124,12 +133,14 @@ async function repairTaskDraft(
 
 export async function generateTask(input: GenerateInput, meta?: AiCallMeta): Promise<TaskOnlyResult> {
   const { rawDescription, repoContext, toolContext, clarifications } = input;
+  const areas = input.areas ?? FALLBACK_AREA_VOCABULARY;
+  const schema = taskOnlyResult(areas.values.map((a) => a.slug));
   // Strict json_schema on the one-shot path; the tool loop can't carry
   // json_schema, so it stays lenient json_object and relies on safeParse.
   const responseFormat: ResponseFormat = toolContext
     ? { type: "json_object" }
-    : jsonResponseFormat(TaskOnlyResult, "task_draft");
-  const systemPrompt = buildTaskSystemPrompt(repoContext);
+    : jsonResponseFormat(schema, "task_draft");
+  const systemPrompt = buildTaskSystemPrompt(repoContext, areas);
   const userPrompt = buildTaskUserPrompt(rawDescription, clarifications);
 
   const callOnce = () => callOpenAI(systemPrompt, userPrompt, 1500, responseFormat, toolContext, meta);
@@ -144,8 +155,8 @@ export async function generateTask(input: GenerateInput, meta?: AiCallMeta): Pro
     } catch {
       return null;
     }
-    const result = TaskOnlyResult.safeParse(stripNullsDeep(parsed));
-    return result.success ? result.data : null;
+    const result = schema.safeParse(stripNullsDeep(parsed));
+    return result.success ? (result.data as TaskOnlyResult) : null;
   };
 
   // The lenient tool-loop path occasionally drifts outside the schema on the
@@ -157,7 +168,7 @@ export async function generateTask(input: GenerateInput, meta?: AiCallMeta): Pro
   let result = tryParse(raw);
   if (!result && toolContext) {
     console.warn("[generateTask] draft missed the schema — repairing shape in one call");
-    result = tryParse(await repairTaskDraft(systemPrompt, userPrompt, raw, meta));
+    result = tryParse(await repairTaskDraft(systemPrompt, userPrompt, raw, schema, meta));
   }
   if (result) return result;
 

@@ -132,6 +132,22 @@
      and by the collapsed rail. */
   --sidebar-width: 260px;
 
+  /* Spacing — the scale DESIGN.md specifies. Documented there since the start but
+     never implemented here, so every rule below this point set gaps and padding
+     in raw px. Defined now rather than adding another literal; existing rules are
+     left alone deliberately (a mechanical sweep of ~7900 lines of CSS is its own
+     change, with its own diff to review). New rules use these. */
+  --space-xs:   2px;
+  --space-sm:   4px;
+  --space-md:   8px;
+  --space-lg:   12px;
+  --space-xl:   16px;
+  --space-2xl:  24px;
+  --space-3xl:  32px;
+  --space-4xl:  48px;
+  --space-5xl:  64px;
+  --space-6xl:  96px;
+
   /* Radius */
   --radius-sm:   6px;
   --radius-md:   10px;
@@ -7903,6 +7919,44 @@ button.krowe-mtg-task-link {
 
 .krowe-repo-empty {
   padding: 18px 16px; font-size: 12.5px; color: var(--muted-foreground);
+}
+
+/* ── Areas: the label vocabulary this repo's tasks are filed under ── */
+.krowe-areas-card {
+  display: flex; flex-direction: column; gap: var(--space-md);
+  padding: var(--space-lg) var(--space-xl);
+}
+.krowe-areas-head {
+  display: flex; align-items: flex-start; gap: var(--space-md);
+  justify-content: space-between; flex-wrap: wrap;
+}
+.krowe-areas-lede {
+  margin: 0; max-width: 62ch;
+  font-size: 12.5px; line-height: 1.5; color: var(--muted-foreground);
+}
+.krowe-areas-refresh { flex-shrink: 0; }
+.krowe-areas-foot {
+  display: flex; justify-content: flex-start;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+.krowe-areas-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: var(--space-md);
+}
+/* Slug column is fixed so the glosses line up and the list reads as a legend
+   rather than a ragged paragraph; it collapses on narrow screens below. */
+.krowe-areas-item {
+  display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: var(--space-md);
+  align-items: baseline;
+}
+.krowe-areas-item .krowe-chip-tag { justify-self: start; }
+.krowe-areas-gloss {
+  font-size: 12.5px; line-height: 1.5; color: var(--foreground);
+}
+
+@media (max-width: 720px) {
+  .krowe-areas-item { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
 }
 
 @media (max-width: 1080px) {

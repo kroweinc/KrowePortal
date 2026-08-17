@@ -25,7 +25,7 @@ Rules:
   - "feature": a capability that does not exist yet
   - "bug": behavior that is broken, wrong, or erroring today
   - "change": a tweak to something that already works — copy, styling, config, scope. Default here when it is neither clearly new nor clearly broken.
-8. Set tags to exactly ONE area label:
+8. Set tags to exactly ONE area label — the area the work primarily touches — or an empty array when none of them fits:
   - "ui": user-facing interface — components, layout, styling, on-screen copy
   - "backend": server-side logic, business rules, server actions, background jobs
   - "api": API endpoints, request/response handling, third-party API integration

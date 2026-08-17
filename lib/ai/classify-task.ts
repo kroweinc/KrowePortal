@@ -1,26 +1,33 @@
 import { runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
-import { TaskClassifyResult } from "./schemas";
+import { taskClassifyResult, type TaskClassifyResult } from "./schemas";
 import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import {
   buildClassifyTaskSystemPrompt,
   buildClassifyTaskUserPrompt,
 } from "./prompts";
+import { FALLBACK_AREA_VOCABULARY, type AreaVocabulary } from "@/lib/types";
 
 interface ClassifyInput {
   title: string;
   description: string | null;
+  /** The label set to classify against — the engagement's repo areas, or the
+      generic fallback. Defaults to the fallback so a caller with no engagement
+      scope still classifies. */
+  areas?: AreaVocabulary;
 }
 
 export async function classifyTask(input: ClassifyInput, meta?: AiCallMeta): Promise<TaskClassifyResult> {
-  const systemPrompt = buildClassifyTaskSystemPrompt();
+  const areas = input.areas ?? FALLBACK_AREA_VOCABULARY;
+  const schema = taskClassifyResult(areas.values.map((a) => a.slug));
+  const systemPrompt = buildClassifyTaskSystemPrompt(areas);
   const userPrompt = buildClassifyTaskUserPrompt(input);
 
   const callOnce = async (): Promise<string> => {
     const response = await runChat({
       model: AI_MODEL,
       max_completion_tokens: 400,
-      response_format: jsonResponseFormat(TaskClassifyResult, "task_classification"),
+      response_format: jsonResponseFormat(schema, "task_classification"),
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -39,8 +46,8 @@ export async function classifyTask(input: ClassifyInput, meta?: AiCallMeta): Pro
     } catch {
       return null;
     }
-    const result = TaskClassifyResult.safeParse(stripNullsDeep(parsed));
-    return result.success ? result.data : null;
+    const result = schema.safeParse(stripNullsDeep(parsed));
+    return result.success ? (result.data as TaskClassifyResult) : null;
   };
 
   // A truncated or malformed classification self-corrects on a resample; retry

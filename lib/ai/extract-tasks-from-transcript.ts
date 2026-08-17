@@ -3,7 +3,14 @@ import "server-only";
 import type OpenAI from "openai";
 import { runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
-import { ExtractTasksResult, ExtractedTaskDraft, ModelExtractTasksResult } from "./schemas";
+import {
+  ExtractedTaskDraft,
+  extractedTaskDraft,
+  extractTasksResult,
+  modelExtractTasksResult,
+  type ExtractTasksResult,
+} from "./schemas";
+import { FALLBACK_AREA_VOCABULARY, type AreaVocabulary } from "@/lib/types";
 import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import {
   postProcessExtraction,
@@ -26,6 +33,23 @@ export type { ExtractTasksInput };
 // descriptions + checklists (no sourceText — reconstructed server-side) is
 // ~14k — 16k leaves headroom for both.
 const MAX_TOKENS = 16_000;
+
+/** The allowed area slugs for one extraction, as the schema factories want them.
+ *  Falls back to the generic taxonomy so an input built before the vocabulary
+ *  seam existed still decodes. */
+function areaSlugs(input: ExtractTasksInput): string[] {
+  return (input.areas ?? FALLBACK_AREA_VOCABULARY).values.map((a) => a.slug);
+}
+
+/** A short, stable id for one vocabulary — enough to separate cache lanes
+ *  without putting a repo's whole area list in a request field. Same slug list
+ *  in the same order always yields the same tag. */
+function areaCacheTag(input: ExtractTasksInput): string {
+  const joined = areaSlugs(input).join(",");
+  let hash = 0;
+  for (let i = 0; i < joined.length; i++) hash = (Math.imul(31, hash) + joined.charCodeAt(i)) | 0;
+  return (hash >>> 0).toString(36);
+}
 
 /**
  * The exact request params for a task extraction — shared by the blocking call
@@ -57,11 +81,28 @@ export function buildExtractionParams(input: ExtractTasksInput) {
     // every extraction, so a stable key raises the cache-hit rate on that prefix —
     // cutting TTFT with zero quality change (caching never alters output). Shared by
     // the blocking and streaming paths since both build params here. Bumped to v2
-    // when the instruction block was rewritten.
-    prompt_cache_key: "granola-task-extraction-v2",
-    response_format: jsonResponseFormat(ModelExtractTasksResult, "granola_task_extraction"),
+    // when the instruction block was rewritten, and to v3 when the area
+    // vocabulary moved out of the base into an appended per-repo block.
+    //
+    // Suffixed with the vocabulary's identity, because the strict json_schema in
+    // response_format carries this repo's tags enum and sits AHEAD of the system
+    // message in the cached prefix. One shared key across repos would route
+    // requests with differing prefixes into the same cache lane and miss every
+    // time; a per-vocabulary key gives each repo its own lane, which is where
+    // the reuse actually is — a builder importing several calls for one client.
+    prompt_cache_key: `granola-task-extraction-v3-${areaCacheTag(input)}`,
+    response_format: jsonResponseFormat(
+      modelExtractTasksResult(areaSlugs(input)),
+      "granola_task_extraction"
+    ),
     messages: [
-      { role: "system", content: buildExtractTasksSystemPrompt(input.builderName ?? null) },
+      {
+        role: "system",
+        content: buildExtractTasksSystemPrompt(
+          input.builderName ?? null,
+          input.areas ?? FALLBACK_AREA_VOCABULARY
+        ),
+      },
       { role: "user", content: buildExtractTasksUserPrompt(input) },
     ],
   } satisfies OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
@@ -70,8 +111,8 @@ export function buildExtractionParams(input: ExtractTasksInput) {
 /** Strict validation of a complete model response. Returns ALL owners' tasks —
     assignee filtering happens after extraction (filterDraftsByOwner /
     isBuilderOwnedDraft), never during parsing. */
-export function parseExtractionResult(content: string): ExtractTasksResult {
-  const parsed = ExtractTasksResult.safeParse(stripNullsDeep(JSON.parse(content)));
+export function parseExtractionResult(content: string, slugs: string[]): ExtractTasksResult {
+  const parsed = extractTasksResult(slugs).safeParse(stripNullsDeep(JSON.parse(content)));
   if (!parsed.success) {
     throw new Error(`Task extraction returned malformed JSON: ${parsed.error.message}`);
   }
@@ -81,13 +122,17 @@ export function parseExtractionResult(content: string): ExtractTasksResult {
 /** Safer fallback parser: salvage every individually valid item from a
     response whose envelope failed strict validation, instead of dropping the
     whole batch. Throws only when nothing at all is recoverable. */
-export function parseExtractionResultLenient(content: string): ExtractTasksResult {
+export function parseExtractionResultLenient(
+  content: string,
+  slugs: string[]
+): ExtractTasksResult {
   const raw = stripNullsDeep(JSON.parse(content)) as { items?: unknown };
   if (!Array.isArray(raw?.items)) throw new Error("Task extraction response has no items array.");
+  const draft = extractedTaskDraft(slugs);
   const items: ExtractedTaskDraft[] = [];
   for (const candidate of raw.items.slice(0, 40)) {
-    const parsed = ExtractedTaskDraft.safeParse(candidate);
-    if (parsed.success) items.push(parsed.data);
+    const parsed = draft.safeParse(candidate);
+    if (parsed.success) items.push(parsed.data as ExtractedTaskDraft);
   }
   if (items.length === 0) throw new Error("Task extraction returned no valid items.");
   return { items };
@@ -117,12 +162,16 @@ export function finalizeExtraction(
   input: ExtractTasksInput,
   meta?: AiCallMeta
 ): ExtractTasksResult {
+  // Parse against the SAME vocabulary the request constrained the model to —
+  // parsing a repo-area response against the fallback taxonomy would reject
+  // every draft as an invalid enum value and salvage nothing.
+  const slugs = areaSlugs(input);
   let parsed: ExtractTasksResult;
   try {
-    parsed = parseExtractionResult(content);
+    parsed = parseExtractionResult(content, slugs);
   } catch (strictError) {
     // Malformed output is salvaged, not silently dropped.
-    parsed = parseExtractionResultLenient(content);
+    parsed = parseExtractionResultLenient(content, slugs);
     console.warn(
       `[extract-tasks] strict parse failed, salvaged ${parsed.items.length} items leniently:`,
       strictError instanceof Error ? strictError.message : strictError

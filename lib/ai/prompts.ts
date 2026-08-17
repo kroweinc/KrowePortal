@@ -1,9 +1,8 @@
 import type { RepoContext } from "@/lib/github/types";
 import {
   TASK_PRIORITIES,
-  TASK_TAGS,
   TASK_TYPES,
-  type TaskTag,
+  type AreaVocabulary,
   type TaskType,
 } from "@/lib/types";
 import { DRAFT_CONFIDENCE, type DraftConfidence } from "@/lib/ai/schemas";
@@ -17,23 +16,7 @@ import type {
 // retyped so the prompt can't promise a cap the filter doesn't enforce.
 import { MAX_GAPS_PER_PUSH } from "@/lib/tasks/untracked-filter";
 
-// One-line gloss per area label, used only to steer the classifier. Typed as a
-// Record<TaskTag, …> so adding a tag to TASK_TAGS forces a description here.
-const TASK_TAG_DESCRIPTIONS: Record<TaskTag, string> = {
-  ui: "user-facing interface — components, layout, styling, on-screen copy",
-  backend: "server-side logic, business rules, server actions, background jobs",
-  api: "API endpoints, request/response handling, third-party API integration",
-  database: "schema, migrations, queries, data modeling, storage",
-  auth: "login, signup, sessions, permissions, access control",
-  infra: "deployment, CI/CD, env config, hosting, build tooling",
-  design: "visual design, UX, design system, branding (vs. implementation)",
-  performance: "speed, caching, query/render optimization, reducing load time",
-  docs: "documentation, README, code comments, guides",
-  growth: "marketing, SEO, analytics, onboarding, referrals, conversion",
-  ai: "LLM / model features — prompts, classification, content generation",
-};
-
-// Same Record<> trick as TASK_TAG_DESCRIPTIONS: adding a value to TASK_TYPES or
+// Same Record<> trick as TASK_TAG_DESCRIPTIONS (lib/types.ts): adding a value to TASK_TYPES or
 // DRAFT_CONFIDENCE fails to compile until its gloss is written, so the prompt
 // text can't drift from the schema the model is decoded against.
 const TASK_TYPE_DESCRIPTIONS: Record<TaskType, string> = {
@@ -56,6 +39,25 @@ function glossedValues<T extends string>(
   descriptions: Record<T, string>
 ): string {
   return values.map((v) => `  - "${v}": ${descriptions[v]}`).join("\n");
+}
+
+/** The resolved area vocabulary as a gloss list, in the same "- value: gloss"
+ *  shape as glossedValues. Derived from `vocab.values` — the same array the
+ *  schema's tags enum is built from (see tagList in lib/ai/schemas.ts) — so the
+ *  labels the prompt offers and the labels decoding permits cannot drift.
+ *  `indent` matches the surrounding bullet depth of each prompt. */
+function glossedAreas(vocab: AreaVocabulary, indent = "  "): string {
+  return vocab.values.map((a) => `${indent}- "${a.slug}": ${a.gloss}`).join("\n");
+}
+
+/** The one sentence that tells the model what KIND of vocabulary it's picking
+ *  from. Repo areas need it: "checkout" only reads as the right answer once the
+ *  model knows the list describes this product's parts rather than generic
+ *  engineering disciplines. */
+function areaFraming(vocab: AreaVocabulary): string {
+  return vocab.source === "repo"
+    ? "the part of THIS product the work belongs to"
+    : "the area the work primarily touches";
 }
 
 const MANIFEST_PROMPT_CAP = 150;
@@ -139,7 +141,10 @@ function formatRepoContext(repoContext: RepoContext | null, opts: { withTools: b
   return lines.join("\n");
 }
 
-export function buildTaskSystemPrompt(repoContext: RepoContext | null): string {
+export function buildTaskSystemPrompt(
+  repoContext: RepoContext | null,
+  areas: AreaVocabulary
+): string {
   const taskShape = `{
   "title": "imperative verb phrase, ≤80 chars, summarizes the deliverable",
   "description": "a bullet list (one '• ' bullet per line) of scope / acceptance criteria. Omit if title is self-evident.",
@@ -150,14 +155,14 @@ export function buildTaskSystemPrompt(repoContext: RepoContext | null): string {
   "followUp": null — or, ONLY when the description was too weak to author confidently: {"question": "ONE short question whose answer would most strengthen this task", "options": ["3–5 concise likely answers, most likely first"], "recommended": "exact text of the best option"}
 }`;
 
-  const labelList = TASK_TAGS.map((t) => `    • "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
+  const labelList = glossedAreas(areas, "    ");
   // Classification rules shared by both prompt variants — triage the task the way a
   // developer would in Linear, so the draft is born with its type and area label.
   const classificationRules = `- type: classify the work, Linear-style — pick exactly ONE:
     • "feature": adds a new user-facing capability that didn't exist before (e.g. "Add CSV export").
     • "bug": fixes broken, incorrect, or unintended behavior. Cues: fix, broken, wrong, error, crash, regression, doesn't work.
     • "change": modifies, improves, refactors, or removes something that already works — copy, styling, config, performance, refactors, removals. Use this as the DEFAULT when it is neither a clear new feature nor a defect.
-- tags: pick exactly ONE area label as a one-element array — the single best fit for the PRIMARY area the work touches. NEVER invent a label, NEVER return more than one, and NEVER use a label outside this list:
+- tags: pick exactly ONE area label as a one-element array — the single best fit for ${areaFraming(areas)}. Return an empty array when none of them fits, because a wrong area is read as fact by everyone who sees the chip. NEVER invent a label and NEVER return more than one:
 ${labelList}`;
 
   const instructions = `You are an expert engineering task author. Turn the user's free-text description into a fully-formed task. ALWAYS return a complete task — never questions instead of a task. Where the description is ambiguous, make the most sensible assumption a senior engineer would make (grounded in the repo context and what your tools showed you, when available) and proceed.
@@ -195,8 +200,11 @@ export function buildTaskUserPrompt(
   return lines.join("\n");
 }
 
-export function buildTaskRegenerateSystemPrompt(repoContext: RepoContext | null): string {
-  const labelList = TASK_TAGS.map((t) => `    • "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
+export function buildTaskRegenerateSystemPrompt(
+  repoContext: RepoContext | null,
+  areas: AreaVocabulary
+): string {
+  const labelList = glossedAreas(areas, "    ");
   const taskShape = `{
   "title": "imperative verb phrase, ≤80 chars, summarizes the deliverable",
   "description": "bullet list (one '• ' bullet per line) covering WHAT is being built (see rules)",
@@ -217,7 +225,7 @@ Rules for the revised task:
 - description: a thorough plain-language overview of WHAT is being built and what it does, written as a BULLET LIST — 3–6 concise bullet points, each on its own line starting with "• ", one idea per bullet (user-facing behavior, the flow end to end, and relevant edge cases). Bullets only: no intro or trailing paragraph. Write for a non-technical product owner: NO file paths, library names, function names, or code-level detail. At least 20 characters.
 - priority: keep the current priority unless the change clearly implies a different urgency.
 - type: classify Linear-style — "feature" (adds a new user-facing capability), "bug" (fixes broken behavior), or "change" (modifies/improves/removes something that already works; use as the DEFAULT).
-- tags: exactly ONE area label as a one-element array — the single best fit for the PRIMARY area the work touches. NEVER invent a label, NEVER return more than one, and NEVER use a label outside this list:
+- tags: exactly ONE area label as a one-element array — the single best fit for ${areaFraming(areas)}. Keep the task's current area unless the change moves the work somewhere else. Return an empty array when none of them fits. NEVER invent a label and NEVER return more than one:
 ${labelList}
 - assumptions: list only genuine judgment calls you made interpreting the change (one short plain-language sentence each, ≤300 chars, max 6). Return [] when the change was unambiguous.${
     repoContext ? `\n- ${FORBIDDEN_ASSUMPTION_TOPICS}` : ""
@@ -353,8 +361,8 @@ export function buildEstimateTaskUserPrompt(input: {
   return parts.join("\n");
 }
 
-export function buildClassifyTaskSystemPrompt(): string {
-  const labelList = TASK_TAGS.map((t) => `- "${t}": ${TASK_TAG_DESCRIPTIONS[t]}`).join("\n");
+export function buildClassifyTaskSystemPrompt(areas: AreaVocabulary): string {
+  const labelList = glossedAreas(areas, "");
   return `You are a senior engineer triaging software tasks the way a developer would in Linear. From the task title and description alone, classify it and label its area.
 
 Pick exactly ONE type:
@@ -362,11 +370,11 @@ Pick exactly ONE type:
 - "bug": fixes broken, incorrect, or unintended behavior (e.g. "Fix login redirect loop", "Totals show wrong tax"). Cues: fix, broken, wrong, error, crash, regression, doesn't work.
 - "change": modifies, improves, refactors, or removes something that already works — copy tweaks, styling, config, performance, refactors, removals (e.g. "Rename the Clients tab", "Speed up the board query", "Remove the legacy banner"). Use this as the default when it is neither clearly a new feature nor a defect.
 
-Then pick exactly ONE area label — the single best fit from this fixed list, returned as a one-element array. Choose the label for the PRIMARY area the work touches; if several apply, pick the most central one. NEVER invent your own label, NEVER return more than one, and NEVER return a label outside this list (e.g. not "pdf-forms", "export", "forms", "misc"):
+Then pick exactly ONE area label — the single best fit for ${areaFraming(areas)}, returned as a one-element array. If several apply, pick the most central one. Return an empty array when none of them fits: an area that is merely close is read as fact by everyone who sees the chip, so no label beats a wrong one. NEVER invent your own label and NEVER return more than one — the list below is the whole vocabulary this project uses, and a label outside it would sit alongside these as a permanent one-off:
 ${labelList}
 
 Output format — respond ONLY with valid JSON in this exact shape:
-{"type": "bug", "tags": ["auth"]}
+{"type": "bug", "tags": [${JSON.stringify(areas.values[0]?.slug ?? "")}]}
 No markdown, no explanation, no wrapper — raw JSON only.`;
 }
 
@@ -481,9 +489,9 @@ const UNTRACKED_CONFIDENCE_DESCRIPTIONS: Record<DraftConfidence, string> = {
  *  reads as a directory listing and buries the paths that carry meaning. */
 const PUSH_FILE_CAP = 60;
 
-export function buildUntrackedWorkSystemPrompt(): string {
+export function buildUntrackedWorkSystemPrompt(areas: AreaVocabulary): string {
   const typeList = glossedValues(TASK_TYPES, TASK_TYPE_DESCRIPTIONS);
-  const tagList = glossedValues(TASK_TAGS, TASK_TAG_DESCRIPTIONS);
+  const areaList = glossedAreas(areas);
   const confidenceList = glossedValues(DRAFT_CONFIDENCE, UNTRACKED_CONFIDENCE_DESCRIPTIONS);
 
   return `You are a senior engineer auditing one push to a repository's main branch against the tasks a solo builder logged for it. You are looking for one thing: work that SHIPPED in this push and that no task describes.
@@ -511,8 +519,8 @@ Rules:
 6. Set priority to one of ${TASK_PRIORITIES.map((p) => `"${p}"`).join(", ")}. The work is already done, so this is only how it would have been ranked: use "medium" unless the push plainly fixes something broken.
 7. Set type to the single value that fits:
 ${typeList}
-8. Set tags to exactly ONE area label:
-${tagList}
+8. Set tags to exactly ONE area label — ${areaFraming(areas)} — or an empty array when none of them fits:
+${areaList}
 9. Set confidence:
 ${confidenceList}
 10. Prefer proposing nothing, because the cost is lopsided. A missed gap costs the builder nothing — the work shipped either way. A wrong one invents a task for work that was already tracked and puts it on a client's changelog.
@@ -585,6 +593,10 @@ export interface ExtractTasksInput {
   /** The builder's display name, when known. Lets the model (and the
       post-processor) map "Steven: do X" notes onto owner "builder". */
   builderName?: string | null;
+  /** The label set drafts are classified against — the engagement's repo areas,
+      or the generic fallback. Absent means fallback (see areaSlugs in
+      lib/ai/extract-tasks-from-transcript.ts). */
+  areas?: AreaVocabulary;
 }
 
 // Keep the prompt well inside the context window; an 80k-char transcript is
@@ -639,7 +651,7 @@ const EXTRACT_TASKS_SYSTEM_BASE = [
   `- confidence: how clearly the call assigned it.\n${glossedValues(DRAFT_CONFIDENCE, DRAFT_CONFIDENCE_DESCRIPTIONS)}`,
   `- priority: the urgency expressed on the call, from ${TASK_PRIORITIES.map((p) => `"${p}"`).join(", ")}. Use "medium" when the call did not signal urgency.`,
   `- type: the single best fit.\n${glossedValues(TASK_TYPES, TASK_TYPE_DESCRIPTIONS)}`,
-  `- tags: the one area the work primarily touches, as a one-element array — or an empty array when no area fits. Pick from this list only:\n${glossedValues(TASK_TAGS, TASK_TAG_DESCRIPTIONS)}`,
+  "- tags: the one area the draft belongs to, as a one-element array — or an empty array when no area fits. The allowed areas are listed at the end of these instructions, and they are the only labels you may use.",
   "- sourceQuote: ≤300 chars copied verbatim from the notes or transcript, the lines that put this draft in the list. For a note bullet, that bullet's own line.",
   "",
   "Grounding and off-schema behavior:",
@@ -649,13 +661,21 @@ const EXTRACT_TASKS_SYSTEM_BASE = [
   "- At most 40 drafts. If the call yields more, keep the 40 most concrete.",
 ].join("\n");
 
-export function buildExtractTasksSystemPrompt(builderName: string | null): string {
-  // The ONE per-builder line — appended last so EXTRACT_TASKS_SYSTEM_BASE stays a
-  // cacheable static prefix (see the note on the constant).
+export function buildExtractTasksSystemPrompt(
+  builderName: string | null,
+  areas: AreaVocabulary
+): string {
+  // The two per-call blocks — appended AFTER the base, never spliced into it, so
+  // EXTRACT_TASKS_SYSTEM_BASE stays the byte-identical cacheable prefix its note
+  // describes. The area vocabulary varies per repo and the identity per builder;
+  // interpolating either one higher up would shrink the cache hit to nothing.
   const builderIdentity = builderName
     ? `Builder identity: the builder's name is "${builderName}" — work assigned to that name, or to its first name, is the builder's: set owner to exactly "builder".`
     : 'Builder identity: no name was given — if speakers are only labeled "Me"/"Them", "Me" is the builder.';
-  return `${EXTRACT_TASKS_SYSTEM_BASE}\n\n${builderIdentity}`;
+
+  const areaBlock = `Areas — the allowed values for tags, and ${areaFraming(areas)}. Pick the one an area's gloss actually covers; when the draft belongs to none of them, return an empty array rather than the closest label.\n${glossedAreas(areas)}`;
+
+  return `${EXTRACT_TASKS_SYSTEM_BASE}\n\n${builderIdentity}\n\n${areaBlock}`;
 }
 
 export function buildExtractTasksUserPrompt(input: ExtractTasksInput): string {
@@ -1053,4 +1073,133 @@ export function buildProjectProfileUserPrompt(
 
   lines.push("Respond with JSON only.");
   return lines.join("\n");
+}
+
+// ── Repo → its product areas ─────────────────────────────────────────────────
+// One derivation per repo, cached in repo_areas (migration 0092). The result
+// becomes the area vocabulary every task classifier picks from, so this prompt
+// is upstream of every area chip on the board.
+
+/** Paths shown to the areas derivation. Deliberately far above the 150 the other
+ *  repo prompts use: directory names ARE the signal here, and the areas of a
+ *  large app live in the long tail of the manifest, not its first page. */
+const AREAS_MANIFEST_CAP = 400;
+
+/** Target size of a derived vocabulary. Below the floor the labels are so broad
+ *  they say nothing ("frontend"); above the ceiling the classifier is picking
+ *  between near-synonyms and the chips stop being scannable. */
+const AREAS_MIN = 4;
+const AREAS_MAX = 12;
+
+export function buildRepoAreasSystemPrompt(): string {
+  return `You name the parts a software product is built from, reading one repository's file structure and README.
+
+The result becomes a fixed menu of labels. Every task on this project — "Add CSV export to the reports page", "Fix the login redirect" — will be filed under exactly one of the areas you return, by a later classifier that sees your labels and nothing else. So each area has to be recognizable from its name and gloss alone.
+
+Name areas the way the people paying for this software talk about it, not the way the framework organizes it. "checkout", "reporting", "user-onboarding" are areas. "app", "components", "lib", "src", "utils", "tests", "config" are framework scaffolding that every project of this type has — they say nothing about what THIS product does, and an area list made of them is worthless because every task would fit every label equally well.
+
+How to read the input:
+1. Start with the README excerpt and the repository description: they usually name the product's features outright, and that is the vocabulary the client already uses.
+2. Then read the file manifest for repeated nouns in path segments and filenames — a "checkout" that appears as a route, a component, a table, and a test is a real area. One file mentioning a noun is not.
+3. Then check the top-level structure for a domain-organized codebase (a "modules/", "features/", or "domains/" folder names the areas directly) versus a layer-organized one (app/components/lib — in which case ignore the top level entirely and work from step 2).
+4. Cover the whole product. An area list that describes the half of the repo you read first will send every unmatched task to the wrong label.
+
+Rules:
+1. Return between ${AREAS_MIN} and ${AREAS_MAX} areas, ordered most to least central to the product.
+2. slug: lowercase, words joined by single hyphens, at most 24 characters, and unique across the list. Use a noun or noun phrase from the product's own vocabulary.
+3. label: the same area written for a human to read, at most 40 characters. Title Case, and it may use spaces, "&", and capitals the slug cannot ("Auth & Billing").
+4. gloss: one line of 10 to 120 characters naming the concrete surfaces, files, or capabilities that belong to this area. The classifier decides using this sentence, so write what would be filed here, not why the area matters.
+5. Make the areas mutually exclusive. When two candidates would attract the same task, return the one the product's users would name and drop the other.
+6. Cover cross-cutting engineering work that has no product home with at most two general areas ("infrastructure", "developer-tooling"). More than two and you have written the generic list this task exists to replace.
+7. NEVER return a slug that only names a framework folder, a language, or a file type — "app", "components", "lib", "src", "utils", "helpers", "config", "tests", "types", "styles", "assets", "scripts", "public", "docs-folder", "typescript", "css", "json". They are dropped before the list is saved, because a label every task matches classifies nothing.
+
+Grounding and off-schema behavior: name only areas the input actually evidences, in the product's own words — a plausible area for this KIND of app that this repo shows no sign of is a label no task will ever earn. When the input is too thin to name areas with confidence — an empty repo, a manifest of only config files, a README that is just a title — return an empty areas array. That is a correct answer: the project falls back to a generic taxonomy, which is a better outcome than a menu of guesses.`;
+}
+
+export interface RepoAreasInput {
+  fullName: string;
+  description: string | null;
+  readmeExcerpt: string;
+  topLevelTree: string[];
+  fileManifest: string[];
+  manifestTruncated: boolean;
+  languages: { name: string; pct: number }[];
+}
+
+export function buildRepoAreasUserPrompt(input: RepoAreasInput): string {
+  const lines: string[] = [`Repository: ${input.fullName}`];
+
+  if (input.description) lines.push(`Description: ${input.description}`);
+  if (input.languages.length > 0) {
+    lines.push(`Languages: ${input.languages.map((l) => `${l.name} ${l.pct}%`).join(", ")}`);
+  }
+  if (input.readmeExcerpt) {
+    lines.push(`\n## README excerpt\n${input.readmeExcerpt}`);
+  }
+  if (input.topLevelTree.length > 0) {
+    lines.push(`\n## Top-level structure\n${input.topLevelTree.slice(0, 40).join("\n")}`);
+  }
+  if (input.fileManifest.length > 0) {
+    const shown = input.fileManifest.slice(0, AREAS_MANIFEST_CAP);
+    const remainder = input.fileManifest.length - shown.length;
+    // Say plainly that the listing is partial. Without this the model reads a cut
+    // manifest as the whole repo and confidently omits the areas it never saw.
+    const trailer =
+      remainder > 0 || input.manifestTruncated
+        ? `\n…and more files not shown${remainder > 0 ? ` (${remainder})` : ""}. Judge only what is listed.`
+        : "";
+    lines.push(
+      `\n## File manifest (${shown.length} of ${input.fileManifest.length})\n${shown.join("\n")}${trailer}`
+    );
+  }
+
+  return lines.join("\n");
+}
+
+// ── Existing tasks → the repo's area vocabulary ──────────────────────────────
+// The one-time backfill after a project gets derived areas: re-file tasks that
+// were classified under whatever vocabulary was in play when they were created.
+// Batched, so this is a per-batch prompt rather than a per-task one.
+
+/** Description characters per task in a backfill batch. An area is decided by
+ *  what a task is ABOUT, which the title plus a couple of lines settles — past
+ *  this the batch is mostly prose the decision never uses. */
+const BACKFILL_DESCRIPTION_CAP = 300;
+
+export function buildTaskAreaBackfillSystemPrompt(areas: AreaVocabulary): string {
+  return `You file existing software tasks under the areas of the product they belong to. You are given a numbered batch of tasks — each with an id, a title, and a short description — and the project's area list.
+
+Every task in the batch was written before this area list existed, so it carries a label from an older, more generic vocabulary. Your job is to say which of these areas each one actually belongs to now.
+
+Rules:
+1. Return one assignment per task you can place, each carrying that task's id copied EXACTLY as given and one area slug from the list below.
+2. Omit a task entirely when no area genuinely covers it. An omitted task keeps the label it already has, which is a working outcome; a task filed under an area it does not belong to is wrong on the board until someone notices. Omitting is the cheaper mistake, so prefer it whenever the fit is arguable.
+3. Judge each task on its own. Tasks arrive in no meaningful order, so a run of tasks in one area is not evidence about the next one.
+4. Decide from what the task is ABOUT, not from the words it shares with a slug. A task saying "fix the checkout button's hover state" belongs to whichever area owns interface work, not to "checkout" because the word appears.
+5. Never invent an area, and never return more than one per task.
+
+Areas — ${areaFraming(areas)}:
+${glossedAreas(areas)}
+
+Off-schema behavior: assign only from the list above. When the batch contains a task the list cannot describe — internal admin, a note to self, something from a different product entirely — leave it out rather than reaching for the closest area. Returning an empty assignments array is a correct answer for a batch where nothing fits.`;
+}
+
+export interface TaskAreaBackfillInput {
+  tasks: { id: string; title: string; description: string | null }[];
+}
+
+export function buildTaskAreaBackfillUserPrompt(input: TaskAreaBackfillInput): string {
+  const block = input.tasks
+    .map((t) => {
+      const parts = [`id: ${t.id}`, `title: ${t.title}`];
+      parts.push(
+        t.description?.trim()
+          ? `description: ${truncate(t.description, BACKFILL_DESCRIPTION_CAP)}`
+          : "description: (none)"
+      );
+      return parts.join("\n");
+    })
+    .join("\n\n");
+
+  return `=== Tasks to file (${input.tasks.length}) ===\n${block}`;
 }

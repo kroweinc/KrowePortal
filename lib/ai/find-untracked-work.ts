@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { runChat, AI_MODEL } from "./client";
 import type { AiCallMeta } from "./usage";
-import { UntrackedWorkResult } from "./schemas";
+import { untrackedWorkResult, type UntrackedWorkResult } from "./schemas";
 import { jsonResponseFormat, stripNullsDeep } from "./strict-schema";
 import {
   buildUntrackedWorkSystemPrompt,
@@ -14,6 +14,7 @@ import {
   type UntrackedWorkCandidate,
 } from "@/lib/tasks/untracked-filter";
 import type { TitleCandidate } from "@/lib/tasks/dedupe";
+import { FALLBACK_AREA_VOCABULARY, type AreaVocabulary } from "@/lib/types";
 
 export type { UntrackedWorkCandidate, UntrackedWorkInput };
 
@@ -41,10 +42,13 @@ const MAX_TOKENS = 4500;
 export async function findUntrackedWork(
   input: UntrackedWorkInput,
   existingTitles: TitleCandidate[],
-  meta?: AiCallMeta
+  meta?: AiCallMeta,
+  areas: AreaVocabulary = FALLBACK_AREA_VOCABULARY
 ): Promise<{ items: UntrackedWorkCandidate[]; model: string }> {
   // Nothing to reason from — no commits means the push contents call degraded.
   if (input.commits.length === 0) return { items: [], model: AI_MODEL };
+
+  const schema = untrackedWorkResult(areas.values.map((a) => a.slug));
 
   /** One call, parsed. `problem` says what went wrong in enough detail to act
    *  on — a truncated response, a refusal and a schema miss are three different
@@ -52,20 +56,22 @@ export async function findUntrackedWork(
    *  them. A scanned push is never revisited, so a silent miss here is the whole
    *  safeguard failing for that push, permanently. */
   const attempt = async (): Promise<{
-    data: z.infer<typeof UntrackedWorkResult> | null;
+    data: UntrackedWorkResult | null;
     problem: string | null;
   }> => {
     const response = await runChat(
       {
         model: AI_MODEL,
         max_completion_tokens: MAX_TOKENS,
-        response_format: jsonResponseFormat(UntrackedWorkResult, "untracked_work"),
-        // The system prompt is byte-identical across every push, so it forms one
-        // static prefix OpenAI can cache. Everything per-push lives in the user
-        // message.
-        prompt_cache_key: "untracked-work-v1",
+        response_format: jsonResponseFormat(schema, "untracked_work"),
+        // The system prompt is byte-identical across every push for a given
+        // repo, so it forms one static prefix OpenAI can cache. Everything
+        // per-push lives in the user message. Keyed by vocabulary source: repo
+        // areas differ per repo, so one shared key would thrash the cache
+        // between builders instead of reusing each one's own prefix.
+        prompt_cache_key: `untracked-work-v2-${areas.source}`,
         messages: [
-          { role: "system", content: buildUntrackedWorkSystemPrompt() },
+          { role: "system", content: buildUntrackedWorkSystemPrompt(areas) },
           { role: "user", content: buildUntrackedWorkUserPrompt(input) },
         ],
       },
@@ -97,7 +103,7 @@ export async function findUntrackedWork(
       };
     }
 
-    const result = UntrackedWorkResult.safeParse(stripNullsDeep(parsed));
+    const result = schema.safeParse(stripNullsDeep(parsed));
     if (result.success) return { data: result.data, problem: null };
     return {
       data: null,

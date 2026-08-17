@@ -13,6 +13,7 @@ import { findUntrackedWork } from "@/lib/ai/find-untracked-work";
 import { estimateAndSaveTaskHours } from "@/lib/actions/estimate-task";
 import { writeAuditEntries } from "@/lib/actions/audit-log";
 import { isEngagementMemberEmbed } from "@/lib/actions/task-access";
+import { resolveAreaVocabulary } from "@/lib/tasks/area-vocabulary";
 import type { TitleCandidate } from "@/lib/tasks/dedupe";
 import type { Profile, ReleaseGapCommit, Task } from "@/lib/types";
 
@@ -131,7 +132,8 @@ async function scanRelease(
       trackedTasks,
     },
     existingTitles,
-    { userId: profileId, operation: "find_untracked_work", engagementId }
+    { userId: profileId, operation: "find_untracked_work", engagementId },
+    await resolveAreaVocabulary({ profileId, engagementId })
   );
 
   if (items.length === 0) {

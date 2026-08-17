@@ -36,7 +36,7 @@ import { streamTaskDrafts } from "@/lib/ai/stream-client";
 import { SOP_ACCEPT, MAX_SOP_CHARS } from "@/lib/attachments-constants";
 import { formatCallDate } from "@/lib/granola/format";
 import type { ExtractedTaskDraft } from "@/lib/ai/schemas";
-import type { ProjectSopTranscript } from "@/lib/types";
+import type { AreaDefinition, ProjectSopTranscript } from "@/lib/types";
 
 type ListState =
   | { status: "idle" }
@@ -53,6 +53,9 @@ interface ReviewState {
   noteTitle: string | null;
   noteCreatedAt: string | null;
   drafts: ExtractedTaskDraft[];
+  /** The vocabulary these drafts were classified against, so the Area select
+      offers the repo's own areas rather than the generic taxonomy. */
+  areas: AreaDefinition[];
   /** True while drafts are still streaming in — approval stays locked until
       the final (authoritative) list replaces the progressive one. */
   streaming?: boolean;
@@ -137,7 +140,11 @@ export function ImportFromGranolaDialog({
   ): Promise<"handled" | "fallback"> {
     const controller = new AbortController();
     streamAbortRef.current = controller;
-    const meta = { noteTitle: null as string | null, noteCreatedAt: null as string | null };
+    const meta = {
+      noteTitle: null as string | null,
+      noteCreatedAt: null as string | null,
+      areas: [] as AreaDefinition[],
+    };
     let opened = false;
     try {
       const final = await streamTaskDrafts("/api/ai/granola/extract-tasks/stream", body, {
@@ -145,6 +152,7 @@ export function ImportFromGranolaDialog({
         onMeta: (m) => {
           meta.noteTitle = m.noteTitle;
           meta.noteCreatedAt = m.noteCreatedAt;
+          meta.areas = m.areas;
         },
         onTask: (item) => {
           // First draft in: switch from the list spinner to the live review.
@@ -156,6 +164,7 @@ export function ImportFromGranolaDialog({
               noteTitle: meta.noteTitle,
               noteCreatedAt: meta.noteCreatedAt,
               drafts: [item],
+              areas: meta.areas,
               streaming: true,
             });
           } else {
@@ -189,6 +198,7 @@ export function ImportFromGranolaDialog({
         noteTitle: meta.noteTitle,
         noteCreatedAt: meta.noteCreatedAt,
         drafts: final.drafts,
+        areas: meta.areas,
         streaming: false,
       });
       return "handled";
@@ -364,6 +374,7 @@ export function ImportFromGranolaDialog({
           noteTitle: result.noteTitle,
           noteCreatedAt: result.noteCreatedAt,
           drafts: result.drafts,
+          areas: result.areas,
         });
       }
     } catch {
@@ -377,6 +388,7 @@ export function ImportFromGranolaDialog({
     noteTitle: string | null;
     noteCreatedAt: string | null;
     drafts: ExtractedTaskDraft[];
+    areas: AreaDefinition[];
     error?: string;
   }) {
     if (result.error) {
@@ -392,6 +404,7 @@ export function ImportFromGranolaDialog({
       noteTitle: result.noteTitle,
       noteCreatedAt: result.noteCreatedAt,
       drafts: result.drafts,
+      areas: result.areas,
     });
     resetPaste();
   }
@@ -569,6 +582,7 @@ export function ImportFromGranolaDialog({
           {review ? (
             <GranolaTaskReview
               drafts={review.drafts}
+              areas={review.areas}
               duplicateMatches={duplicateMatches}
               submitting={creating}
               streaming={review.streaming ?? false}

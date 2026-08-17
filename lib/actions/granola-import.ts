@@ -37,7 +37,9 @@ import { extractTranscriptText } from "@/lib/sop/extract-text";
 import { ExtractedTaskDraft } from "@/lib/ai/schemas";
 import { friendlyAiError } from "@/lib/ai/client";
 import { MAX_ATTACHMENT_SIZE, MAX_SOP_CHARS } from "@/lib/attachments-constants";
-import type { ProjectSopTranscript } from "@/lib/types";
+import { AREA_SLUG_MAX, AREA_SLUG_RE } from "@/lib/types";
+import type { AreaDefinition, AreaVocabulary, ProjectSopTranscript } from "@/lib/types";
+import { allowedAreaSlugs } from "@/lib/tasks/area-vocabulary";
 
 export type { GranolaImportTargetInput } from "@/lib/granola/draft-core";
 
@@ -274,6 +276,10 @@ export interface GranolaTaskDraftsResult {
   noteTitle: string | null;
   noteCreatedAt: string | null;
   drafts: ExtractedTaskDraft[];
+  /** The vocabulary the drafts were classified against — the review's Area
+      select is built from it, so it offers what the model could actually pick.
+      Empty on the error paths, where there are no drafts to label anyway. */
+  areas: AreaDefinition[];
   error?: string;
 }
 
@@ -285,7 +291,7 @@ export async function draftTasksFromGranolaNote(
   engagementId: string,
   noteId: string
 ): Promise<GranolaTaskDraftsResult> {
-  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [] };
+  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [] };
   const timer = stageTimer("granola-draft");
 
   const resolved = await resolveGranolaDraft(engagementId, noteId, timer);
@@ -302,6 +308,7 @@ export async function draftTasksFromGranolaNote(
       noteTitle: resolved.noteTitle,
       noteCreatedAt: resolved.noteCreatedAt,
       drafts: result.items,
+      areas: resolved.extractInput.areas?.values ?? [],
     };
   } catch (err) {
     console.error("[draftTasksFromGranolaNote]", err);
@@ -310,7 +317,12 @@ export async function draftTasksFromGranolaNote(
 }
 
 async function runTranscriptTaskExtraction(
-  gate: { profileId: string; engagementId: string; builderName: string | null },
+  gate: {
+    profileId: string;
+    engagementId: string;
+    builderName: string | null;
+    areas: AreaVocabulary;
+  },
   title: string | null,
   transcript: string
 ): Promise<GranolaTaskDraftsResult> {
@@ -322,6 +334,7 @@ async function runTranscriptTaskExtraction(
         transcript,
         participants: null,
         builderName: gate.builderName,
+        areas: gate.areas,
       },
       {
         userId: gate.profileId,
@@ -329,10 +342,10 @@ async function runTranscriptTaskExtraction(
         engagementId: gate.engagementId,
       }
     );
-    return { noteTitle: title, noteCreatedAt: null, drafts: result.items };
+    return { noteTitle: title, noteCreatedAt: null, drafts: result.items, areas: gate.areas.values };
   } catch (err) {
     console.error("[runTranscriptTaskExtraction]", err);
-    return { noteTitle: null, noteCreatedAt: null, drafts: [], error: friendlyAiError(err) };
+    return { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [], error: friendlyAiError(err) };
   }
 }
 
@@ -352,7 +365,7 @@ export async function draftTasksFromPastedTranscript(
   content: string,
   label?: string
 ): Promise<GranolaTaskDraftsResult> {
-  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [] };
+  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [] };
   const parsed = pasteDraftSchema.safeParse({ content, label: label || undefined });
   if (!parsed.success) {
     return { ...empty, error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -372,7 +385,7 @@ export async function draftTasksFromPastedTranscript(
 export async function draftTasksFromTranscriptFile(
   formData: FormData
 ): Promise<GranolaTaskDraftsResult> {
-  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [] };
+  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [] };
 
   const engagementId = formData.get("engagement_id");
   if (typeof engagementId !== "string") return { ...empty, error: "Invalid input." };
@@ -399,7 +412,13 @@ export async function draftTasksFromTranscriptFile(
 // A reviewed draft as approved in the dialog: the AI extraction plus the
 // builder-chosen board column ("Lands in"). Done is deliberately excluded —
 // creating straight into Done would skip the approval gate.
+// `tags` is re-declared as a SHAPE check rather than inherited from
+// ExtractedTaskDraft's enum: that const is built from the fallback vocabulary,
+// so a draft the extraction legitimately filed under a repo area ("checkout")
+// would fail here and take the entire approval batch with it. Membership is
+// enforced after parsing, against the caller's own scope — see sanitizeAreaTags.
 const ApprovedTaskDraftSchema = ExtractedTaskDraft.extend({
+  tags: z.array(z.string().max(AREA_SLUG_MAX).regex(AREA_SLUG_RE)).max(1).default([]),
   status: z.enum(["backlog", "todo", "in_progress"]).optional(),
 });
 export type ApprovedTaskDraft = z.infer<typeof ApprovedTaskDraftSchema>;
@@ -423,6 +442,13 @@ async function createDraftTasks(
   granolaImportId: string | null = null
 ): Promise<{ created: number; firstError: string | null }> {
   const supabase = await getClient(profileId);
+  // The schema only checked each tag's SHAPE (membership depends on this
+  // engagement's vocabulary, which a static schema can't see). Vet them here,
+  // once for the batch, so a tampered payload can't persist an off-vocabulary
+  // chip — an unrecognized slug becomes no chip rather than a failed approval.
+  const allowed = await allowedAreaSlugs({ profileId, engagementId });
+  const areaFor = (item: ApprovedTaskDraft) => item.tags.filter((t) => allowed.has(t)).slice(0, 1);
+
   const { data, error } = await supabase
     .from("tasks")
     .insert(
@@ -432,7 +458,7 @@ async function createDraftTasks(
         description: draftDescription(item),
         priority: item.priority,
         type: item.type,
-        tags: item.tags,
+        tags: areaFor(item),
         // Approval is builder-gated, so the source is always builder_added.
         source: "builder_added",
         created_by: profileId,

@@ -8,14 +8,70 @@ import { TASK_PRIORITIES, TASK_TAGS, TASK_TYPES } from "@/lib/types";
 export const DRAFT_CONFIDENCE = ["high", "medium", "low"] as const;
 export type DraftConfidence = (typeof DRAFT_CONFIDENCE)[number];
 
+// ── Area vocabulary ──────────────────────────────────────────────────────────
+// Every task-authoring schema below carries the task's AREA as a one-element
+// `tags` array. The allowed set is no longer fixed: a repo with derived areas
+// (repo_areas, migration 0092) supplies its own product areas, and TASK_TAGS is
+// the fallback for repos without them — see resolveAreaVocabulary in
+// lib/tasks/area-vocabulary.ts.
+//
+// So the schemas that embed it are FACTORIES over the allowed slugs. They are
+// memoized on the joined slug list because jsonResponseFormat rebuilds the
+// strict JSON Schema from zod on every call, while a builder's vocabulary is
+// stable across their calls — same reasoning as sectionResultCache below. The
+// bare consts (TaskDraft, TaskClassifyResult, …) are the fallback-vocabulary
+// instances, kept so callers that never resolve a vocabulary work unchanged.
+export type AreaSlugs = readonly string[];
+
+const schemaCache = new Map<string, z.ZodTypeAny>();
+
+function memoSchema<T extends z.ZodTypeAny>(kind: string, slugs: AreaSlugs, build: () => T): T {
+  const key = `${kind}:${slugs.join(",")}`;
+  const hit = schemaCache.get(key);
+  if (hit) return hit as T;
+  const built = build();
+  schemaCache.set(key, built);
+  return built;
+}
+
 // Exactly-one area tag, kept as an array for the tasks.tags text[] column.
 // OpenAI strict mode can't enforce maxItems (strict-schema.ts strips it from the
 // wire schema), so the model occasionally returns 2+ tags despite the prompt —
 // keep the first instead of failing the whole generation. z.preprocess keeps the
 // wire JSON schema (array of enum) intact, unlike .transform.
-const TagList = z
-  .preprocess((v) => (Array.isArray(v) ? v.slice(0, 1) : v), z.array(z.enum(TASK_TAGS)).max(1))
-  .default([]);
+function tagList(slugs: AreaSlugs) {
+  // The element schema stays a real z.enum at RUNTIME — that's what constrains
+  // decoding and what buildStrictSchema emits into the wire schema — but its
+  // inferred TS type is widened to string. A task's stored area is a slug from
+  // whichever vocabulary was resolved (lib/types.ts, TaskArea), so a union of
+  // this call's slugs would be a lie everywhere the result is persisted or read
+  // back, and would make every consumer of these types repo-specific.
+  const area = z.enum(slugs) as unknown as z.ZodType<string>;
+  return z
+    .preprocess((v) => (Array.isArray(v) ? v.slice(0, 1) : v), z.array(area).max(1))
+    .default([]);
+}
+
+// The derived vocabulary itself: what one repo is made of, in the words a client
+// would use. Intentionally unbounded — normalizeAreas
+// (lib/ai/repo-areas-postprocess.ts) is the layer that repairs and vets, and it
+// can only do that on entries this parse lets through.
+export const RepoAreasResult = z.object({
+  areas: z
+    .array(
+      // Bounds are stated in the prompt, NOT enforced here. normalizeAreas
+      // truncates an over-long slug/label/gloss and drops an unusable entry, so
+      // a floor or ceiling at this layer would fail the whole array over one bad
+      // element — throwing away nine good areas and burning a resample — before
+      // the repair step it exists to feed ever runs.
+      z.object({
+        slug: z.string(),
+        label: z.string(),
+        gloss: z.string(),
+      })
+    )
+    .default([]),
+});
 
 const Question = z
   .object({
@@ -66,7 +122,8 @@ const Question = z
 // flow drafts title/description/priority plus the Linear-style classification;
 // subtasks are generated SEPARATELY, on demand, from the task sidebar (see
 // SubtasksResult below and lib/ai/generate-subtasks.ts).
-export const TaskDraft = z.object({
+export function taskDraft(slugs: AreaSlugs) {
+  return z.object({
   title: z.string().min(3).max(300),
   description: z.string().min(20).max(2000),
   priority: z.enum(TASK_PRIORITIES),
@@ -75,7 +132,7 @@ export const TaskDraft = z.object({
   // round-trip and no fill-in delay. `type` defaults to "change" so a rare omission
   // degrades to the catch-all instead of failing the whole generation.
   type: z.enum(TASK_TYPES).default("change"),
-  tags: TagList,
+  tags: tagList(slugs),
   // Assumptions the AI made where the description was ambiguous. Surfaced
   // read-only on the prefilled draft form so the builder can catch a wrong call
   // before creating the task. Never persisted to the tasks table. `.default([])`
@@ -95,12 +152,23 @@ export const TaskDraft = z.object({
       recommended: z.string().min(1).max(80).optional(),
     })
     .optional(),
-});
+  });
+}
 
-export const TaskOnlyResult = z.object({
-  kind: z.literal("task"),
-  item: TaskDraft,
-});
+/** Fallback-vocabulary instance — the shape callers get when no repo areas are
+    resolved. Every factory below has the same const/factory pairing. */
+export const TaskDraft = taskDraft(TASK_TAGS);
+
+export function taskOnlyResult(slugs: AreaSlugs) {
+  return memoSchema("taskOnly", slugs, () =>
+    z.object({
+      kind: z.literal("task"),
+      item: taskDraft(slugs),
+    })
+  );
+}
+
+export const TaskOnlyResult = taskOnlyResult(TASK_TAGS);
 
 // ── Task regeneration ────────────────────────────────────────────────────────
 // Revising an EXISTING task (+ its subtasks) from a builder's "what changed"
@@ -118,17 +186,26 @@ export const SubtaskPlanItem = z.object({
   title: z.string().min(1).max(300),
 });
 
-export const RegenerateTaskResult = z.object({
-  kind: z.literal("task"),
-  // The revised task itself. Reuses TaskDraft minus followUp — regeneration
-  // never asks a follow-up question — while keeping assumptions for the preview.
-  task: TaskDraft.omit({ followUp: true }),
-  // Final ordered subtask list. Soft-capped (strict mode strips maxItems) rather
-  // than failing the whole regeneration. Empty when the task had no subtasks.
-  subtasks: z
-    .preprocess((v) => (Array.isArray(v) ? v.slice(0, 30) : v), z.array(SubtaskPlanItem).max(30))
-    .default([]),
-});
+export function regenerateTaskResult(slugs: AreaSlugs) {
+  return memoSchema("regenerateTask", slugs, () =>
+    z.object({
+      kind: z.literal("task"),
+      // The revised task itself. Reuses TaskDraft minus followUp — regeneration
+      // never asks a follow-up question — while keeping assumptions for the preview.
+      task: taskDraft(slugs).omit({ followUp: true }),
+      // Final ordered subtask list. Soft-capped (strict mode strips maxItems) rather
+      // than failing the whole regeneration. Empty when the task had no subtasks.
+      subtasks: z
+        .preprocess(
+          (v) => (Array.isArray(v) ? v.slice(0, 30) : v),
+          z.array(SubtaskPlanItem).max(30)
+        )
+        .default([]),
+    })
+  );
+}
+
+export const RegenerateTaskResult = regenerateTaskResult(TASK_TAGS);
 
 // A cross-person dependency on an extracted task: something ANOTHER participant
 // must deliver before this task can proceed ("Rahul sends the call sheet
@@ -163,7 +240,8 @@ const DependencyList = z
 // assumptions/followUp are omitted: they drive the new-task "strengthen" flow
 // only, and strict mode would force the extraction model to emit them on every
 // task (every key lands in `required` — same reason sourceText uses .omit).
-export const ExtractedTaskDraft = TaskDraft.omit({ assumptions: true, followUp: true }).extend({
+export function extractedTaskDraft(slugs: AreaSlugs) {
+  return taskDraft(slugs).omit({ assumptions: true, followUp: true }).extend({
   sourceQuote: z.string().max(300).optional(),
   // Fuller verbatim excerpt of the note/transcript lines this task came from
   // (up to ~1200 chars). Grounds the completeness/misattribution checks in
@@ -187,7 +265,10 @@ export const ExtractedTaskDraft = TaskDraft.omit({ assumptions: true, followUp: 
   // How clearly the call assigned this item. Ambiguous attribution must
   // surface as medium/low — never a silent guess.
   confidence: z.enum(DRAFT_CONFIDENCE).default("medium"),
-});
+  });
+}
+
+export const ExtractedTaskDraft = extractedTaskDraft(TASK_TAGS);
 
 // Absent/"builder" owner = the builder's own work; anything else is another
 // participant's action item.
@@ -195,15 +276,21 @@ export function isBuilderOwnedDraft(owner?: string): boolean {
   return !owner || owner.trim().toLowerCase() === "builder";
 }
 
-export const ExtractTasksResult = z.object({
-  // Soft-truncate instead of relying on .max() alone: strict mode strips
-  // maxItems from the wire schema, so the model can exceed the cap — keep the
-  // first 40 rather than failing the whole extraction (same posture as TagList).
-  items: z.preprocess(
-    (v) => (Array.isArray(v) ? v.slice(0, 40) : v),
-    z.array(ExtractedTaskDraft).max(40)
-  ),
-});
+export function extractTasksResult(slugs: AreaSlugs) {
+  return memoSchema("extractTasks", slugs, () =>
+    z.object({
+      // Soft-truncate instead of relying on .max() alone: strict mode strips
+      // maxItems from the wire schema, so the model can exceed the cap — keep the
+      // first 40 rather than failing the whole extraction (same posture as tagList).
+      items: z.preprocess(
+        (v) => (Array.isArray(v) ? v.slice(0, 40) : v),
+        z.array(extractedTaskDraft(slugs)).max(40)
+      ),
+    })
+  );
+}
+
+export const ExtractTasksResult = extractTasksResult(TASK_TAGS);
 
 // What the MODEL is asked to emit: everything in ExtractedTaskDraft EXCEPT
 // sourceText, which is reconstructed server-side (reconstructSourceText in
@@ -211,14 +298,24 @@ export const ExtractTasksResult = z.object({
 // into `required`, so merely .optional() would still make the model emit the
 // field — omission is the only way to stop paying for those output tokens.
 // Wire-schema only; server-side parsing keeps using ExtractTasksResult.
-export const ModelExtractedTaskDraft = ExtractedTaskDraft.omit({ sourceText: true });
+export function modelExtractedTaskDraft(slugs: AreaSlugs) {
+  return extractedTaskDraft(slugs).omit({ sourceText: true });
+}
 
-export const ModelExtractTasksResult = z.object({
-  items: z.preprocess(
-    (v) => (Array.isArray(v) ? v.slice(0, 40) : v),
-    z.array(ModelExtractedTaskDraft).max(40)
-  ),
-});
+export const ModelExtractedTaskDraft = modelExtractedTaskDraft(TASK_TAGS);
+
+export function modelExtractTasksResult(slugs: AreaSlugs) {
+  return memoSchema("modelExtractTasks", slugs, () =>
+    z.object({
+      items: z.preprocess(
+        (v) => (Array.isArray(v) ? v.slice(0, 40) : v),
+        z.array(modelExtractedTaskDraft(slugs)).max(40)
+      ),
+    })
+  );
+}
+
+export const ModelExtractTasksResult = modelExtractTasksResult(TASK_TAGS);
 
 // On-demand subtask breakdown. The "Generate" button in the task sidebar turns
 // a task (+ its linked repo) into a flat, ordered list of concrete subtasks.
@@ -242,13 +339,44 @@ export const TaskEstimateResult = z
   });
 
 // Linear-style classification: the single change type plus exactly ONE area
-// label drawn from the fixed TASK_TAGS taxonomy (e.g. "auth", "ui"). Kept as an
-// array (capped at 1) so the tasks.tags text[] column and TaskTags renderer stay
-// unchanged. Persisted by classifyAndSaveTask onto tasks.type / tasks.tags.
-export const TaskClassifyResult = z.object({
-  type: z.enum(TASK_TYPES),
-  tags: TagList,
-});
+// label drawn from the resolved area vocabulary — the repo's derived areas when
+// it has them, else the fixed TASK_TAGS taxonomy. Kept as an array (capped at 1)
+// so the tasks.tags text[] column and TaskTags renderer stay unchanged.
+// Persisted by classifyAndSaveTask onto tasks.type / tasks.tags.
+export function taskClassifyResult(slugs: AreaSlugs) {
+  return memoSchema("taskClassify", slugs, () =>
+    z.object({
+      type: z.enum(TASK_TYPES),
+      tags: tagList(slugs),
+    })
+  );
+}
+
+export const TaskClassifyResult = taskClassifyResult(TASK_TAGS);
+
+// Re-filing a whole board onto a new area vocabulary, a batch at a time. A
+// deliberately SPARSE array, for the CommitTaskMatchResult reason: the model
+// emits only the tasks it could place, so "none of these areas fits this task"
+// costs nothing to express and needs no sentinel value. taskId is a plain
+// string — a hallucinated id is filtered against the batch's own whitelist
+// anyway, and failing safeParse would throw away the batch's real assignments.
+export function taskAreaBackfillResult(slugs: AreaSlugs) {
+  return memoSchema("taskAreaBackfill", slugs, () =>
+    z.object({
+      assignments: z
+        .preprocess(
+          (v) => (Array.isArray(v) ? v.slice(0, 40) : v),
+          z.array(
+            z.object({
+              taskId: z.string().min(1).max(64),
+              area: z.enum(slugs) as unknown as z.ZodType<string>,
+            })
+          ).max(40)
+        )
+        .default([]),
+    })
+  );
+}
 
 // Commits on the default branch that appear to finish an open task — the
 // "you forgot to mark this done" safeguard. Deliberately a sparse ARRAY, not a
@@ -296,7 +424,8 @@ const boundedStrings = (min: number, max: number, cap: number) =>
     z.array(z.string().min(min).max(max)).max(cap)
   );
 
-export const UntrackedWorkItem = TaskDraft.omit({
+export function untrackedWorkItem(slugs: AreaSlugs) {
+  return taskDraft(slugs).omit({
   assumptions: true,
   followUp: true,
 }).extend({
@@ -311,29 +440,39 @@ export const UntrackedWorkItem = TaskDraft.omit({
   // How sure the model is that this was a real, separate piece of work nobody
   // tracked. "low" never reaches the builder — the filter drops it.
   confidence: z.enum(DRAFT_CONFIDENCE).default("medium"),
-});
+  });
+}
 
-export const UntrackedWorkResult = z.object({
-  // Soft-truncate rather than relying on .max() alone (strict mode strips
-  // maxItems), same posture as ExtractTasksResult. The filter cuts this to
-  // MAX_GAPS_PER_PUSH afterwards; the cap here only stops a runaway response.
-  //
-  // Items are also salvaged one at a time: a proposal that still fails after
-  // boundedStrings (a description under the 20-char floor, say) is dropped on
-  // its own rather than taking its siblings with it. One unusable item in a
-  // response of four is not a reason to report that this push shipped nothing —
-  // and a scanned push is never revisited (gaps_scanned_at), so anything lost
-  // here is lost for good.
-  items: z
-    .preprocess(
-      (v) =>
-        Array.isArray(v)
-          ? v.slice(0, 6).filter((item) => UntrackedWorkItem.safeParse(item).success)
-          : v,
-      z.array(UntrackedWorkItem).max(6)
-    )
-    .default([]),
-});
+export const UntrackedWorkItem = untrackedWorkItem(TASK_TAGS);
+
+export function untrackedWorkResult(slugs: AreaSlugs) {
+  return memoSchema("untrackedWork", slugs, () => {
+    const item = untrackedWorkItem(slugs);
+    return z.object({
+      // Soft-truncate rather than relying on .max() alone (strict mode strips
+      // maxItems), same posture as ExtractTasksResult. The filter cuts this to
+      // MAX_GAPS_PER_PUSH afterwards; the cap here only stops a runaway response.
+      //
+      // Items are also salvaged one at a time: a proposal that still fails after
+      // boundedStrings (a description under the 20-char floor, say) is dropped on
+      // its own rather than taking its siblings with it. One unusable item in a
+      // response of four is not a reason to report that this push shipped nothing —
+      // and a scanned push is never revisited (gaps_scanned_at), so anything lost
+      // here is lost for good.
+      items: z
+        .preprocess(
+          (v) =>
+            Array.isArray(v)
+              ? v.slice(0, 6).filter((el) => item.safeParse(el).success)
+              : v,
+          z.array(item).max(6)
+        )
+        .default([]),
+    });
+  });
+}
+
+export const UntrackedWorkResult = untrackedWorkResult(TASK_TAGS);
 
 export const ProjectProfileResult = z.object({
   summary: z.string().min(20).max(600),
@@ -702,6 +841,9 @@ export type SubtasksResult = z.infer<typeof SubtasksResult>;
 export type TaskEstimateResult = z.infer<typeof TaskEstimateResult>;
 export type TaskClassifyResult = z.infer<typeof TaskClassifyResult>;
 export type CommitTaskMatchResult = z.infer<typeof CommitTaskMatchResult>;
+export type UntrackedWorkItem = z.infer<typeof UntrackedWorkItem>;
+export type UntrackedWorkResult = z.infer<typeof UntrackedWorkResult>;
+export type RepoAreasResult = z.infer<typeof RepoAreasResult>;
 export type SimplifiedSubtask = z.infer<typeof SimplifiedSubtask>;
 export type SimplifiedTask = z.infer<typeof SimplifiedTask>;
 export type SimplifyTasksResult = z.infer<typeof SimplifyTasksResult>;

@@ -30,6 +30,8 @@ import {
   NoRepoSelected,
   RepoFetchError,
 } from "@/components/project-profile";
+import { AreasSection } from "@/components/repo-page/areas-section";
+import { getRepoAreas } from "@/lib/actions/repo-areas";
 import { RepoSelector } from "@/components/github/repo-selector";
 import { fetchGithubRepos } from "@/lib/github/list-repos";
 import { deriveArchLayers } from "@/lib/operator-project/derive-arch-layers";
@@ -169,6 +171,18 @@ export default async function ProjectProfilePage({
     engagements.find((e) => e.github_repo_full_name === fullName) ??
     (engagements.length === 1 ? engagements[0] : null);
 
+  // The scope the Areas card reads AND WRITES. Deliberately not `engagement`
+  // above: that chain ends in "the only engagement", which is fine for titling
+  // but would point the card at a client whose repo is not the one on screen —
+  // and "Re-file existing tasks" would then rewrite that client's whole board.
+  // Only an engagement that actually owns `fullName` counts; the personal repo
+  // option scopes to null, which resolves to the builder's own selected repo.
+  const areasEngagement =
+    activeRepo.engagement?.github_repo_full_name === fullName
+      ? activeRepo.engagement
+      : (engagements.find((e) => e.github_repo_full_name === fullName) ?? null);
+  const areasScoped = areasEngagement !== null || activeRepo.key === "personal";
+
   const repoUrl = `https://github.com/${owner}/${name}`;
 
   if (!repoContext) {
@@ -246,6 +260,12 @@ export default async function ProjectProfilePage({
             />
           </Suspense>
 
+          {areasScoped && (
+            <Suspense fallback={null}>
+              <AsyncAreasSection engagementId={areasEngagement?.id ?? null} />
+            </Suspense>
+          )}
+
           <UpdatesSection
             commits={timeline}
             activity={insights.activity}
@@ -263,6 +283,13 @@ export default async function ProjectProfilePage({
       </main>
     </>
   );
+}
+
+/** Streams in beside the rest of the page — the areas read costs two indexed
+    queries, but there is no reason to hold the shell for them. */
+async function AsyncAreasSection({ engagementId }: { engagementId: string | null }) {
+  const areas = await getRepoAreas(engagementId);
+  return <AreasSection engagementId={engagementId} initialAreas={areas} />;
 }
 
 async function AsyncToolkitSection({

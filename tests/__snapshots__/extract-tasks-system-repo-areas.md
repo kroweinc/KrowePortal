@@ -46,17 +46,9 @@ Grounding and off-schema behavior:
 - A call with no assigned action items — a status sync, a demo, a sales conversation — returns an empty items array. That is a correct answer, not a failure.
 - At most 40 drafts. If the call yields more, keep the 40 most concrete.
 
-Builder identity: no name was given — if speakers are only labeled "Me"/"Them", "Me" is the builder.
+Builder identity: the builder's name is "Steven Ortega" — work assigned to that name, or to its first name, is the builder's: set owner to exactly "builder".
 
-Areas — the allowed values for tags, and the area the work primarily touches. Pick the one an area's gloss actually covers; when the draft belongs to none of them, return an empty array rather than the closest label.
-  - "ui": user-facing interface — components, layout, styling, on-screen copy
-  - "backend": server-side logic, business rules, server actions, background jobs
-  - "api": API endpoints, request/response handling, third-party API integration
-  - "database": schema, migrations, queries, data modeling, storage
-  - "auth": login, signup, sessions, permissions, access control
-  - "infra": deployment, CI/CD, env config, hosting, build tooling
-  - "design": visual design, UX, design system, branding (vs. implementation)
-  - "performance": speed, caching, query/render optimization, reducing load time
-  - "docs": documentation, README, code comments, guides
-  - "growth": marketing, SEO, analytics, onboarding, referrals, conversion
-  - "ai": LLM / model features — prompts, classification, content generation
+Areas — the allowed values for tags, and the part of THIS product the work belongs to. Pick the one an area's gloss actually covers; when the draft belongs to none of them, return an empty array rather than the closest label.
+  - "checkout": cart, payment, order confirmation
+  - "reporting": dashboards, exports, scheduled emails
+  - "accounts": sign-up, sign-in, roles, team members

@@ -17,17 +17,23 @@ import { getDefaultBranchTip } from "@/lib/github/recent-commits";
 import { parseMergedBranch, mergeSubject } from "@/lib/github/merge-subject";
 import { isUniqueViolation } from "@/lib/supabase/errors";
 import { findSimilarTitles } from "@/lib/tasks/dedupe";
+import { sanitizeAreaTags } from "@/lib/tasks/area-vocabulary";
 import {
-  TASK_TAGS,
+  AREA_SLUG_MAX,
+  AREA_SLUG_RE,
   WORK_KINDS,
+  type TaskArea,
   type TaskStatus,
-  type TaskTag,
   type WorkKind,
 } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
 }
+
+/** One area slug, shape-checked. Shared by task creation and the regeneration
+    apply so both accept a repo area and a fallback tag on equal terms. */
+const AreaSlug = z.string().max(AREA_SLUG_MAX).regex(AREA_SLUG_RE);
 
 const createTaskSchema = z.object({
   engagement_id: z.string().uuid().optional(),
@@ -37,7 +43,12 @@ const createTaskSchema = z.object({
   // Optional Linear-style classification, supplied pre-classified by the AI draft
   // flow (new-task-form). Absent on manual entry, which classifies after creation.
   type: z.enum(["feature", "bug", "change"]).optional(),
-  tags: z.array(z.enum(TASK_TAGS)).max(1).optional(),
+  // One area slug from whichever vocabulary classified the task. SHAPE only here
+  // (see AREA_SLUG_RE) — membership depends on the caller's engagement, which a
+  // static schema can't see, so the action runs it through sanitizeAreaTags
+  // before insert. Both halves are needed: shape alone would let a hand-rolled
+  // POST persist an off-vocabulary one-off chip.
+  tags: z.array(AreaSlug).max(1).optional(),
   // Optional starting column, from the Granola review's "Lands in" select.
   // Done is excluded so a freshly created task can't bypass the approval gate.
   status: z.enum(["backlog", "todo", "in_progress"]).optional(),
@@ -108,7 +119,13 @@ export async function createTask(formData: FormData) {
     // Pre-classified by the AI draft; null/[] on manual entry (filled by the
     // deferred classifier below).
     type: parsed.data.type ?? null,
-    tags: parsed.data.tags ?? [],
+    // Shape-checked by the schema; membership can only be judged against this
+    // caller's engagement, so it happens here. An unrecognized slug becomes no
+    // chip rather than a rejected create — see sanitizeAreaTags.
+    tags: await sanitizeAreaTags(parsed.data.tags, {
+      profileId: profile.id,
+      engagementId: parsed.data.engagement_id ?? null,
+    }),
     source: profile.role === "operator" ? "operator_request" : "builder_added",
     created_by: profile.id,
     // Omit when unset so the column's DB default applies.
@@ -168,6 +185,7 @@ export async function createTask(formData: FormData) {
         title: parsed.data.title,
         description: parsed.data.description ?? null,
         userId: profile.id,
+        engagementId: parsed.data.engagement_id ?? null,
       })
     );
   }
@@ -1331,7 +1349,7 @@ const applyRegenSchema = z.object({
     description: z.string().max(2000),
     priority: z.enum(["low", "medium", "high", "urgent"]),
     type: z.enum(["feature", "bug", "change"]),
-    tags: z.array(z.enum(TASK_TAGS)).max(1),
+    tags: z.array(AreaSlug).max(1),
   }),
   final: z
     .array(
@@ -1354,7 +1372,7 @@ export interface ApplyTaskRegenerationInput {
     description: string;
     priority: "low" | "medium" | "high" | "urgent";
     type: "feature" | "bug" | "change";
-    tags: TaskTag[];
+    tags: TaskArea[];
   };
   final: { op: "keep" | "rename" | "add" | "preserved"; id?: string; title: string }[];
   remove: { id: string }[];
@@ -1388,7 +1406,7 @@ export async function applyTaskRegeneration(
 
   const { data: before } = await supabase
     .from("tasks")
-    .select("title, description, priority, type, tags")
+    .select("title, description, priority, type, tags, engagement_id")
     .eq("id", taskId)
     .single();
 
@@ -1400,7 +1418,12 @@ export async function applyTaskRegeneration(
       description: fields.description,
       priority: fields.priority,
       type: fields.type,
-      tags: fields.tags,
+      // Membership-checked against this task's engagement for the createTask
+      // reason — the schema above can only vet the slug's shape.
+      tags: await sanitizeAreaTags(fields.tags, {
+        profileId: profile.id,
+        engagementId: (before?.engagement_id as string | null) ?? null,
+      }),
       updated_at: new Date().toISOString(),
     })
     .eq("id", taskId);

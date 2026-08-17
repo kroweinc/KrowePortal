@@ -12,6 +12,7 @@ import {
   getBranchesByEngagement,
 } from "@/lib/actions/get-engagement-branches";
 import { sweepMainPushes } from "@/lib/actions/tasks";
+import { warmRepoAreas } from "@/lib/tasks/area-vocabulary";
 
 const BUILDER_TABS = [
   { label: "Tasks", href: "/b", icon: "list-checks", tour: "nav-tasks" },
@@ -33,6 +34,13 @@ export default async function BuilderLayout({ children }: { children: React.Reac
   // picker is instant and current by the time the builder reaches approval. Runs
   // after the response flushes and only re-crawls GitHub for cold/stale repos.
   after(() => warmEngagementBranches());
+
+  // Same idea for the area vocabulary every AI classifier picks labels from: a
+  // cold repo derives here, in the background, so the first task drafted from a
+  // call is already filed under the repo's own areas rather than the generic
+  // fallback. Skips repos whose vocabulary is fresh, and derives at most one per
+  // load, so the steady state is a single indexed query.
+  after(() => warmRepoAreas(profile.id));
 
   // Catch up on any push to main that landed since the last visit. Detection
   // used to run only on /b/staging, so a push stayed unrecorded until someone

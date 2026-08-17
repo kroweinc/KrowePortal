@@ -21,6 +21,8 @@ import {
 } from "@/lib/granola/client";
 import { assertAiBudget } from "@/lib/ai/usage";
 import type { ExtractTasksInput } from "@/lib/ai/extract-tasks-from-transcript";
+import { resolveAreaVocabulary } from "@/lib/tasks/area-vocabulary";
+import type { AreaVocabulary } from "@/lib/types";
 import type { AiCallMeta } from "@/lib/ai/usage";
 import type { StageTimer } from "@/lib/granola/timing";
 
@@ -186,6 +188,10 @@ export async function resolveGranolaDraft(
       transcript: transcriptText,
       participants: detail.note.participants,
       builderName: profile.display_name,
+      areas: await resolveAreaVocabulary({
+        profileId: profile.id,
+        engagementId: parsed.data.engagementId,
+      }),
     },
     meta: {
       userId: profile.id,
@@ -199,7 +205,13 @@ export async function resolveGranolaDraft(
 
 export type TranscriptDraftGate =
   | { ok: false; status: number; error: string }
-  | { ok: true; profileId: string; engagementId: string; builderName: string | null };
+  | {
+      ok: true;
+      profileId: string;
+      engagementId: string;
+      builderName: string | null;
+      areas: AreaVocabulary;
+    };
 
 /** Shared gate for the non-Granola transcript sources (paste / file upload):
     builder role, engagement ownership, and AI budget — ownership and budget
@@ -216,9 +228,10 @@ export async function gateTranscriptTaskDrafting(
   const parsed = z.string().uuid().safeParse(engagementId);
   if (!parsed.success) return { ok: false, status: 400, error: "Invalid input." };
 
-  const [isOwner, budget] = await Promise.all([
+  const [isOwner, budget, areas] = await Promise.all([
     assertEngagementBuilder(parsed.data, profile.id),
     assertAiBudget(profile.id),
+    resolveAreaVocabulary({ profileId: profile.id, engagementId: parsed.data }),
   ]);
   if (!isOwner) return { ok: false, status: 403, error: "Not your client." };
   if (!budget.ok) return { ok: false, status: 429, error: budget.error };
@@ -228,5 +241,6 @@ export async function gateTranscriptTaskDrafting(
     profileId: profile.id,
     engagementId: parsed.data,
     builderName: profile.display_name,
+    areas,
   };
 }
