@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CalendarDays, Check, CheckCheck, CornerUpLeft, Pin, RotateCcw, Trash2 } from "lucide-react";
+import { Check, CheckCheck, CornerUpLeft, Pin, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateTaskStatus } from "@/lib/actions/tasks";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -11,7 +11,7 @@ import { useRequestApproval } from "@/components/approval-deliverable-provider";
 import { useTaskMenu } from "@/components/task-menu";
 import { ContextMenu } from "@/components/ui/context-menu";
 import { ApprovalPill } from "@/components/approval-pill";
-import { DeliveryChips } from "@/components/design-atoms";
+import { DeliveryChips, PriorityBars, StateGlyph } from "@/components/design-atoms";
 import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
 import { SubmitterAvatar } from "@/components/submitter-avatar";
 import {
@@ -42,9 +42,10 @@ interface TaskCardProps {
   selected?: boolean;
   selectionMode?: boolean;
   onToggleSelect?: (task: Task) => void;
-  // A commit on the default branch that looks like it finished this task. The
-  // card strikes the title through and asks the builder to confirm — the task is
-  // never marked done off the back of a match alone.
+  // A commit that looks like it finished this task. Below the auto-apply
+  // threshold the card strikes the title through and asks the builder to
+  // confirm; at or above it the scan already moved the task and the card reports
+  // that instead, with Not done as a full undo.
   commitMatch?: PendingCommitMatch;
   onConfirmMatch?: (task: Task) => void;
   onDismissMatch?: (task: Task) => void;
@@ -70,9 +71,12 @@ export function TaskCard({
   const requestApproval = useRequestApproval();
   const advance = getTaskAdvance(task);
   const changeRequest = getActiveChangeRequest(task);
-  // Builder-only, and never on a card that's already done — completion authority
-  // stays with whoever wrote the code, and a done task has nothing to confirm.
-  const showMatch = !!commitMatch && role === "builder" && task.status !== "done";
+  // Builder-only — completion authority stays with whoever wrote the code. The
+  // done check that used to live here has moved server-side: an auto-applied
+  // match belongs on a done card (it's reporting the move), an ordinary
+  // suggestion never reaches one. See getPendingCommitMatches.
+  const showMatch = !!commitMatch && role === "builder";
+  const autoApplied = !!commitMatch?.autoApplied;
   const taskMenu = useTaskMenu({
     task,
     role,
@@ -103,12 +107,27 @@ export function TaskCard({
   return (
     <>
     <div
-      className={`krowe-card priority-${task.priority} status-${task.status} ${isAwaitingApproval(task) ? "approval-pending" : ""} ${showMatch ? "likely-done" : ""} ${isDragging ? "dragging" : ""} ${selectionMode ? "selecting" : ""} ${selected ? "selected" : ""}`}
+      // `selectable` marks the cards that render a checkbox — it cross-fades
+      // over the state glyph, so it costs the card no gutter of its own.
+      className={`krowe-card priority-${task.priority} status-${task.status} ${onToggleSelect ? "selectable" : ""} ${isAwaitingApproval(task) ? "approval-pending" : ""} ${showMatch && !autoApplied ? "likely-done" : ""} ${autoApplied ? "auto-done" : ""} ${isDragging ? "dragging" : ""} ${selectionMode ? "selecting" : ""} ${selected ? "selected" : ""}`}
       draggable
       onDragStart={(e) => {
         setIsDragging(true);
         e.dataTransfer.setData("taskId", task.id);
         e.dataTransfer.effectAllowed = "move";
+        // Drag the card, not the link under the cursor. A grab that lands on the
+        // title <a> would otherwise hand the browser its own ghost — the URL
+        // chip — so we snapshot a clone of the card and hold it at the exact
+        // point it was picked up. The clone lives offscreen for one frame,
+        // which is all the browser needs to rasterize it.
+        const rect = e.currentTarget.getBoundingClientRect();
+        const ghost = e.currentTarget.cloneNode(true) as HTMLElement;
+        ghost.classList.remove("dragging");
+        ghost.classList.add("krowe-card-ghost");
+        ghost.style.width = `${rect.width}px`;
+        document.body.appendChild(ghost);
+        e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
+        requestAnimationFrame(() => ghost.remove());
         onDragStart?.(task);
       }}
       onDragEnd={() => {
@@ -121,9 +140,7 @@ export function TaskCard({
       }}
       onContextMenu={taskMenu.menu.openAtEvent}
     >
-      <div className="krowe-rail" />
-
-      <div className="krowe-card-row">
+      <div className="krowe-card-srow">
         {onToggleSelect && (
           <button
             type="button"
@@ -139,27 +156,21 @@ export function TaskCard({
             {selected && <Check width={12} height={12} strokeWidth={3} />}
           </button>
         )}
-        {task.status === "done" && (
-          <span className="krowe-card-check" aria-hidden="true">
-            <Check width={11} height={11} strokeWidth={3} />
-          </span>
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <Link
-            href={`/${role === "operator" ? "o" : "b"}/tasks/${task.id}`}
-            className="krowe-card-title"
-            style={{ display: "block", textDecoration: "none" }}
-            onClick={(e) => {
-              if (!onSelect) return;
-              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-              e.preventDefault();
-              onSelect(task);
-            }}
-          >
-            {task.title}
-          </Link>
-        </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+        <StateGlyph status={task.status} />
+        <Link
+          href={`/${role === "operator" ? "o" : "b"}/tasks/${task.id}`}
+          className="krowe-card-title"
+          draggable={false}
+          onClick={(e) => {
+            if (!onSelect) return;
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+            e.preventDefault();
+            onSelect(task);
+          }}
+        >
+          {task.title}
+        </Link>
+        <div className="krowe-card-srow-end">
           {task.pinned_at && (
             <span className="krowe-card-pin" title="Pinned to top" aria-label="Pinned to top">
               <Pin width={13} height={13} strokeWidth={2.2} />
@@ -213,12 +224,14 @@ export function TaskCard({
       )}
 
       {showMatch && commitMatch && (
-        <div className="krowe-card-shipped">
+        <div className={`krowe-card-shipped ${autoApplied ? "auto" : ""}`}>
           <div className="krowe-card-shipped-head">
             <span className="badge">
               <CheckCheck width={13} height={13} strokeWidth={2.2} />
             </span>
-            <span className="h">Looks shipped</span>
+            <span className="h">
+              {autoApplied ? "Marked done automatically" : "Looks shipped"}
+            </span>
             {commitMatch.committedAt && (
               <span className="t">{relativeTime(commitMatch.committedAt)}</span>
             )}
@@ -230,6 +243,7 @@ export function TaskCard({
                 href={commitMatch.url}
                 target="_blank"
                 rel="noreferrer"
+                draggable={false}
                 onClick={(e) => e.stopPropagation()}
               >
                 <span className="sha">{commitMatch.shortSha}</span>
@@ -264,7 +278,7 @@ export function TaskCard({
                 }}
               >
                 <Check width={13} height={13} strokeWidth={2.4} />
-                Confirm done
+                {autoApplied ? "Keep" : "Confirm done"}
               </button>
             </div>
           </div>
@@ -273,69 +287,67 @@ export function TaskCard({
 
       <DeliveryChips task={task} />
 
-      <div className="krowe-card-meta">
-        <div className="krowe-card-meta-left">
-          <span className={`krowe-prio-dot ${task.priority}`}>
-            <span className="d" />
-          </span>
-          <TaskTypeBadge type={task.type} />
-          <TaskTags tags={task.tags} />
-        </div>
-        <div className="krowe-card-actions">
-          {role === "builder" && advance && (
+      <div className="krowe-card-smeta">
+        <PriorityBars priority={task.priority} />
+        <TaskTypeBadge type={task.type} />
+        <TaskTags tags={task.tags} />
+        <span className="krowe-card-spacer" />
+        {/* Signature and actions share one grid cell so the hover cross-fade
+            never reflows the meta line — see .krowe-card-endcap. */}
+        <div className="krowe-card-endcap">
+          <div className="krowe-card-signature">
+            <span className="krowe-card-date">
+              {new Date(task.created_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                timeZone: "UTC",
+              })}
+            </span>
+            <span className="krowe-card-sep" />
+            <span className="krowe-card-submitter" title={submitterName(task.creator)}>
+              <SubmitterAvatar creator={task.creator} />
+            </span>
+          </div>
+          <div className="krowe-card-actions">
+            {role === "builder" && advance && (
+              <button
+                className="krowe-advance-btn"
+                onClick={(e) => { e.stopPropagation(); handleAdvance(); }}
+              >
+                <span style={{ fontFamily: "var(--font-mono)" }}>→</span>
+                {advance.label}
+              </button>
+            )}
             <button
-              className="krowe-advance-btn"
-              onClick={(e) => { e.stopPropagation(); handleAdvance(); }}
+              className="krowe-iconbtn danger"
+              title="Delete task"
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (
+                  !(await confirm({
+                    title: `Delete “${task.title}”?`,
+                    description: "This permanently removes the task. This can’t be undone.",
+                    confirmText: "Delete task",
+                    cancelText: "Cancel",
+                    icon: Trash2,
+                    tone: "danger",
+                  }))
+                )
+                  return;
+                import("@/lib/actions/tasks")
+                  .then(({ deleteTask }) => deleteTask(task.id))
+                  .then((res) => {
+                    if (res && typeof res === "object" && "error" in res && res.error) {
+                      toast.error(res.error as string);
+                    }
+                  })
+                  .catch(() => toast.error("Couldn't delete the task. Please try again."));
+              }}
             >
-              <span style={{ fontFamily: "var(--font-mono)" }}>→</span>
-              {advance.label}
+              <Trash2 width={14} height={14} />
             </button>
-          )}
-          <button
-            className="krowe-iconbtn danger"
-            title="Delete task"
-            onClick={async (e) => {
-              e.stopPropagation();
-              if (
-                !(await confirm({
-                  title: `Delete “${task.title}”?`,
-                  description: "This permanently removes the task. This can’t be undone.",
-                  confirmText: "Delete task",
-                  cancelText: "Cancel",
-                  icon: Trash2,
-                  tone: "danger",
-                }))
-              )
-                return;
-              import("@/lib/actions/tasks")
-                .then(({ deleteTask }) => deleteTask(task.id))
-                .then((res) => {
-                  if (res && typeof res === "object" && "error" in res && res.error) {
-                    toast.error(res.error as string);
-                  }
-                })
-                .catch(() => toast.error("Couldn't delete the task. Please try again."));
-            }}
-          >
-            <Trash2 width={14} height={14} />
-          </button>
+          </div>
         </div>
-      </div>
-
-      <div className="krowe-card-foot">
-        <span className="krowe-card-date">
-          <CalendarDays width={12} height={12} strokeWidth={2} />
-          {new Date(task.created_at).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-            timeZone: "UTC",
-          })}
-        </span>
-        <span className="krowe-card-submitter">
-          <SubmitterAvatar creator={task.creator} />
-          {submitterName(task.creator)}
-        </span>
       </div>
     </div>
     <ContextMenu state={taskMenu.menu.state} items={taskMenu.items} onClose={taskMenu.menu.close} />

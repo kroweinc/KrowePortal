@@ -87,9 +87,17 @@ export interface GranolaFolder {
   noteCount: number | null;
 }
 
+/** Why `transcript` is empty when it is. A free workspace's plan denial and a
+    still-processing call both degrade to `[]` (see getNoteWithTranscript), and
+    the meeting page has to tell the builder which one it hit — "your plan
+    doesn't include transcripts" and "Granola hadn't finished yet" are different
+    problems with different answers. */
+export type GranolaTranscriptOutcome = "ok" | "plan_gated" | "not_found" | "empty";
+
 export interface GranolaNoteDetail {
   note: GranolaNote;
   transcript: GranolaTranscriptSegment[];
+  transcriptOutcome: GranolaTranscriptOutcome;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -202,6 +210,10 @@ export async function listNotes(
   // cursor/page size, so the whole range comes back as one page.
   opts: { cursor?: string; pageSize?: number; createdAfter?: string; folderId?: string } = {}
 ): Promise<GranolaNotesPage> {
+  // Matches GRANOLA_HISTORY_DAYS (lib/granola/format.ts) — and that window is
+  // not just this tool's paging: get_meetings 404s on an explicit id past the
+  // same 30 days, so nothing older is reachable by any route. Measured, see
+  // the constant's note.
   const args: Record<string, unknown> = { time_range: "last_30_days" };
   if (opts.folderId) args.folder_id = opts.folderId;
   const payload = await granolaTool(accessToken, "list_meetings", args);
@@ -352,19 +364,22 @@ export async function getNoteWithTranscript(
     if (!note.id) note.id = noteId;
 
     let transcript: GranolaTranscriptSegment[] = [];
+    // Which of the degraded cases we landed in. The import actions don't care —
+    // they fall back to summary-only content and error only when both are empty
+    // — but the meeting page renders a different sentence for each.
+    let outcome: GranolaTranscriptOutcome;
     if (transcriptOutcome.kind === "ok") {
       transcript = parseTranscriptPayload(transcriptOutcome.payload);
-    } else if (
-      !(transcriptOutcome.error instanceof GranolaNotFoundError) &&
-      !isPlanDenial(transcriptOutcome.error)
-    ) {
+      outcome = transcript.length > 0 ? "ok" : "empty";
+    } else if (transcriptOutcome.error instanceof GranolaNotFoundError) {
+      outcome = "not_found";
+    } else if (isPlanDenial(transcriptOutcome.error)) {
+      outcome = "plan_gated";
+    } else {
       throw transcriptOutcome.error;
     }
-    // else: no transcript (still processing, or free workspace) — the import
-    // actions fall back to summary-only content and error only when both
-    // are empty.
 
-    return { note, transcript };
+    return { note, transcript, transcriptOutcome: outcome };
   }
 }
 
@@ -375,38 +390,8 @@ export async function getAccountInfo(accessToken: string): Promise<{ email: stri
   return { email: typeof record.email === "string" ? record.email : null };
 }
 
-function speakerLabel(segment: GranolaTranscriptSegment): string {
-  const speaker = segment.speaker;
-  if (speaker?.source === "microphone") return "Me";
-  // Prefer the real diarized name over the generic "Them" — owner attribution
-  // in task extraction depends on participants keeping their names.
-  if (speaker?.diarization_label) return speaker.diarization_label;
-  if (speaker?.source === "speaker") return "Them";
-  return "Speaker";
-}
-
-/**
- * Flattens transcript segments to readable plain text, merging consecutive
- * same-speaker segments into one paragraph:
- *
- *   Me: …\n\nThem: …
- *
- * A single unlabeled segment (plain-text transcript) passes through without
- * a speaker prefix.
- */
-export function transcriptToPlainText(segments: GranolaTranscriptSegment[]): string {
-  if (segments.length === 1 && !segments[0].speaker) {
-    return segments[0].text;
-  }
-  const paragraphs: { label: string; parts: string[] }[] = [];
-  for (const segment of segments) {
-    const label = speakerLabel(segment);
-    const last = paragraphs[paragraphs.length - 1];
-    if (last && last.label === label) {
-      last.parts.push(segment.text.trim());
-    } else {
-      paragraphs.push({ label, parts: [segment.text.trim()] });
-    }
-  }
-  return paragraphs.map((p) => `${p.label}: ${p.parts.join(" ")}`).join("\n\n");
-}
+// transcriptToPlainText lives next to the parser that reads its output
+// (lib/granola/transcript-view.ts) so the format's writer and reader are one
+// unit-testable pair — it's a pure formatter and was only server-only by
+// association. Re-exported here so every existing import site is unchanged.
+export { transcriptToPlainText } from "@/lib/granola/transcript-view";

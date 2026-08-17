@@ -37,7 +37,18 @@ What each draft carries:
   - "feature": a capability that does not exist yet
   - "bug": behavior that is broken, wrong, or erroring today
   - "change": a tweak to something that already works — copy, styling, config, scope. Default here when it is neither clearly new nor clearly broken.
-- tags: the one area the work primarily touches, as a one-element array — or an empty array when no area fits. Pick from this list only:
+- tags: the one area the draft belongs to, as a one-element array — or an empty array when no area fits. The allowed areas are listed at the end of these instructions, and they are the only labels you may use.
+- sourceQuote: ≤300 chars copied verbatim from the notes or transcript, the lines that put this draft in the list. For a note bullet, that bullet's own line.
+
+Grounding and off-schema behavior:
+- Every draft traces to a specific line of the input, quoted verbatim in sourceQuote. A draft you cannot quote does not belong in the output.
+- When the call gives no value for a field, leave that field empty rather than filling it from something nearby — an owner, a date, or a quote borrowed from an unrelated part of the call reads as fact to the reviewer and is worse than an absent value.
+- A call with no assigned action items — a status sync, a demo, a sales conversation — returns an empty items array. That is a correct answer, not a failure.
+- At most 40 drafts. If the call yields more, keep the 40 most concrete.
+
+Builder identity: no name was given — if speakers are only labeled "Me"/"Them", "Me" is the builder.
+
+Areas — the allowed values for tags, and the area the work primarily touches. Pick the one an area's gloss actually covers; when the draft belongs to none of them, return an empty array rather than the closest label.
   - "ui": user-facing interface — components, layout, styling, on-screen copy
   - "backend": server-side logic, business rules, server actions, background jobs
   - "api": API endpoints, request/response handling, third-party API integration
@@ -49,12 +60,3 @@ What each draft carries:
   - "docs": documentation, README, code comments, guides
   - "growth": marketing, SEO, analytics, onboarding, referrals, conversion
   - "ai": LLM / model features — prompts, classification, content generation
-- sourceQuote: ≤300 chars copied verbatim from the notes or transcript, the lines that put this draft in the list. For a note bullet, that bullet's own line.
-
-Grounding and off-schema behavior:
-- Every draft traces to a specific line of the input, quoted verbatim in sourceQuote. A draft you cannot quote does not belong in the output.
-- When the call gives no value for a field, leave that field empty rather than filling it from something nearby — an owner, a date, or a quote borrowed from an unrelated part of the call reads as fact to the reviewer and is worse than an absent value.
-- A call with no assigned action items — a status sync, a demo, a sales conversation — returns an empty items array. That is a correct answer, not a failure.
-- At most 40 drafts. If the call yields more, keep the 40 most concrete.
-
-Builder identity: no name was given — if speakers are only labeled "Me"/"Them", "Me" is the builder.

@@ -32,10 +32,25 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export const TASK_TYPES = ["feature", "bug", "change"] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
-// Fixed taxonomy of area labels the AI classifier may assign. A task gets
-// exactly ONE of these (stored as a single-element tasks.tags array) — the
-// closed list keeps labels consistent and prevents one-off free-form tags like
-// "pdf-forms" or "export". Edit this list to change the allowed set.
+// What a task actually IS, as opposed to what kind of change it makes
+// (migration 0089). Not every task ends in a branch — plenty of builder work is
+// asking the client a question or sending an email, and forcing that through
+// the code-shaped approval flow made it read half-finished. Chosen by the
+// builder in the Submit-for-Approval dialog; null on anything never asked, which
+// lays out like "code" but renders no chip.
+export const WORK_KINDS = ["code", "question", "email", "other"] as const;
+export type WorkKind = (typeof WORK_KINDS)[number];
+
+// The FALLBACK taxonomy of area labels. A task gets exactly ONE area (stored as
+// a single-element tasks.tags array), but the allowed set is no longer fixed:
+// a repo with derived areas (repo_areas, migration 0092) supplies its own
+// product areas — "checkout", "reporting" — and this generic list is what the
+// classifiers fall back to when no repo is connected or the derivation failed.
+// See resolveAreaVocabulary in lib/tasks/area-vocabulary.ts.
+//
+// Whichever vocabulary is in play, it stays a CLOSED list: that's what prevents
+// one-off free-form tags like "pdf-forms" sitting next to "export". Edit this
+// list to change the fallback set.
 export const TASK_TAGS = [
   "ui",
   "backend",
@@ -50,6 +65,63 @@ export const TASK_TAGS = [
   "ai",
 ] as const;
 export type TaskTag = (typeof TASK_TAGS)[number];
+
+// One-line gloss per fallback label, used only to steer the classifier. Typed as
+// a Record<TaskTag, …> so adding a tag to TASK_TAGS is a compile error until its
+// gloss is written — prompt text and the enum the schema decodes against cannot
+// drift. Lives beside the taxonomy rather than in lib/ai/prompts.ts so the
+// vocabulary resolver can build the fallback without importing prompt code.
+export const TASK_TAG_DESCRIPTIONS: Record<TaskTag, string> = {
+  ui: "user-facing interface — components, layout, styling, on-screen copy",
+  backend: "server-side logic, business rules, server actions, background jobs",
+  api: "API endpoints, request/response handling, third-party API integration",
+  database: "schema, migrations, queries, data modeling, storage",
+  auth: "login, signup, sessions, permissions, access control",
+  infra: "deployment, CI/CD, env config, hosting, build tooling",
+  design: "visual design, UX, design system, branding (vs. implementation)",
+  performance: "speed, caching, query/render optimization, reducing load time",
+  docs: "documentation, README, code comments, guides",
+  growth: "marketing, SEO, analytics, onboarding, referrals, conversion",
+  ai: "LLM / model features — prompts, classification, content generation",
+};
+
+// A task's area label as STORED. Deliberately a bare string, not TaskTag: the
+// value is a slug from whichever vocabulary was resolved when the task was
+// classified, so a repo area ("checkout") and a fallback tag ("ui") are both
+// valid and both render as the same chip. Anything reading tasks.tags should use
+// this; TaskTag now only types the fallback list itself.
+export type TaskArea = string;
+
+// The shape every area slug holds, whichever vocabulary produced it: lowercase
+// kebab, no leading/trailing hyphen, ≤24 chars. Enforced on writes instead of
+// membership in a specific list — a board legitimately holds tasks classified
+// under a vocabulary that has since been refreshed, and rejecting those on edit
+// would make a task uneditable because its repo grew a new area.
+export const AREA_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const AREA_SLUG_MAX = 24;
+
+// One allowed area, with the gloss that steers the classifier toward it.
+export type AreaDefinition = { slug: TaskArea; label: string; gloss: string };
+
+// The label set one classification runs against. "repo" = areas derived from the
+// engagement's repo (repo_areas, migration 0092); "fallback" = TASK_TAGS. The
+// source is carried so the UI can say which vocabulary a chip came from and so
+// callers can tell "this repo has no areas yet" from "this repo has these areas".
+export type AreaVocabulary = {
+  source: "repo" | "fallback";
+  values: AreaDefinition[];
+};
+
+// The fallback vocabulary as an AreaVocabulary — one definition, reused by the
+// resolver and by any caller that needs a vocabulary without touching the DB.
+export const FALLBACK_AREA_VOCABULARY: AreaVocabulary = {
+  source: "fallback",
+  values: TASK_TAGS.map((slug) => ({
+    slug,
+    label: slug,
+    gloss: TASK_TAG_DESCRIPTIONS[slug],
+  })),
+};
 
 export type OnboardingStatus = "in_progress" | "completed" | "dismissed";
 // First-time product-tour lifecycle (separate from the onboarding form wizard).
@@ -147,6 +219,10 @@ export interface Task {
   source: TaskSource;
   // Linear-style change type and AI-generated area labels (migration 0064).
   type: TaskType | null;
+  // Code vs. non-code work (migration 0089). Set when the task is sent for
+  // approval; null on tasks that predate the question. Only "code" carries a
+  // branch — the other kinds hide the branch/commit UI entirely.
+  work_kind: WorkKind | null;
   tags: string[];
   status: TaskStatus;
   priority: TaskPriority;
@@ -186,6 +262,24 @@ export interface Task {
   release_id: string | null;
   shipped_at: string | null;
   release?: Release | null;
+  // The Granola call this task was drafted from (migration 0088). Nullable —
+  // hand-written tasks, operator requests and paste/upload drafts have none.
+  // ON DELETE SET NULL, so releasing a failed import's ledger claim unlinks its
+  // tasks rather than stranding them. Links to /b/meetings/[granola_import_id].
+  granola_import_id: string | null;
+  // The verbatim line the AI drafted this task from (ExtractedTaskDraft
+  // .sourceQuote, <= 300 chars). Discarded at approval before 0088, so
+  // backfilled tasks have none — every surface must render it optionally.
+  granola_source_quote: string | null;
+  // Embedded meeting header, only present when the query selects it (the builder
+  // board does, to label the "From meeting" link without a second read). Yields
+  // null for operators — granola_imports_select is builder-only, and a blocked
+  // embed returns null rather than erroring.
+  granola_import?: {
+    id: string;
+    granola_note_title: string | null;
+    granola_created_at: string | null;
+  } | null;
   engagement?: Engagement;
   // The person who submitted the task, joined on created_by. Surfaced in place of
   // the old operator/builder source badge. Absent unless the query selects it.
@@ -270,7 +364,7 @@ export interface ReleaseGap {
   description: string;
   priority: TaskPriority;
   type: TaskType;
-  tags: TaskTag[];
+  tags: TaskArea[];
   confidence: "high" | "medium" | "low";
   evidence: ReleaseGapCommit[];
   files: string[];
@@ -596,6 +690,10 @@ export interface GranolaConnection {
 // project AND an engagement, never twice into the same container.
 export type GranolaImportTarget = "project" | "engagement";
 
+// Why granola_imports.transcript is what it is (migration 0088). Filled by the
+// post-approve snapshot capture; null = never attempted (any pre-0088 import).
+export type GranolaTranscriptStatus = "captured" | "plan_gated" | "not_ready" | "failed";
+
 export interface GranolaImport {
   id: string;
   user_id: string;
@@ -609,6 +707,15 @@ export interface GranolaImport {
   tasks_created: number; // engagement imports: approved task count
   imported_via: "manual" | "cron";
   created_at: string;
+  // ── Call snapshot (0088), engagement targets ONLY ──
+  // Granola exposes no shareable URL, so /b/meetings/[id] renders from these
+  // rather than linking out or re-fetching. Project imports keep the same text
+  // in project_sop_transcripts.content and leave these null on purpose.
+  summary: string | null;
+  transcript: string | null;
+  participants: string | null;
+  transcript_status: GranolaTranscriptStatus | null;
+  snapshot_fetched_at: string | null; // stamped on every attempt, success or not
 }
 
 // ── Product Feedback ───────────────────────────────────────────────────
@@ -966,6 +1073,10 @@ export interface TaskAttachment {
   is_deliverable: boolean;
   created_at: string;
   uploader?: Pick<Profile, "id" | "display_name" | "role">;
+  // Not a column. A short-lived signed URL minted at read time for image
+  // attachments (see withPreviewUrls) so the UI can paint the file inline
+  // instead of offering only a download.
+  preview_url?: string | null;
 }
 
 // A message in a task's comment thread (migration 0082). Rendered in the detail

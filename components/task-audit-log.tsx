@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { relativeTime } from "@/lib/utils";
 import {
   ArrowRight,
   Check,
@@ -191,7 +192,8 @@ function describe(entry: AuditEntry): React.ReactNode {
   }
 }
 
-/** Short plain-text rendering of an event for the digest summary line. */
+/** Short plain-text rendering of an event — the digest summary line, and every
+ *  row of the compact Activity timeline in the detail sheet's Overview. */
 function plainDescribe(entry: AuditEntry): string {
   const meta = entry.metadata ?? {};
   switch (entry.action) {
@@ -199,22 +201,68 @@ function plainDescribe(entry: AuditEntry): string {
       return "created this task";
     case "task.status_changed":
       return `moved it to ${formatValue(entry.action, "status", entry.new_value)}`;
+    case "task.field_changed": {
+      const field =
+        entry.field === "builder_estimate_hours" ? "estimate" : entry.field ?? "a field";
+      return `changed the ${field}`;
+    }
     case "task.completed":
       return meta.pushed_to_main ? "marked it done and pushed to main" : "marked it done";
     case "task.sent_for_approval":
       return "sent it for approval";
     case "task.approval_withdrawn":
       return "pulled it back from approval";
+    case "task.approved":
+      return "approved the deliverable";
     case "task.changes_requested":
       return "requested changes";
+    case "task.comment_added":
+      return "left a comment";
+    case "task.comment_deleted":
+      return "deleted a comment";
+    case "task.regenerated":
+      return "regenerated this task";
+    case "task.pinned":
+      return "pinned it to the top";
+    case "task.unpinned":
+      return "unpinned it";
+    case "task.branch_set":
+    case "task.branch_changed":
+      return `set the branch to ${formatValue(entry.action, null, entry.new_value)}`;
+    case "task.pushed_to_main_changed":
+      return entry.new_value ? "marked it pushed to main" : "cleared pushed to main";
+    case "task.commit_match_auto_applied":
+      return "was closed automatically by a matching commit";
+    case "task.commit_match_auto_reverted":
+      return "reopened it after an automatic match";
+    case "task.commit_match_confirmed":
+      return "confirmed a matching commit";
+    case "task.commit_match_dismissed":
+      return "dismissed a matching commit";
+    case "task.release_gap_accepted":
+      return "logged it against a release";
     case "subtask.completed":
       return "closed a sub-task";
+    case "subtask.uncompleted":
+      return "reopened a sub-task";
     case "subtask.created":
       return "added a sub-task";
+    case "subtask.renamed":
+      return "renamed a sub-task";
+    case "subtask.deleted":
+      return "deleted a sub-task";
     case "attachment.uploaded":
       return "uploaded a file";
+    case "attachment.linked":
+      return "added a link";
+    case "attachment.note_added":
+      return "added a note";
+    case "attachment.removed":
+      return "removed an attachment";
     case "task.commit_linked":
       return "linked a commit";
+    case "task.commit_unlinked":
+      return "unlinked a commit";
     default:
       return entry.action.replace(/[._]/g, " ");
   }
@@ -335,11 +383,24 @@ function AuditEvent({ entry }: { entry: AuditEntry }) {
   );
 }
 
-interface Props {
-  taskId: string;
+/** Node glyph for the compact timeline — the Overview's smaller vocabulary. */
+function ActivityIcon({ kind }: { kind: EventKind }) {
+  if (kind === "milestone") return <GitMerge className="h-[11px] w-[11px]" strokeWidth={2} />;
+  if (kind === "subtask") return <Check className="h-[11px] w-[11px]" strokeWidth={2.4} />;
+  if (kind === "status") return <ArrowRight className="h-[11px] w-[11px]" strokeWidth={2} />;
+  return <PenLine className="h-[11px] w-[11px]" strokeWidth={2} />;
 }
 
-export function TaskAuditLog({ taskId }: Props) {
+interface Props {
+  taskId: string;
+  /** Compact timeline for the sheet's Overview: newest few events, no digest,
+   *  no filters, no day grouping. The full ledger stays in the Audit tab. */
+  compact?: boolean;
+  limit?: number;
+  onViewAll?: () => void;
+}
+
+export function TaskAuditLog({ taskId, compact = false, limit = 6, onViewAll }: Props) {
   const [entries, setEntries] = useState<AuditEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "status" | "subtask" | "note">("all");
@@ -388,7 +449,45 @@ export function TaskAuditLog({ taskId }: Props) {
   }
 
   if (entries.length === 0) {
-    return <div className="krowe-audit-empty">No activity yet.</div>;
+    return (
+      <div className={compact ? "krowe-task-empty-soft" : "krowe-audit-empty"}>
+        {compact ? "Nothing has happened here yet." : "No activity yet."}
+      </div>
+    );
+  }
+
+  if (compact) {
+    const rows = entries.slice(0, limit);
+    return (
+      <>
+        <ul className="krowe-task-acts">
+          {rows.map((e) => {
+            const kind = classify(e);
+            return (
+              <li className="krowe-task-act" key={e.id}>
+                <span className={`node ${kind}`} aria-hidden="true">
+                  <ActivityIcon kind={kind} />
+                </span>
+                <span className="what">
+                  <strong>{actorName(e.actor)}</strong> {plainDescribe(e)}
+                </span>
+                <time
+                  dateTime={e.created_at}
+                  title={new Date(e.created_at).toLocaleString()}
+                >
+                  {relativeTime(e.created_at)}
+                </time>
+              </li>
+            );
+          })}
+        </ul>
+        {onViewAll && entries.length > rows.length && (
+          <button type="button" className="krowe-task-acts-more" onClick={onViewAll}>
+            View all {entries.length} events
+          </button>
+        )}
+      </>
+    );
   }
 
   const shown =

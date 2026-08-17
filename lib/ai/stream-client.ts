@@ -5,6 +5,7 @@
  */
 
 import type { ExtractedTaskDraft, Question } from "@/lib/ai/schemas";
+import type { AreaDefinition } from "@/lib/types";
 import { createPrdSectionScanner } from "@/lib/ai/prd-section-scanner";
 
 /** The terminal event the server can send. */
@@ -133,8 +134,16 @@ export type TaskDraftStreamFinal =
   | { type: "error"; error: string }
   | { type: "unavailable" };
 
+/** The `meta` event's payload — sent before the first draft, so the review can
+    paint its Area select with the same vocabulary the model was constrained to. */
+export type TaskDraftMeta = {
+  noteTitle: string | null;
+  noteCreatedAt: string | null;
+  areas: AreaDefinition[];
+};
+
 type TaskDraftWireEvent =
-  | { type: "meta"; noteTitle: string | null; noteCreatedAt: string | null }
+  | ({ type: "meta" } & TaskDraftMeta)
   | { type: "task"; item: ExtractedTaskDraft }
   | { type: "done"; drafts: ExtractedTaskDraft[] }
   | { type: "error"; error: string };
@@ -151,7 +160,7 @@ export async function streamTaskDrafts(
   body: unknown,
   opts: {
     signal: AbortSignal;
-    onMeta?: (meta: { noteTitle: string | null; noteCreatedAt: string | null }) => void;
+    onMeta?: (meta: TaskDraftMeta) => void;
     onTask?: (item: ExtractedTaskDraft) => void;
   }
 ): Promise<TaskDraftStreamFinal> {

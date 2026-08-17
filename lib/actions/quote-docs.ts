@@ -55,6 +55,7 @@ export async function draftQuote(input: DraftQuoteInput): Promise<DraftQuoteResu
   try {
     result = await generateQuote(resolved.genInput, { userId: resolved.profile.id, operation: "generate_quote" });
   } catch (err) {
+    console.error("[draftQuote]", err);
     return { error: friendlyAiError(err) };
   }
 
@@ -176,6 +177,7 @@ export async function refineQuoteSection(
       currentDate: new Date().toISOString().slice(0, 10),
     }, { userId: profile.id, operation: "refine_quote_section" });
   } catch (err) {
+    console.error("[refineQuoteSection]", err);
     return { error: friendlyAiError(err) };
   }
 

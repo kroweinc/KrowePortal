@@ -17,11 +17,23 @@ import { getDefaultBranchTip } from "@/lib/github/recent-commits";
 import { parseMergedBranch, mergeSubject } from "@/lib/github/merge-subject";
 import { isUniqueViolation } from "@/lib/supabase/errors";
 import { findSimilarTitles } from "@/lib/tasks/dedupe";
-import { TASK_TAGS, type TaskStatus, type TaskTag } from "@/lib/types";
+import { sanitizeAreaTags } from "@/lib/tasks/area-vocabulary";
+import {
+  AREA_SLUG_MAX,
+  AREA_SLUG_RE,
+  WORK_KINDS,
+  type TaskArea,
+  type TaskStatus,
+  type WorkKind,
+} from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
 }
+
+/** One area slug, shape-checked. Shared by task creation and the regeneration
+    apply so both accept a repo area and a fallback tag on equal terms. */
+const AreaSlug = z.string().max(AREA_SLUG_MAX).regex(AREA_SLUG_RE);
 
 const createTaskSchema = z.object({
   engagement_id: z.string().uuid().optional(),
@@ -31,7 +43,12 @@ const createTaskSchema = z.object({
   // Optional Linear-style classification, supplied pre-classified by the AI draft
   // flow (new-task-form). Absent on manual entry, which classifies after creation.
   type: z.enum(["feature", "bug", "change"]).optional(),
-  tags: z.array(z.enum(TASK_TAGS)).max(1).optional(),
+  // One area slug from whichever vocabulary classified the task. SHAPE only here
+  // (see AREA_SLUG_RE) — membership depends on the caller's engagement, which a
+  // static schema can't see, so the action runs it through sanitizeAreaTags
+  // before insert. Both halves are needed: shape alone would let a hand-rolled
+  // POST persist an off-vocabulary one-off chip.
+  tags: z.array(AreaSlug).max(1).optional(),
   // Optional starting column, from the Granola review's "Lands in" select.
   // Done is excluded so a freshly created task can't bypass the approval gate.
   status: z.enum(["backlog", "todo", "in_progress"]).optional(),
@@ -102,7 +119,13 @@ export async function createTask(formData: FormData) {
     // Pre-classified by the AI draft; null/[] on manual entry (filled by the
     // deferred classifier below).
     type: parsed.data.type ?? null,
-    tags: parsed.data.tags ?? [],
+    // Shape-checked by the schema; membership can only be judged against this
+    // caller's engagement, so it happens here. An unrecognized slug becomes no
+    // chip rather than a rejected create — see sanitizeAreaTags.
+    tags: await sanitizeAreaTags(parsed.data.tags, {
+      profileId: profile.id,
+      engagementId: parsed.data.engagement_id ?? null,
+    }),
     source: profile.role === "operator" ? "operator_request" : "builder_added",
     created_by: profile.id,
     // Omit when unset so the column's DB default applies.
@@ -162,6 +185,7 @@ export async function createTask(formData: FormData) {
         title: parsed.data.title,
         description: parsed.data.description ?? null,
         userId: profile.id,
+        engagementId: parsed.data.engagement_id ?? null,
       })
     );
   }
@@ -421,6 +445,11 @@ export async function markTaskDone(
     // confirmMatchedTaskDone, which has the default-branch commit in hand. Two
     // tasks confirmed against the same commit then share one release.
     ship?: ShipRef | null;
+    // Whether to email the operator that the work was delivered. Defaults on;
+    // the auto-apply path (commit-task-matches) turns it off because a task the
+    // scan marked done on its own is still awaiting the builder's word, and an
+    // email can't be unsent when they reject it. Their Keep releases it.
+    notify?: boolean;
   }
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
@@ -543,7 +572,9 @@ export async function markTaskDone(
 
     // Email the operator that the task was delivered — only on an actual
     // transition into done, so re-marking an already-done task doesn't re-notify.
-    if (before && before.status !== "done") {
+    // The audit rows above still write when notify is off: the trail should
+    // record the auto-move, it's only the outward-facing mail that waits.
+    if (before && before.status !== "done" && payload.notify !== false) {
       await notifyTaskEvent({
         taskId,
         actor: profile,
@@ -768,7 +799,8 @@ type ShippedPush = { branch: string | null; taskIds: string[]; releaseId: string
  *  can share it — `redirect()` is not callable from `after()`. */
 async function shipPushedTasks(
   profileId: string,
-  engagementIds: string[]
+  engagementIds: string[],
+  opts: { fresh?: boolean } = {}
 ): Promise<ShippedPush[]> {
   const admin = createAdminClient();
   const shipped: ShippedPush[] = [];
@@ -785,7 +817,7 @@ async function shipPushedTasks(
     // and with no release row there is nowhere to hang the untracked-work scan
     // (0086). The read is cached for 300s and already shared with the commit
     // scan, so an unchanged repo costs one indexed lookup.
-    const tip = await getDefaultBranchTip(repo);
+    const tip = await getDefaultBranchTip(repo, { fresh: opts.fresh });
     if (!tip) continue;
 
     // Claim the push on the releases ledger. This is set membership over every
@@ -879,21 +911,30 @@ async function shipPushedTasks(
           }))
         )
       );
-      shipped.push({
-        branch: parseMergedBranch(tip.message),
-        taskIds,
-        releaseId: release.id as string,
-      });
     }
+    // Reported even when it moved nothing. The release row is the find — the
+    // Shipped timeline renders it whether or not a task rode along — so
+    // withholding it left a detected push invisible until a full reload, and
+    // left the button with nothing to say about a push it had just recorded.
+    shipped.push({
+      branch: parseMergedBranch(tip.message),
+      taskIds,
+      releaseId: release.id as string,
+    });
   }
 
   return shipped;
 }
 
-/** Staging-board load and the "Check for pushes" button. Returns what it shipped
- *  so the client can toast (with Undo). */
+/** Staging-board load and the "Check for pushes" button. Returns every push it
+ *  recorded so the client can toast (with Undo).
+ *
+ *  `fresh` is the button: an explicit check bypasses the 300s GitHub cache the
+ *  mount read and the background sweep share, so pressing it right after a push
+ *  sees the push instead of a five-minute-old tip. */
 export async function pollMainMerges(
-  engagementIds: string[]
+  engagementIds: string[],
+  opts?: { fresh?: boolean }
 ): Promise<ShippedPush[]> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -901,7 +942,9 @@ export async function pollMainMerges(
   const parsed = pollMainMergesSchema.safeParse(engagementIds);
   if (!parsed.success || parsed.data.length === 0) return [];
 
-  const shipped = await shipPushedTasks(profile.id, parsed.data);
+  const shipped = await shipPushedTasks(profile.id, parsed.data, {
+    fresh: opts?.fresh === true,
+  });
   if (shipped.length > 0) {
     revalidatePath("/b");
     revalidatePath("/b/staging");
@@ -949,11 +992,23 @@ export async function sweepMainPushes(): Promise<void> {
 const markForApprovalSchema = z.object({
   taskId: z.string().uuid(),
   note: z.string().trim().max(2000).nullish(),
+  // What kind of work this was (migration 0089). Only "code" carries a branch;
+  // the other kinds are the ones that used to be squeezed through a
+  // deliverable-shaped dialog they had no deliverable for.
+  workKind: z.enum(WORK_KINDS).optional(),
+  // Omitted (undefined) leaves whatever the task already had — only the code
+  // chip, with a real repo behind it, sends a value. Explicit null is "no
+  // branch" and does clear it.
+  branchName: z.string().trim().max(255).nullish(),
 });
 
 export async function markTaskForApproval(
   taskId: string,
-  payload: { note: string | null }
+  payload: {
+    note: string | null;
+    workKind?: WorkKind;
+    branchName?: string | null;
+  }
 ): Promise<{ success: true } | { error: string }> {
   const profile = await getCurrentProfile();
   if (!profile) redirect("/login");
@@ -973,6 +1028,16 @@ export async function markTaskForApproval(
   if (parsed.data.note) {
     updates.completion_note = parsed.data.note;
   }
+  if (parsed.data.workKind) {
+    updates.work_kind = parsed.data.workKind;
+    // A task that isn't code can't be on a branch. Clearing here matters on a
+    // re-submit: a task first sent as code and corrected to "email" would
+    // otherwise keep the branch it was filed under.
+    if (parsed.data.workKind !== "code") updates.branch_name = null;
+  }
+  if (parsed.data.branchName !== undefined && parsed.data.workKind === "code") {
+    updates.branch_name = parsed.data.branchName || null;
+  }
 
   const supabase = await getClient(profile.id);
 
@@ -984,7 +1049,13 @@ export async function markTaskForApproval(
     taskId,
     actorId: profile.id,
     action: "task.sent_for_approval",
-    metadata: parsed.data.note ? { note: parsed.data.note } : null,
+    metadata:
+      parsed.data.note || parsed.data.workKind
+        ? {
+            ...(parsed.data.note ? { note: parsed.data.note } : {}),
+            ...(parsed.data.workKind ? { work_kind: parsed.data.workKind } : {}),
+          }
+        : null,
   });
 
   // Email the operator that a task is ready for their review — deferred so the
@@ -1278,7 +1349,7 @@ const applyRegenSchema = z.object({
     description: z.string().max(2000),
     priority: z.enum(["low", "medium", "high", "urgent"]),
     type: z.enum(["feature", "bug", "change"]),
-    tags: z.array(z.enum(TASK_TAGS)).max(1),
+    tags: z.array(AreaSlug).max(1),
   }),
   final: z
     .array(
@@ -1301,7 +1372,7 @@ export interface ApplyTaskRegenerationInput {
     description: string;
     priority: "low" | "medium" | "high" | "urgent";
     type: "feature" | "bug" | "change";
-    tags: TaskTag[];
+    tags: TaskArea[];
   };
   final: { op: "keep" | "rename" | "add" | "preserved"; id?: string; title: string }[];
   remove: { id: string }[];
@@ -1335,7 +1406,7 @@ export async function applyTaskRegeneration(
 
   const { data: before } = await supabase
     .from("tasks")
-    .select("title, description, priority, type, tags")
+    .select("title, description, priority, type, tags, engagement_id")
     .eq("id", taskId)
     .single();
 
@@ -1347,7 +1418,12 @@ export async function applyTaskRegeneration(
       description: fields.description,
       priority: fields.priority,
       type: fields.type,
-      tags: fields.tags,
+      // Membership-checked against this task's engagement for the createTask
+      // reason — the schema above can only vet the slug's shape.
+      tags: await sanitizeAreaTags(fields.tags, {
+        profileId: profile.id,
+        engagementId: (before?.engagement_id as string | null) ?? null,
+      }),
       updated_at: new Date().toISOString(),
     })
     .eq("id", taskId);

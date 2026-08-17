@@ -6,6 +6,8 @@ import { GitBranch, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { setTaskBranch } from "@/lib/actions/tasks";
 import {
+  addLocalBranch,
+  removeLocalBranch,
   getEngagementBranchesCached,
   refreshEngagementBranches,
   type EngagementBranch,
@@ -82,6 +84,33 @@ export function TaskBranchField({ taskId, branch, readOnly, preloaded }: Props) 
     });
   }
 
+  // Same escape hatch the deliverable dialogs have: file a task under a branch
+  // that only exists on the builder's machine. Selecting it (and so saving it
+  // onto the task) is the picker's job — these just keep the chips in sync.
+  async function handleAddBranch(name: string): Promise<string | null> {
+    try {
+      const res = await addLocalBranch(taskId, name);
+      if ("error" in res) return res.error;
+      setBranches(res.branches);
+      setDefaultBranch(res.defaultBranch);
+      setState("ready");
+      return null;
+    } catch {
+      return "Couldn't add that branch. Try again.";
+    }
+  }
+
+  async function handleRemoveBranch(name: string): Promise<string | null> {
+    try {
+      const res = await removeLocalBranch(taskId, name);
+      if ("error" in res) return res.error;
+      setBranches(res.branches);
+      return null;
+    } catch {
+      return "Couldn't remove that branch. Try again.";
+    }
+  }
+
   async function handleRefresh() {
     setRefreshing(true);
     try {
@@ -117,6 +146,8 @@ export function TaskBranchField({ taskId, branch, readOnly, preloaded }: Props) 
             disabled={isPending}
             onRefresh={handleRefresh}
             refreshing={refreshing}
+            onAddBranch={handleAddBranch}
+            onRemoveBranch={handleRemoveBranch}
           />
         )}
         <button

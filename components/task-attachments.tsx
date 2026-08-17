@@ -10,8 +10,6 @@ import {
   Link2,
   FileText,
   ExternalLink,
-  ChevronDown,
-  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +43,32 @@ function formatBytes(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Roughly the point where a note stops being a line and starts being a wall.
+// Past it the body clamps and offers to open, so one long paste can't push the
+// rest of the section off the sheet.
+const NOTE_CLAMP_CHARS = 320;
+
+/** A text attachment's body — wrapped and whole, not truncated to one line. */
+function NoteBody({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const clampable = content.length > NOTE_CLAMP_CHARS;
+
+  return (
+    <div className="krowe-att-note">
+      <p className={clampable && !expanded ? "body clamped" : "body"}>{content}</p>
+      {clampable && (
+        <button
+          type="button"
+          className="krowe-att-note-more"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface TaskAttachmentsProps {
   taskId: string;
   role: Role;
@@ -65,7 +89,6 @@ export function TaskAttachments({
   const [attachments, setAttachments] = useState<TaskAttachment[]>(initial);
   const [loading, setLoading] = useState(initial.length === 0);
   const [isPending, startTransition] = useTransition();
-  const [collapsed, setCollapsed] = useState(false);
   const [addMode, setAddMode] = useState<AddMode>(null);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
@@ -184,41 +207,37 @@ export function TaskAttachments({
 
   return (
     <div className="space-y-2">
+      {/* The sheet's standard section head. Owned here rather than by the
+          caller so the label, the count and the Add action stay one row —
+          the sheet used to draw its own head above this one, and the two
+          stacked as a doubled "ATTACHMENTS". */}
       {!isDeliverable && (
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setCollapsed((c) => !c)}
-            className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-500 hover:text-neutral-700 transition-colors"
-          >
-            {collapsed ? (
-              <ChevronRight className="h-3 w-3" />
-            ) : (
-              <ChevronDown className="h-3 w-3" />
-            )}
+        <div className="krowe-task-section-h">
+          <span className="label">
             <Paperclip className="h-3 w-3" />
             Attachments
             {attachments.length > 0 && (
-              <span className="font-normal text-neutral-400">
-                ({attachments.length})
+              <span className="krowe-task-section-count">
+                {attachments.length}
               </span>
             )}
-          </button>
-          {!readOnly && !collapsed && addMode === null && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs text-neutral-400 hover:text-neutral-700"
+          </span>
+          <span className="rule" />
+          {!readOnly && addMode === null && (
+            <button
+              type="button"
+              className="krowe-task-mini"
               onClick={() => setAddMode("picker")}
               disabled={isPending}
             >
-              <Plus className="mr-1 h-3 w-3" />
+              <Plus className="h-3 w-3" />
               Add
-            </Button>
+            </button>
           )}
         </div>
       )}
 
-      {!collapsed && !readOnly && addMode === "picker" && (
+      {!readOnly && addMode === "picker" && (
         <div className="flex items-center gap-1.5 rounded-md border border-neutral-200 bg-neutral-50 px-2 py-1.5">
           <span className="text-xs text-neutral-400 mr-1">Add:</span>
           <button
@@ -254,7 +273,7 @@ export function TaskAttachments({
         </div>
       )}
 
-      {!collapsed && !readOnly && addMode === "link" && (
+      {!readOnly && addMode === "link" && (
         <div className="space-y-1.5 rounded-md border border-neutral-200 bg-neutral-50 p-2.5">
           <input
             type="url"
@@ -294,7 +313,7 @@ export function TaskAttachments({
         </div>
       )}
 
-      {!collapsed && !readOnly && addMode === "text" && (
+      {!readOnly && addMode === "text" && (
         <div className="space-y-1.5 rounded-md border border-neutral-200 bg-neutral-50 p-2.5">
           <textarea
             placeholder="Add a note..."
@@ -336,17 +355,33 @@ export function TaskAttachments({
         />
       )}
 
-      {!collapsed && loading ? (
-        <p className="py-1 text-xs text-neutral-400">Loading attachments…</p>
-      ) : !collapsed && attachments.length === 0 && !isDeliverable ? (
-        <p className="py-1 text-xs text-neutral-400">No attachments</p>
-      ) : !collapsed ? (
+      {loading ? (
+        <p className="krowe-task-empty-soft">Loading attachments…</p>
+      ) : attachments.length === 0 && !isDeliverable ? (
+        <p className="krowe-task-empty-soft">
+          Nothing attached yet — drop a file or paste a link.
+        </p>
+      ) : (
         <ul className="space-y-1.5">
           {attachments.map((a) => (
-            <li
-              key={a.id}
-              className="flex items-center justify-between gap-2 rounded-md border border-neutral-100 bg-neutral-50 px-2.5 py-1.5 text-xs"
-            >
+            <li key={a.id} className="krowe-att-item">
+              {a.preview_url && (
+                <a
+                  href={a.preview_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="krowe-att-media"
+                  title={`Open ${a.file_name}`}
+                >
+                  {/* Plain <img>: signed Supabase Storage URL, no next/image
+                      remotePatterns needed. Lazy so a task with a dozen
+                      screenshots doesn't fetch them all on open. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={a.preview_url} alt={a.file_name} loading="lazy" />
+                </a>
+              )}
+
+              <div className="krowe-att-row">
               {a.attachment_type === "link" ? (
                 <div className="flex min-w-0 items-center gap-2">
                   <Link2 className="h-3 w-3 shrink-0 text-neutral-400" />
@@ -370,9 +405,7 @@ export function TaskAttachments({
               ) : a.attachment_type === "text" ? (
                 <div className="flex min-w-0 items-start gap-2">
                   <FileText className="h-3 w-3 shrink-0 text-neutral-400 mt-0.5" />
-                  <span className="truncate text-neutral-700 leading-relaxed">
-                    {a.text_content}
-                  </span>
+                  <NoteBody content={a.text_content ?? ""} />
                   {a.uploader && (
                     <Badge
                       variant={a.uploader.role === "operator" ? "operator" : "builder"}
@@ -436,10 +469,11 @@ export function TaskAttachments({
                   </button>
                 )}
               </div>
+              </div>
             </li>
           ))}
         </ul>
-      ) : null}
+      )}
     </div>
   );
 }

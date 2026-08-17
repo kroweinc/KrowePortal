@@ -9,6 +9,7 @@ import type { TaskAttachment } from "@/lib/types";
 import { MAX_ATTACHMENT_SIZE, ALLOWED_ATTACHMENT_EXTENSIONS } from "@/lib/attachments-constants";
 import { writeAuditEntry } from "@/lib/actions/audit-log";
 import { isTaskMember, isAttachmentMember } from "@/lib/actions/task-access";
+import { withPreviewUrls } from "@/lib/attachments-preview";
 
 const MAX_SIZE = MAX_ATTACHMENT_SIZE;
 const ALLOWED_EXTENSIONS = ALLOWED_ATTACHMENT_EXTENSIONS;
@@ -89,7 +90,10 @@ export async function uploadAttachment(formData: FormData): Promise<{ success?: 
 
   revalidatePath(`/o/tasks/${parsed.data.task_id}`);
   revalidatePath(`/b/tasks/${parsed.data.task_id}`);
-  return { success: true, attachment: data as TaskAttachment };
+  // Sign it on the way back so an uploaded image paints the moment the row is
+  // prepended, instead of waiting for the next read of the list.
+  const [attachment] = await withPreviewUrls([data as TaskAttachment]);
+  return { success: true, attachment };
 }
 
 const linkSchema = z.object({

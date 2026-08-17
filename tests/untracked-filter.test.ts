@@ -6,6 +6,7 @@ import {
   type PushEvidence,
   type UntrackedWorkCandidate,
 } from "@/lib/tasks/untracked-filter";
+import { UntrackedWorkResult } from "@/lib/ai/schemas";
 
 // The deterministic net under the untracked-work model. Every rule here is
 // something the prompt already asks for — these tests cover the case where it
@@ -146,5 +147,58 @@ describe("filterUntrackedItems", () => {
 
   it("drops a title too short to be a task", () => {
     expect(filterUntrackedItems([item({ title: "  x " })], push, [])).toHaveLength(0);
+  });
+});
+
+// The parse in front of the filter. Strict mode strips minLength/maxLength from
+// the wire schema, so these are shapes the model really does emit — and every
+// one of them used to fail the whole response, which the caller reports as "this
+// push shipped nothing" and never revisits.
+describe("UntrackedWorkResult salvage", () => {
+  const raw = (over: Record<string, unknown> = {}) => ({
+    title: "Add PDF export to the agent report",
+    description: "Renders the agent report as a downloadable PDF from the report page.",
+    priority: "medium",
+    type: "feature",
+    tags: ["backend"],
+    shas: ["a1b2c3d4e5f"],
+    files: ["lib/pdf/render.ts"],
+    confidence: "high",
+    ...over,
+  });
+
+  it("drops a junk sha instead of the proposal carrying it", () => {
+    // Observed live: the model appended "c4?" to an otherwise sound sha list.
+    const parsed = UntrackedWorkResult.safeParse({
+      items: [raw({ shas: ["a1b2c3d4e5f", "c4?"] })],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0].shas).toEqual(["a1b2c3d4e5f"]);
+  });
+
+  it("drops a file path shoved into the sha list", () => {
+    // Also observed live: two migration filenames, both over the 64-char bound.
+    const parsed = UntrackedWorkResult.safeParse({
+      items: [
+        raw({
+          shas: [
+            "a1b2c3d4e5f",
+            "supabase/migrations/20260810000000_close_takeover_anon_access.sql",
+          ],
+        }),
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items[0].shas).toEqual(["a1b2c3d4e5f"]);
+  });
+
+  it("drops only the unusable item, keeping its siblings", () => {
+    const parsed = UntrackedWorkResult.safeParse({
+      items: [raw({ description: "too short" }), raw({ title: "Batch the spreadsheet import" })],
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.items.map((i) => i.title)).toEqual([
+      "Batch the spreadsheet import",
+    ]);
   });
 });

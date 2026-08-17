@@ -1,5 +1,30 @@
-import { ExternalLink, GitBranch, Paperclip } from "lucide-react";
-import type { Task } from "@/lib/types";
+import { Check, ExternalLink, GitBranch, Paperclip } from "lucide-react";
+import { PRIORITY_LABELS, STATUS_LABELS } from "@/lib/utils";
+import type { Task, TaskPriority, TaskStatus } from "@/lib/types";
+
+/** The board's stage marker: a dashed ring in Backlog, a solid one in To-Do, a
+ *  half-filled disc In Progress, a filled check when Done. Replaces the priority
+ *  rail as the card's leading glyph — status is what you scan a column for. */
+export function StateGlyph({ status }: { status: TaskStatus }) {
+  return (
+    <span className={`krowe-card-state ${status}`} title={STATUS_LABELS[status]} aria-hidden="true">
+      {status === "done" && <Check width={10} height={10} strokeWidth={3.2} />}
+    </span>
+  );
+}
+
+/** Three ascending bars, lit low → urgent. Carries the same reading as the old
+ *  priority dot in a third of the width, which is what buys the single meta line. */
+export function PriorityBars({ priority }: { priority: TaskPriority }) {
+  const label = `${PRIORITY_LABELS[priority]} priority`;
+  return (
+    <span className={`krowe-bars ${priority}`} title={label} aria-label={label}>
+      <i />
+      <i />
+      <i />
+    </span>
+  );
+}
 
 export function DeliveryChips({ task }: { task: Pick<Task, "status" | "pushed_to_main" | "completion_note" | "task_attachments"> }) {
   if (task.status !== "done") return null;

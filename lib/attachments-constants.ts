@@ -9,6 +9,23 @@ export const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
   ".docx", ".xlsx", ".pptx", ".doc", ".xls",
 ]);
 
+// The subset of the allowlist a browser paints natively, so the attachment can
+// render inline instead of sitting behind a download button. SVG is included:
+// inside an <img> it can't run script, which is the only reason to hold it back.
+export const PREVIEWABLE_IMAGE_EXTENSIONS = new Set([
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
+]);
+
+/** True when this attachment is an image we can show inline. */
+export function isPreviewableImage(
+  fileName: string,
+  mimeType?: string | null
+): boolean {
+  if (mimeType?.startsWith("image/")) return true;
+  const ext = "." + (fileName.split(".").pop()?.toLowerCase() ?? "");
+  return PREVIEWABLE_IMAGE_EXTENSIONS.has(ext);
+}
+
 export const ATTACHMENT_ACCEPT = [
   "image/jpeg,image/png,image/gif,image/webp,image/svg+xml",
   "application/pdf",

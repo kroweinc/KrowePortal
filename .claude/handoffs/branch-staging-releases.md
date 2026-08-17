@@ -1,10 +1,11 @@
 # Handoff — Branch staging → release tracking
 
-**Status:** Phase 11 of 11 complete · **Last updated:** 2026-08-01
+**Status:** Phase 16 of 16 complete · **Last updated:** 2026-08-10
 **Repo / branch:** `/Users/stevenortega/KrowePortal` · `dev`
-**Next up:** Nothing blocking. Review the working-tree diff and commit when ready.
-One open question for Steven in Phase 11 — which client a gap lands under when
-several engagements share a repo.
+**Next up:** Load `/b/staging` — the security push (release `2f3be534`) has had its
+`gaps_scanned_at` cleared and will re-scan on mount. Phases 12–16 are working-tree
+only — review and commit. One open question for Steven from Phase 11 — which client
+a gap lands under when several engagements share a repo.
 
 ## Phases
 | # | Phase | Status |
@@ -20,6 +21,11 @@ several engagements share a repo.
 | 9 | Split the 80-task Jul 31 blob into real pushes | ✅ done |
 | 10 | Group Shipped by day + name each push by its merge | ✅ done |
 | 11 | Detect work that shipped with no task (migration 0086) | ✅ done |
+| 12 | Make "Check for pushes" actually check | ✅ done |
+| 13 | Auto-complete near-certain commit matches (migration 0087) | ✅ done |
+| 14 | Stop one junk string discarding a whole gap scan | ✅ done |
+| 15 | Non-code work gets its own section, not a branch | ✅ done |
+| 16 | Make accepting a "Not tracked" card feel instant | ✅ done |
 
 ## What this solved
 
@@ -539,11 +545,290 @@ gone and still gone after reload. **Steady state proven against `ai_usage`:
 
 **Open / blocked:** see the shared-repo question in Open / follow-ups below.
 
+## Phase 12 — Make "Check for pushes" actually check (2026-08-07)
+
+**Done:** The button was a no-op in the case it exists for — pressed right after
+a push. Three fixes, all on that one gesture.
+
+1. **An explicit check bypasses the GitHub cache.** `getDefaultBranchTip` takes
+   `{ fresh }`, and `pollMainMerges` passes it through to `shipPushedTasks`. The
+   client sends `fresh: pollTick > 0` — mount rides the cache, a press does not.
+2. **A push that carried no queued work is reported.** `shipPushedTasks` pushes
+   its `ShippedPush` unconditionally instead of only when `taskIds.length > 0`.
+3. **The check says what it found.** A manual pass with no results toasts "No new
+   pushes", or an error if the poll threw. Previously: spinner, then silence.
+
+**Why:** `getDefaultBranchTip` reads `cachedFetchBranchCommits` — 300s, shared
+with the commit scan and warmed by *every* builder page (the layout sweep, the
+board, the staging page itself). So the tip was almost always cached when the
+button was pressed, and "did anything just ship?" was answered with a tip from up
+to five minutes ago. Nothing detected, nothing toasted, nothing on screen — a
+dead button. Phase 8's background sweep made this worse, not better: it keeps the
+cache permanently warm.
+
+**Files touched:** `lib/github/recent-commits.ts`, `lib/actions/tasks.ts`,
+`components/staging-board.tsx`.
+
+**Verified by:** driven live in Chromium against the dev server (`dev_role=builder`,
+scratchpad `check-pushes.mjs`) — button found, label flips to "Checking…", two
+server-action POSTs, toast "No new pushes / Nothing new on main since the last
+check." Cache bypass proven by the dev log on a second run with a warm cache:
+`pollMainMerges(…, {"fresh":false})` **508ms** (cached) vs
+`pollMainMerges(…, {"fresh":true})` **1191ms** (went to GitHub). 237 tests pass,
+`npx tsc --noEmit --incremental false` clean, eslint 0 errors.
+
+**Decisions:**
+- **Only the button bypasses the cache.** Mount would cost a GitHub request per
+  engagement on every navigation to `/b/staging`, and the layout sweep already
+  covers the lazy case. A press is the one moment someone is asserting "it just
+  shipped, go look".
+- **The fresh read doesn't repopulate the shared entry.** `unstable_cache` tags
+  are static per wrapper, so busting per-repo would mean rebuilding the wrapper
+  per call. The ledger is what matters and the window is ≤300s.
+- **The zero-task toast doesn't claim the push lands under Shipped** — a release
+  with no tasks *and* no gaps is dropped from the timeline
+  (`staging-grouping.ts:200`), so it names the gap scan as what happens next.
+
+**Gotchas:** the mount pass must stay silent — a "no new pushes" toast on every
+board load would be noise. `manual` (`pollTick > 0`) gates the reporting, not just
+the freshness.
+
+## Phase 13 — The near-certain matches stop asking (2026-08-07)
+
+**Done:** 0081's commit→task matcher gained a second threshold. At **≥0.95** the
+scan marks the task done itself and shows the builder what it did: an amber card
+at the head of Done reading "Marked done automatically", with **Keep** and
+**Not done**. Between 0.80 and 0.95 nothing changes — the green "Looks shipped"
+card still asks first.
+
+**Why:** Steven's ask — *"can we make it auto move it to done at the top, if the
+user rejects it, it goes back to backlog."* The safeguard worked and was being
+ignored: prod held 137 scanned commits and one 0.98 match (`9d2e5a0` → *"Add
+internal agent feedback ticketing system"*) that had sat in `backlog` for days
+waiting on a click. Filing is the job; asking permission to file isn't.
+
+**Files touched:** `supabase/migrations/completed/0087_commit_match_auto_apply.sql`
+(new), `lib/tasks/commit-match-filter.ts` (`AUTO_APPLY_CONFIDENCE_THRESHOLD`,
+`shouldAutoApply`), `lib/actions/tasks.ts` (`markTaskDone` gained `notify?`),
+`lib/actions/commit-task-matches.ts` (`applyMatchToTask`, `sweepAutoApplies`,
+`reverseAutoApply`; confirm/dismiss branch on `auto_applied_at`),
+`lib/actions/get-commit-task-matches.ts`, `app/b/page.tsx`,
+`components/task-card.tsx`, `components/task-board.tsx`, `app/globals.css`
+(`--shipped-accent`, `.krowe-card-shipped.auto`, `.krowe-card.auto-done`),
+`tests/commit-task-match.test.ts`.
+
+**Verified by:** 247 tests pass (10 new), `npx tsc --noEmit --incremental false`
+clean, eslint 0 errors/0 warnings. **Driven live in Chromium** on :3000 as
+`dev_role=builder` against a seeded 0.97 match on the real `in_progress` task
+*"Fix the agent portal loading bug"* (engagement `a64db420`, repo
+`Jynx-hub/PatelInternal`):
+- **Auto-move** — task went In Progress → head of Done, card classes
+  `status-done auto-done` / `krowe-card-shipped auto`, header "Marked done
+  automatically", button "Keep". DB: `status=done`, `pushed_to_main=true`,
+  release attached, `branch_name=main`, match row still `pending` with
+  `auto_applied_at` set and `prior_status='in_progress'`.
+- **Not done** — task returned to **In Progress** (not backlog), and
+  `pushed_to_main / release_id / completed_at / shipped_at` all null, commit
+  unlinked, row `dismissed`, tombstone release left standing. Re-polling did not
+  resurface it.
+- **Keep** — row `confirmed`, task unchanged (no re-stamped `completed_at`).
+- Computed styles confirm the amber is `--warning` (`rgb(180,83,9)` on the panel
+  border), not a literal.
+- All fixtures removed afterwards; task restored to `in_progress`, residue 0,
+  and globally `leaked=0 / shipped_but_undated=0 / auto_rows=0`.
+
+**Decisions (Steven's calls, asked up front):**
+- **Reject restores the prior status**, not backlog — an In Progress task that
+  gets auto-completed wrongly comes back In Progress. That's what `prior_status`
+  is for.
+- **0.95, not 0.80.** The two mistakes cost differently: between the thresholds a
+  wrong match paints a card you ignore; above it, it moves your task and files
+  the work under a push.
+- **The operator's "delivered" mail is held until Keep.** `markTaskDone` gained
+  `notify?: boolean` and the auto path passes `false`; `confirmMatchedTaskDone`
+  fires it on an auto-applied row. A rejected auto-move leaves no trace outside
+  the app. The audit rows still write — the trail should record the move.
+- **Approval-pending tasks auto-complete too**, resolving the gate exactly as
+  pressing Confirm always has. `cleared_approval` records that we were the one to
+  stamp it, so Reject un-stamps only then.
+- **The row stays `state='pending'`** after an auto-apply — it is still awaiting
+  the builder's word, and pending is what the board reads. `auto_applied_at` is
+  the only thing separating the two kinds of pending. No new state value.
+- **The sweep is table-driven, not fed from the scan's own results.** Commits
+  already in `commit_task_matches` are filtered out before the model runs, so a
+  repo whose work was all scanned before this existed has no fresh commit to hang
+  an apply on — those rows would have sat pending forever. Scoped to the polled
+  engagement's open tasks, which doubles as the membership gate on a shared repo.
+- **The snapshot is written before the task is touched**, and cleared again if the
+  apply fails. Marking done is lossy; an `auto_applied_at` over an unmoved task
+  would have the card claim a move that never happened.
+- **Lifting to the top of Done lives in `task-board.tsx`**, not in
+  `sortWithApprovalPin` — the pin has to hold under every sort key, and the
+  operator list shares that util and has no auto-done concept.
+
+**Gotchas:**
+- **Turbopack skipped the `globals.css` edit again** — `.krowe-card.auto-done`
+  was in the source and absent from the served chunk (`shipped-accent` from the
+  same session *was* there, so it's partial, not all-or-nothing). Moving the rule
+  next to `.status-done` forced the recompile. Grep the served chunk; the class
+  being on the element proves nothing.
+- **The "delivered" mail could not be observed end-to-end.** The dev operator
+  fixture `00000000-…-0001` has a row in `auth.users` but
+  `auth.admin.getUserById` answers **"User not found"**, so `notifyUser` bails
+  before `sendEmail` — Resend has never received a send for it. Pre-existing, not
+  new. What *is* proven: zero sends fired on the auto-move, and Keep reaches
+  `notifyTaskEvent` (the action ran and its sibling `after()` audit row landed).
+- The real 0.98 match cited above was **confirmed by Steven by hand at 22:41 UTC**
+  mid-session, before any of this landed. Its Resend row is his, not the feature's.
+
+## Phase 14 — Stop one junk string discarding a whole gap scan (2026-08-10)
+
+**Done:** The security push to `Jynx-hub/PatelInternal` (`555f161e`, 13 commits, one
+unrelated task against it) produced no gap cards. It had been scanned — both the
+first call and the resample failed `UntrackedWorkResult.safeParse`, so the scan
+stamped `gaps_scanned_at` and moved on. Replaying that exact input 8× reproduced it
+**3/8**: once the reasoning pass ate all 2500 `max_completion_tokens` and returned
+empty content (`finish_reason: length`), once the model appended `"c4?"` to a sha
+list, once it put two migration *file paths* in `shas`. Each killed the entire
+response — four sound proposals lost to one bad string, permanently, because a
+scanned push is never revisited. Four changes:
+- `boundedStrings` in `schemas.ts` **filters** malformed entries out of
+  `shas`/`files` before validating, instead of validating them in place. Strict
+  mode strips `minLength`/`maxLength` from the wire schema (`STRIP_KEYWORDS`), so
+  the model can always emit one — the comment claiming a bad sha "is filtered by
+  the caller's whitelist anyway" was aspirational until now.
+- `UntrackedWorkResult.items` salvages item-by-item, so a proposal that still
+  fails (short description, say) is dropped alone rather than with its siblings.
+- `MAX_TOKENS` 2500 → 4500. Reasoning and the JSON share one budget.
+- The failure log names the actual failure — `finish_reason`, reasoning tokens,
+  refusal text, or the first three zod issue paths. The old line said only "did
+  not match the expected shape", which is why a 37% failure rate was invisible.
+
+**Files touched:** `lib/ai/schemas.ts`, `lib/ai/find-untracked-work.ts`,
+`tests/untracked-filter.test.ts`
+
+**Verified by:** the two captured failing payloads now parse to 4 items each, all 4
+surviving `filterUntrackedItems`; 6 live re-runs at the new cap → 0 parse failures,
+3–4 proposals each, max reasoning 930 of 4500. Full suite 265/265, `tsc
+--incremental false` clean, eslint clean.
+
+**Decisions:** Filter-then-validate rather than loosening the bounds — the bounds
+are real (a 200-char "sha" is not a sha), they just must not be fatal. Salvage at
+both levels (entry and item) because the two failures observed were at different
+levels and a third kind is likely.
+
+**Gotchas:** `releases.gaps_scanned_at` on `2f3be534` was cleared by hand so the
+security push re-scans; nothing else was touched. The same latent defect sits in
+`CommitTaskMatchResult.matches` (`sha`/`taskId`/`reason` bounds inside the array,
+same "would throw away the whole batch" comment) — **not** changed, since that
+path hasn't been observed failing.
+
+## Phase 15 — Non-code work gets its own section, not a branch (2026-08-10)
+
+**Done:** `/b/staging` in Branch mode now has a third section, **Actions**, between
+Next push and Shipped. Anything whose `work_kind` (migration 0089) isn't `code` —
+an email sent, a question asked — is lifted out before any branch or release
+grouping happens and bucketed by kind instead. It was landing in the "No branch"
+bucket under **Next push**, so finished work read as queued behind a push that was
+never going to carry it.
+
+The section renders only when there is something in it. "No branch" still exists
+and still means what it always did: a *code* task whose branch nobody recorded.
+
+**Files touched:** `lib/tasks/staging-grouping.ts` (`splitCodeWork`,
+`groupTasksByWorkKind`, `TaskBucket.workKind`), `components/staging-board.tsx`,
+`lib/utils.ts` (`isCodeWork`), `app/globals.css` (`.krowe-stage-badge.action`,
+`.krowe-stage-branch.is-kind`), `components/task-detail-sheet.tsx` +
+`components/done-deliverable-dialog.tsx` (use the shared predicate),
+`tests/staging-and-branch.test.ts`
+
+**Verified by:** 269/269 tests, `tsc --incremental false` clean, eslint 0 errors.
+Then live: `/b/staging` as the dev builder rendered no Actions section (correct —
+0 tasks carry a `work_kind`); flipping one shipped task to `email` produced the
+section with "1 thing done outside the code" and an Email group, the task
+appearing exactly once in the DOM and gone from the Shipped timeline. Reverted —
+`select count(*) from tasks where work_kind is not null` is back to 0.
+
+**Decisions:**
+- **The chosen kind wins over a branch**, not the other way round. A task marked
+  `email` that also carries a stale `branch_name` is an action; `work_kind` is
+  the builder's explicit answer to "what is this", `branch_name` is residue.
+- **Null `work_kind` stays code.** Every task predating 0089 is null, so reading
+  null as an action would empty the branch view overnight.
+- **Non-code work is pulled out of Shipped too**, not just Next push. Nothing
+  non-code is shipped today (0 rows), and an action has no push to belong to.
+- **Bucket by kind, drop empty kinds.** Unlike a branch, a kind with nothing in
+  it isn't a thing waiting to be filled, so it isn't rendered.
+- Badge takes `--info`, not the staged/shipped warning/success pair — Actions is
+  a terminal state, not a step on the way to one.
+
+**Gotchas:** `groupTasksByWorkKind` gives `code` no bucket, so a code task passed
+to it vanishes silently — feed it only `splitCodeWork(...).actions`. Nothing sets
+`work_kind` except the Submit-for-Approval dialog, so this section stays invisible
+until a builder answers that question on a real task.
+
+## Phase 16 — Make accepting a "Not tracked" card feel instant (2026-08-10)
+
+**Done:** Clicking **Create task** on a release-gap card took ~1.9s to show the
+task. It now shows in ~0.35s, and the board is fully consistent in ~0.95s. Three
+changes, none of them to what the accept actually writes:
+
+1. **`/b/staging` stopped awaiting nine reads in a row.** The page ran
+   tasks → avatars → groups → releases → gaps → branch warm → branches →
+   purposes strictly serially, so a load cost the *sum* of nine round trips (one
+   of them a GitHub sync). They now run as five concurrent branches, with only
+   the genuine chains kept in order (tasks→avatars, releases→gaps,
+   warm→branches). **2.0s → 0.70s.** This is also most of the accept's cost,
+   since the accept revalidates this route.
+2. **`loadWritableGap` collapsed three reads into one.** It awaited the profile,
+   then the gap, then `isEngagementMember`. The identity lookup doesn't decide
+   *which* row to read, so it runs alongside it; and the engagement the
+   membership check needs is now embedded in the same select
+   (`engagements(builder_id, operator_id)` → new `isEngagementMemberEmbed`).
+   5 serial round trips → 3.
+3. **The card paints the task itself.** `acceptReleaseGap` returns the whole row
+   (`.select("*")` + `creator` stitched from the caller's profile) instead of
+   `{ taskId }`; `ReleaseGapCard` hands it to `StagingBoard` via `onAccepted`,
+   which merges it into `tasks` until the server sends the same id back. The gap
+   used to leave a hole in the push until the revalidated tree arrived.
+
+**Files touched:** `app/b/staging/page.tsx`, `lib/actions/release-gaps.ts`,
+`lib/actions/task-access.ts`, `components/release-gap-card.tsx`,
+`components/staging-board.tsx`
+
+**Verified by:** headless server-action calls against throwaway `model='probe'`
+gap rows on *Krowe Internal*, timing the response stream (when the action's
+return chunk lands vs. when the whole response does), A/B'd by stashing the
+change. Before: card appears at 1.80–2.10s. After: 0.34–0.39s to paint,
+0.89–1.02s to a fully refreshed board. `GET /b/staging` 1.57–2.01s → 0.64–0.78s.
+Dismiss re-checked end to end (state `dismissed`, `resolved_by` set, 0.98s). All
+probe rows and their tasks deleted afterwards — 22 real pending gaps untouched.
+`npx tsc --noEmit --incremental false` clean, 269/269 vitest pass, eslint clean
+(one pre-existing `set-state-in-effect` warning on the poll effect).
+
+**Decisions:** `revalidatePath("/b/staging")` stays on the accept — the board
+still has to converge on the truth, and now that the card paints itself the
+revalidation is off the critical path rather than in front of it. The optimistic
+row is the *real* inserted row, never a fabricated one, so its id is real and it
+opens, drags and menus like any other card the instant it appears.
+
+**Gotchas:** the streaming order is what makes this work — Next sends a server
+action's return value *before* the revalidated flight tree, so `await
+acceptReleaseGap()` resolves ~0.6s ahead of the board refresh. The optimistic
+copy carries no `avatar_url` (`attachCreatorAvatars` runs on the page, not the
+insert), so the card shows initials for that half-second. A gap accepted with
+`work_kind` null counts as code work (`isCodeWork` defaults it), which is what
+puts it in the push bucket rather than the Actions section.
+
 ## Open / follow-ups
 
-- **Nothing is committed.** All code changes across Phases 5–10 are working-tree
-  only; the DB writes (migrations 0084 + 0085, the sweep, the re-date, the
-  Phase 9 split, the Phase 10 subject backfill) are live in prod.
+- **Phases 1–11 are committed** (`4f91b78`…`9e7b51f` on `dev`); the DB writes
+  (migrations 0084 + 0085 + 0086 + 0087, the sweep, the re-date, the Phase 9
+  split, the Phase 10 subject backfill) are live in prod. Phases 12–13 are
+  working-tree only.
+- **`AUTO_APPLY_CONFIDENCE_THRESHOLD` is a constant, not a setting.** If 0.95
+  turns out to be too eager (or too shy) in practice it's a one-line change in
+  `lib/tasks/commit-match-filter.ts`; a per-builder toggle would need a column.
 - **`/o/changelog` still labels a release `title ?? branch_name`** — it never got
   the `merge_subject` fallback, deliberately: a merge subject is builder-facing
   shorthand, not client copy. `setReleaseNotes` is the client-facing surface.
@@ -562,4 +847,3 @@ gone and still gone after reload. **Steady state proven against `ai_usage`:
   accepting files the task (and its changelog entry) under that client. Options
   if it misfires: prefer the engagement with the most tasks already on that push,
   or let the card pick a client before creating. Needs Steven's call.
-- **Nothing is committed.** All changes are working-tree only.

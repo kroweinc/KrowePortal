@@ -5,7 +5,7 @@ import { Sparkles, GitCommit, Pencil, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { acceptReleaseGap, dismissReleaseGap } from "@/lib/actions/release-gaps";
 import { TaskTypeBadge, TaskTags } from "@/components/task-type-badge";
-import type { ReleaseGap } from "@/lib/types";
+import type { ReleaseGap, Task } from "@/lib/types";
 
 /**
  * A proposed task for work that shipped in this push with nothing tracking it.
@@ -24,9 +24,12 @@ interface ReleaseGapCardProps {
   gap: ReleaseGap;
   /** The push this hangs under, for the toast copy. */
   pushLabel: string;
+  /** The row the accept created, handed to the board so it renders as a real
+   *  card in this push straight away — see `acceptedTasks` in StagingBoard. */
+  onAccepted?: (task: Task) => void;
 }
 
-export function ReleaseGapCard({ gap, pushLabel }: ReleaseGapCardProps) {
+export function ReleaseGapCard({ gap, pushLabel, onAccepted }: ReleaseGapCardProps) {
   const [, startTransition] = useTransition();
 
   const [title, setTitle] = useState(gap.title);
@@ -60,6 +63,9 @@ export function ReleaseGapCard({ gap, pushLabel }: ReleaseGapCardProps) {
         setResolved(false);
         return;
       }
+      // Paint the task in this push now rather than when the revalidated board
+      // arrives — the write is done, and the row is the real one.
+      onAccepted?.(res.task);
       toast.success(`Added “${title}” to ${pushLabel}`);
     });
   }

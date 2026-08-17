@@ -4,8 +4,11 @@ import {
   groupTasksByBranch,
   groupTasksByStagingGroup,
   groupTasksByRelease,
+  groupTasksByWorkKind,
   groupReleasesByDay,
   reconcileBranch,
+  splitCodeWork,
+  queuedCodeWork,
 } from "@/lib/tasks/staging-grouping";
 import { isListingComplete } from "@/lib/github/branches";
 import type { Task, StagingGroup, Release, ReleaseGap } from "@/lib/types";
@@ -309,6 +312,92 @@ describe("groupTasksByStagingGroup", () => {
       defs
     );
     expect(allGrouped.some((b) => b.label === "No group")).toBe(false);
+  });
+});
+
+// Both group-by tabs bucket this one set. Before it existed, the staging tab
+// grouped *every* done task, so 136 tasks that shipped weeks earlier piled up
+// under "No group" beside the three actually waiting on a push.
+describe("queuedCodeWork (what the staging board is about)", () => {
+  it("keeps only finished code that hasn't reached main", () => {
+    const queued = queuedCodeWork([
+      task("1", { branch_name: "feat/x" }),
+      task("2", { branch_name: "feat/y", pushed_to_main: true }),
+      task("3", { work_kind: "email" }),
+      task("4", { work_kind: "question", pushed_to_main: true }),
+    ]);
+    expect(queued.map((t) => t.id)).toEqual(["1"]);
+  });
+
+  it("keeps code work whose branch was never recorded", () => {
+    // "No branch" means a code task nobody filed a branch for — a gap worth
+    // seeing on the board, not a reason to drop the task off it.
+    expect(queuedCodeWork([task("1")]).map((t) => t.id)).toEqual(["1"]);
+  });
+
+  it("treats a null work_kind as code, matching splitCodeWork", () => {
+    expect(queuedCodeWork([task("1"), task("2", { work_kind: "code" })])).toHaveLength(2);
+  });
+
+  it("preserves the caller's incoming order", () => {
+    const queued = queuedCodeWork([
+      task("3"),
+      task("1", { pushed_to_main: true }),
+      task("2"),
+    ]);
+    expect(queued.map((t) => t.id)).toEqual(["3", "2"]);
+  });
+
+  it("leaves the staging tab holding only what is waiting on a push", () => {
+    const all = [
+      task("shipped-a", { pushed_to_main: true }),
+      task("shipped-b", { pushed_to_main: true, staging_group_id: "g1" }),
+      task("queued", { branch_name: "feat/x" }),
+      task("emailed", { work_kind: "email" }),
+    ];
+    const buckets = groupTasksByStagingGroup(queuedCodeWork(all), [
+      group("g1", "Release 1.2"),
+    ]);
+    expect(buckets.map((b) => b.label)).toEqual(["Release 1.2", "No group"]);
+    expect(buckets[0].tasks).toHaveLength(0); // its work already shipped
+    expect(buckets[1].tasks.map((t) => t.id)).toEqual(["queued"]);
+  });
+});
+
+// Migration 0089: an email or a question is finished work with no branch and no
+// push, so the branch view has to stop counting it as queued.
+describe("splitCodeWork / groupTasksByWorkKind (the Actions section)", () => {
+  it("treats a null work_kind as code — nothing predating the question moves", () => {
+    const { code, actions } = splitCodeWork([task("1"), task("2", { work_kind: "code" })]);
+    expect(code.map((t) => t.id)).toEqual(["1", "2"]);
+    expect(actions).toEqual([]);
+  });
+
+  it("lifts non-code work out, branch or no branch", () => {
+    const { code, actions } = splitCodeWork([
+      task("1", { work_kind: "code", branch_name: "feat/x" }),
+      task("2", { work_kind: "email" }),
+      // Contradictory data — the kind the builder chose wins over a stale branch.
+      task("3", { work_kind: "other", branch_name: "feat/x" }),
+    ]);
+    expect(code.map((t) => t.id)).toEqual(["1"]);
+    expect(actions.map((t) => t.id)).toEqual(["2", "3"]);
+  });
+
+  it("buckets by kind in a fixed order, dropping empty kinds and code", () => {
+    const buckets = groupTasksByWorkKind([
+      task("1", { work_kind: "other" }),
+      task("2", { work_kind: "question" }),
+      task("3", { work_kind: "other" }),
+    ]);
+    expect(buckets.map((b) => b.label)).toEqual(["Question", "Other"]);
+    expect(buckets.map((b) => b.workKind)).toEqual(["question", "other"]);
+    expect(buckets[1].tasks.map((t) => t.id)).toEqual(["1", "3"]); // incoming order
+    expect(buckets.every((b) => b.branch === null && b.groupId === null)).toBe(true);
+  });
+
+  it("renders nothing when there is no non-code work", () => {
+    expect(groupTasksByWorkKind([])).toEqual([]);
   });
 });
 

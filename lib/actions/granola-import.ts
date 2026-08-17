@@ -21,6 +21,7 @@ import {
   GranolaNotFoundError,
   GranolaRateLimitError,
 } from "@/lib/granola/client";
+import { captureGranolaMeetingSnapshot } from "@/lib/granola/meeting-snapshot";
 import {
   getClient,
   granolaTargetSchema,
@@ -36,7 +37,9 @@ import { extractTranscriptText } from "@/lib/sop/extract-text";
 import { ExtractedTaskDraft } from "@/lib/ai/schemas";
 import { friendlyAiError } from "@/lib/ai/client";
 import { MAX_ATTACHMENT_SIZE, MAX_SOP_CHARS } from "@/lib/attachments-constants";
-import type { ProjectSopTranscript } from "@/lib/types";
+import { AREA_SLUG_MAX, AREA_SLUG_RE } from "@/lib/types";
+import type { AreaDefinition, AreaVocabulary, ProjectSopTranscript } from "@/lib/types";
+import { allowedAreaSlugs } from "@/lib/tasks/area-vocabulary";
 
 export type { GranolaImportTargetInput } from "@/lib/granola/draft-core";
 
@@ -273,6 +276,10 @@ export interface GranolaTaskDraftsResult {
   noteTitle: string | null;
   noteCreatedAt: string | null;
   drafts: ExtractedTaskDraft[];
+  /** The vocabulary the drafts were classified against — the review's Area
+      select is built from it, so it offers what the model could actually pick.
+      Empty on the error paths, where there are no drafts to label anyway. */
+  areas: AreaDefinition[];
   error?: string;
 }
 
@@ -284,7 +291,7 @@ export async function draftTasksFromGranolaNote(
   engagementId: string,
   noteId: string
 ): Promise<GranolaTaskDraftsResult> {
-  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [] };
+  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [] };
   const timer = stageTimer("granola-draft");
 
   const resolved = await resolveGranolaDraft(engagementId, noteId, timer);
@@ -301,6 +308,7 @@ export async function draftTasksFromGranolaNote(
       noteTitle: resolved.noteTitle,
       noteCreatedAt: resolved.noteCreatedAt,
       drafts: result.items,
+      areas: resolved.extractInput.areas?.values ?? [],
     };
   } catch (err) {
     console.error("[draftTasksFromGranolaNote]", err);
@@ -309,7 +317,12 @@ export async function draftTasksFromGranolaNote(
 }
 
 async function runTranscriptTaskExtraction(
-  gate: { profileId: string; engagementId: string; builderName: string | null },
+  gate: {
+    profileId: string;
+    engagementId: string;
+    builderName: string | null;
+    areas: AreaVocabulary;
+  },
   title: string | null,
   transcript: string
 ): Promise<GranolaTaskDraftsResult> {
@@ -321,6 +334,7 @@ async function runTranscriptTaskExtraction(
         transcript,
         participants: null,
         builderName: gate.builderName,
+        areas: gate.areas,
       },
       {
         userId: gate.profileId,
@@ -328,10 +342,10 @@ async function runTranscriptTaskExtraction(
         engagementId: gate.engagementId,
       }
     );
-    return { noteTitle: title, noteCreatedAt: null, drafts: result.items };
+    return { noteTitle: title, noteCreatedAt: null, drafts: result.items, areas: gate.areas.values };
   } catch (err) {
     console.error("[runTranscriptTaskExtraction]", err);
-    return { noteTitle: null, noteCreatedAt: null, drafts: [], error: friendlyAiError(err) };
+    return { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [], error: friendlyAiError(err) };
   }
 }
 
@@ -351,7 +365,7 @@ export async function draftTasksFromPastedTranscript(
   content: string,
   label?: string
 ): Promise<GranolaTaskDraftsResult> {
-  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [] };
+  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [] };
   const parsed = pasteDraftSchema.safeParse({ content, label: label || undefined });
   if (!parsed.success) {
     return { ...empty, error: parsed.error.issues[0]?.message ?? "Invalid input." };
@@ -371,7 +385,7 @@ export async function draftTasksFromPastedTranscript(
 export async function draftTasksFromTranscriptFile(
   formData: FormData
 ): Promise<GranolaTaskDraftsResult> {
-  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [] };
+  const empty = { noteTitle: null, noteCreatedAt: null, drafts: [], areas: [] };
 
   const engagementId = formData.get("engagement_id");
   if (typeof engagementId !== "string") return { ...empty, error: "Invalid input." };
@@ -398,7 +412,13 @@ export async function draftTasksFromTranscriptFile(
 // A reviewed draft as approved in the dialog: the AI extraction plus the
 // builder-chosen board column ("Lands in"). Done is deliberately excluded —
 // creating straight into Done would skip the approval gate.
+// `tags` is re-declared as a SHAPE check rather than inherited from
+// ExtractedTaskDraft's enum: that const is built from the fallback vocabulary,
+// so a draft the extraction legitimately filed under a repo area ("checkout")
+// would fail here and take the entire approval batch with it. Membership is
+// enforced after parsing, against the caller's own scope — see sanitizeAreaTags.
 const ApprovedTaskDraftSchema = ExtractedTaskDraft.extend({
+  tags: z.array(z.string().max(AREA_SLUG_MAX).regex(AREA_SLUG_RE)).max(1).default([]),
   status: z.enum(["backlog", "todo", "in_progress"]).optional(),
 });
 export type ApprovedTaskDraft = z.infer<typeof ApprovedTaskDraftSchema>;
@@ -418,9 +438,17 @@ function draftDescription(item: ApprovedTaskDraft): string {
 async function createDraftTasks(
   profileId: string,
   engagementId: string,
-  items: ApprovedTaskDraft[]
+  items: ApprovedTaskDraft[],
+  granolaImportId: string | null = null
 ): Promise<{ created: number; firstError: string | null }> {
   const supabase = await getClient(profileId);
+  // The schema only checked each tag's SHAPE (membership depends on this
+  // engagement's vocabulary, which a static schema can't see). Vet them here,
+  // once for the batch, so a tampered payload can't persist an off-vocabulary
+  // chip — an unrecognized slug becomes no chip rather than a failed approval.
+  const allowed = await allowedAreaSlugs({ profileId, engagementId });
+  const areaFor = (item: ApprovedTaskDraft) => item.tags.filter((t) => allowed.has(t)).slice(0, 1);
+
   const { data, error } = await supabase
     .from("tasks")
     .insert(
@@ -430,7 +458,7 @@ async function createDraftTasks(
         description: draftDescription(item),
         priority: item.priority,
         type: item.type,
-        tags: item.tags,
+        tags: areaFor(item),
         // Approval is builder-gated, so the source is always builder_added.
         source: "builder_added",
         created_by: profileId,
@@ -438,6 +466,13 @@ async function createDraftTasks(
         // explicit null, NOT the column default), so the default is filled in
         // here — 'backlog' matches the tasks.status DB default (migration 0065).
         status: item.status ?? "backlog",
+        // Provenance (migration 0088): which call this came from, and the line
+        // it came from. Both set on every row for the same unify-the-columns
+        // reason as status — null on the paste/upload path, which has no call.
+        // sourceQuote was generated and thrown away before 0088; keeping it is
+        // what lets the meeting page point at the exact transcript line.
+        granola_import_id: granolaImportId,
+        granola_source_quote: item.sourceQuote?.slice(0, 300) ?? null,
       }))
     )
     .select("id");
@@ -519,7 +554,9 @@ export async function approveExtractedTasks(input: {
   const { created, firstError } = await createDraftTasks(
     profile.id,
     parsed.data.engagementId,
-    parsed.data.items
+    parsed.data.items,
+    // No Granola note backs these, so no meeting to link to.
+    null
   );
   if (created === 0) {
     return { error: firstError ?? "Couldn't create the tasks. Please try again." };
@@ -598,12 +635,15 @@ export async function approveGranolaTasks(input: {
     ({ created, firstError } = await createDraftTasks(
       profile.id,
       parsed.data.engagementId,
-      parsed.data.items
+      parsed.data.items,
+      ledgerRow.id
     ));
   } catch (err) {
     // A throw here would strand the ledger claim — every retry would then hit
     // the unique index with zero tasks to show for it. Release it like the
-    // created === 0 branch below.
+    // created === 0 branch below. tasks.granola_import_id is ON DELETE SET NULL
+    // (0088), so any rows that did land are unlinked by the delete rather than
+    // left pointing at a meeting that no longer exists.
     console.error("[granola] createDraftTasks threw after ledger claim:", err);
     await supabase.from("granola_imports").delete().eq("id", ledgerRow.id);
     return { error: "Couldn't create the tasks. Please try again." };
@@ -624,6 +664,17 @@ export async function approveGranolaTasks(input: {
     .from("granola_imports")
     .update({ tasks_created: created })
     .eq("id", ledgerRow.id);
+
+  // Snapshot the call itself for /b/meetings/[id]. The transcript is NOT in
+  // hand here — it's fetched and discarded at DRAFT time (resolveGranolaDraft),
+  // and the client only sends back the drafts — so this needs its own Granola
+  // round-trip. It goes after the response, exactly like the hour estimates in
+  // createDraftTasks, because this path is latency-tuned (see the timer above).
+  // The ledger row already carries the title and date, so the meeting page is
+  // never blank while this runs; it renders what landed and offers a retry.
+  after(() =>
+    captureGranolaMeetingSnapshot(ledgerRow.id, profile.id, parsed.data.noteId)
+  );
 
   revalidatePath(`/b/engagements/${parsed.data.engagementId}`);
   revalidatePath("/b");

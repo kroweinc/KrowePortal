@@ -64,6 +64,7 @@ export async function generateSubtasksForTask(
       { userId: profile.id, operation: "generate_subtasks" }
     );
   } catch (err) {
+    console.error("[generateSubtasksForTask]", err);
     return { inserted: [], error: friendlyAiError(err) };
   }
 

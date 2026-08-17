@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentProfile, DEV_PROFILE_IDS } from "@/lib/auth";
 import { isTaskMember } from "@/lib/actions/task-access";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
+import { withPreviewUrls } from "@/lib/attachments-preview";
+import type { TaskAttachment } from "@/lib/types";
 
 async function getClient(profileId: string) {
   return DEV_PROFILE_IDS.has(profileId) ? createAdminClient() : createClient();
@@ -40,5 +42,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data ?? []);
+  return NextResponse.json(await withPreviewUrls((data ?? []) as TaskAttachment[]));
 }

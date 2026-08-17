@@ -75,6 +75,7 @@ export async function POST(request: NextRequest) {
         );
         controller.close();
       } catch (err) {
+        console.error("[quote stream]", err);
         try {
           controller.enqueue(encoder.encode(sse({ type: "error", error: friendlyAiError(err) })));
           controller.close();

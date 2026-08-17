@@ -30,11 +30,15 @@ import { setTasksPushedToMain, pollMainMerges } from "@/lib/actions/tasks";
 import { pollReleaseGaps } from "@/lib/actions/release-gaps";
 import { ReleaseGapCard } from "@/components/release-gap-card";
 import type { PreloadedBranches } from "@/lib/actions/get-engagement-branches";
+import { WORK_KIND_ICONS } from "@/components/task-type-badge";
 import {
   groupTasksByBranch,
   groupTasksByStagingGroup,
   groupTasksByRelease,
+  groupTasksByWorkKind,
   groupReleasesByDay,
+  splitCodeWork,
+  queuedCodeWork,
   type TaskBucket,
   type ReleaseBucket,
   type ReleaseDay,
@@ -62,6 +66,13 @@ type GroupMode = "branch" | "staging";
 function plural(n: number, one: string, many: string = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
+
+// How many days of the Shipped timeline paint open. The timeline is the whole
+// history, so rendering it expanded mounted a task card for every push ever —
+// 139 of them on a board whose actionable half was three. The newest days are
+// the ones anyone is reading; the rest open on demand, and their headers still
+// carry the counts that say what's inside.
+const DAYS_OPEN_BY_DEFAULT = 2;
 
 // UTC everywhere, matching how groupTasksByRelease buckets days — a local-time
 // format would render differently on the server and the client.
@@ -118,7 +129,7 @@ function shipTime(iso: string): string {
 }
 
 export function StagingBoard({
-  tasks,
+  tasks: serverTasks,
   engagements,
   purposes,
   currentUserId,
@@ -127,6 +138,21 @@ export function StagingBoard({
   releases,
   gapsByRelease,
 }: StagingBoardProps) {
+  // Tasks accepted from a "Not tracked" card since the last board render. The
+  // accept returns the row it wrote, so the card can become a real task card in
+  // its push at once instead of leaving a hole until the revalidated tree lands
+  // — roughly a third of a second against a second and a half. Each one stops
+  // being rendered the moment the server sends the same id back, so the local
+  // copy can never outlive or disagree with the truth.
+  const [acceptedTasks, setAcceptedTasks] = useState<Task[]>([]);
+  const tasks =
+    acceptedTasks.length === 0
+      ? serverTasks
+      : [
+          ...serverTasks,
+          ...acceptedTasks.filter((a) => !serverTasks.some((t) => t.id === a.id)),
+        ];
+
   const engagementMap = new Map(engagements.map((e) => [e.id, e.title]));
   const router = useRouter();
   const pathname = usePathname();
@@ -150,17 +176,23 @@ export function StagingBoard({
   const [renamingReleaseId, setRenamingReleaseId] = useState<string | null>(null);
   const [releaseName, setReleaseName] = useState("");
 
-  // Days start open — the timeline is the point of the page. Collapsing is for
-  // getting a long history out of the way, so only what's shut is tracked.
-  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
+  // What the reader has explicitly opened or shut, over the newest-first default
+  // above. A record of overrides rather than a pre-seeded set, so a push that
+  // lands after a refresh is judged by its new position instead of inheriting
+  // whatever the day in that slot was doing before.
+  const [dayOverrides, setDayOverrides] = useState<Record<string, boolean>>({});
 
-  function toggleDay(key: string) {
-    setCollapsedDays((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  function isDayOpen(key: string, index: number): boolean {
+    return dayOverrides[key] ?? index < DAYS_OPEN_BY_DEFAULT;
+  }
+
+  function toggleDay(key: string, index: number) {
+    // Read the current state inside the updater, not out of the closure, so two
+    // toggles batched into one tick can't both flip from the same stale value.
+    setDayOverrides((prev) => ({
+      ...prev,
+      [key]: !(prev[key] ?? index < DAYS_OPEN_BY_DEFAULT),
+    }));
   }
 
   function toggleRelease(id: string) {
@@ -234,38 +266,59 @@ export function StagingBoard({
     const ids = engagements.map((e) => e.id);
     if (ids.length === 0) return;
     let cancelled = false;
+    let failed = false;
+    // A tick past 0 is the button. Mount rides the cached read the layout sweep
+    // already warmed; a press means "go and look now", and is also the only pass
+    // that reports back when it found nothing — silence on mount is correct,
+    // silence after a click is indistinguishable from a dead button.
+    const manual = pollTick > 0;
     setChecking(true);
 
-    // Nothing to MOVE unless something is queued for the next push — the branch
-    // is a label, so an untagged task counts just the same. The gap scan below
-    // runs either way: a push where the builder queued nothing at all is
-    // precisely the one it exists to catch.
-    const hasStaged = tasks.some((t) => !t.pushed_to_main);
-    const detect = hasStaged
-      ? pollMainMerges(ids)
-      : Promise.resolve([] as Awaited<ReturnType<typeof pollMainMerges>>);
-
-    detect
+    // Runs even with Next push empty. Skipping the poll when nothing is queued
+    // looks like a free win — there'd be no task to move — but the poll is also
+    // what writes the release row, and a push carrying no queued work is exactly
+    // the one the gap scan below exists to catch. The GitHub read is cached for
+    // 300s and shared with the commit scan, so the "wasted" call is a lookup.
+    pollMainMerges(ids, { fresh: manual })
       .then((results) => {
         if (cancelled) return [];
         for (const r of results) {
-          toast.success(
-            `Shipped ${plural(r.taskIds.length, "task")} to main${
-              r.branch ? ` via ${r.branch}` : ""
-            }`,
-            {
-              action: {
-                label: "Undo",
-                onClick: () =>
-                  setTasksPushedToMain(r.taskIds, false).then(() => router.refresh()),
-              },
-            }
-          );
+          const via = r.branch ? ` via ${r.branch}` : "";
+          if (r.taskIds.length === 0) {
+            // A real push that carried nothing queued. Deliberately doesn't
+            // claim it lands under Shipped — a release with no tasks and no gaps
+            // is dropped from the timeline — so it names what happens next
+            // instead: the gap scan below is what can make it appear.
+            toast.success(`New push to main${via}`, {
+              description: "Nothing was queued for it — scanning what went out.",
+            });
+            continue;
+          }
+          toast.success(`Shipped ${plural(r.taskIds.length, "task")} to main${via}`, {
+            action: {
+              label: "Undo",
+              onClick: () =>
+                setTasksPushedToMain(r.taskIds, false).then(() => router.refresh()),
+            },
+          });
         }
         return results;
       })
-      .catch(() => [])
+      .catch(() => {
+        failed = true;
+        return [];
+      })
       .then(async (results) => {
+        if (manual && !cancelled && results.length === 0) {
+          if (failed)
+            toast.error("Couldn't reach GitHub", {
+              description: "The push check didn't run. Try again in a moment.",
+            });
+          else
+            toast.message("No new pushes", {
+              description: "Nothing new on main since the last check.",
+            });
+        }
         // The fast half is done; release the button before the scan, which is an
         // AI call and takes seconds.
         if (!cancelled) setChecking(false);
@@ -515,15 +568,20 @@ export function StagingBoard({
     const canShip =
       mode === "branch" && section === "staged" && g.branch !== null && g.tasks.length > 0;
     const isEmpty = g.tasks.length === 0;
+    // An Actions bucket is named by its kind, not by an identifier — so it takes
+    // that kind's icon and drops the mono treatment branch names get.
+    const Icon = g.workKind
+      ? WORK_KIND_ICONS[g.workKind]
+      : mode === "branch"
+        ? GitBranch
+        : Layers;
     return (
       <div key={g.key} className={`krowe-stage-group${isEmpty ? " is-empty" : ""}`}>
         <div className="krowe-stage-group-head">
-          {mode === "branch" ? (
-            <GitBranch width={14} height={14} strokeWidth={2} />
-          ) : (
-            <Layers width={14} height={14} strokeWidth={2} />
-          )}
-          <span className="krowe-stage-branch">{g.label}</span>
+          <Icon width={14} height={14} strokeWidth={2} />
+          <span className={`krowe-stage-branch${g.workKind ? " is-kind" : ""}`}>
+            {g.label}
+          </span>
           {purpose && <span className="krowe-stage-purpose">{purpose}</span>}
           <span className="krowe-stage-count">{g.tasks.length}</span>
           {renderGroupActions(g)}
@@ -699,7 +757,12 @@ export function StagingBoard({
               same grid, on task-card metrics, so it reads as part of the push
               rather than as a notice bolted underneath. */}
           {b.gaps.map((gap) => (
-            <ReleaseGapCard key={gap.id} gap={gap} pushLabel={label} />
+            <ReleaseGapCard
+              key={gap.id}
+              gap={gap}
+              pushLabel={label}
+              onAccepted={(task) => setAcceptedTasks((prev) => [...prev, task])}
+            />
           ))}
         </div>
       </div>
@@ -709,19 +772,19 @@ export function StagingBoard({
   // A calendar day, with every push that landed on it nested underneath. Two
   // pushes on one date used to render as two identical-looking rows; the date
   // lives here now, and each push below identifies itself by its merge.
-  function renderDay(day: ReleaseDay) {
-    const collapsed = collapsedDays.has(day.key);
+  function renderDay(day: ReleaseDay, index: number) {
+    const open = isDayOpen(day.key, index);
     const heading = day.shippedAt ? shipDayLabel(day.shippedAt) : "Date unknown";
     return (
       <section key={day.key} className="krowe-stage-day">
         <button
           type="button"
           className="krowe-stage-day-head"
-          aria-expanded={!collapsed}
-          onClick={() => toggleDay(day.key)}
+          aria-expanded={open}
+          onClick={() => toggleDay(day.key, index)}
         >
           <ChevronDown
-            className={`krowe-stage-day-chevron${collapsed ? " is-collapsed" : ""}`}
+            className={`krowe-stage-day-chevron${open ? "" : " is-collapsed"}`}
             width={14}
             height={14}
             strokeWidth={2.2}
@@ -740,7 +803,7 @@ export function StagingBoard({
           )}
           <span className="krowe-stage-rule" />
         </button>
-        {!collapsed && (
+        {open && (
           <div className="krowe-stage-groups">{day.pushes.map(renderRelease)}</div>
         )}
       </section>
@@ -833,6 +896,9 @@ export function StagingBoard({
     );
   }
 
+  // The queue, however it's bucketed. Both tabs render this same section — the
+  // Group-by toggle only decides whether a bucket is a branch or a staging
+  // group — so the count line names whichever unit is on screen.
   function renderStagedSection(groups: TaskBucket[]) {
     const total = groups.reduce((n, g) => n + g.tasks.length, 0);
     return (
@@ -841,7 +907,10 @@ export function StagingBoard({
           <span className="krowe-stage-badge staged">Next push</span>
           {groups.length > 0 && (
             <span className="krowe-stage-section-count">
-              {plural(groups.length, "branch", "branches")} · {plural(total, "task")}
+              {mode === "branch"
+                ? plural(groups.length, "branch", "branches")
+                : plural(groups.length, "group")}{" "}
+              · {plural(total, "task")}
             </span>
           )}
           <span className="krowe-stage-rule" />
@@ -860,7 +929,9 @@ export function StagingBoard({
         </div>
         {groups.length === 0 ? (
           <div className="krowe-stage-empty">
-            Nothing queued — completed work that isn&apos;t pushed to main shows up here.
+            {mode === "branch"
+              ? "Nothing queued — completed work that isn't pushed to main shows up here."
+              : "Nothing queued — finish a task on a branch and it lands here, ready to batch into a group."}
           </div>
         ) : (
           <div className="krowe-stage-groups">
@@ -870,6 +941,42 @@ export function StagingBoard({
       </section>
     );
   }
+
+  // Work that isn't code — an email sent, a question asked. It has no branch and
+  // no push coming, so it gets its own section rather than sitting in "Next
+  // push" under "No branch" waiting on a release that will never include it.
+  function renderActionsSection(groups: TaskBucket[]) {
+    const total = groups.reduce((n, g) => n + g.tasks.length, 0);
+    return (
+      <section className="krowe-stage-section">
+        <div className="krowe-stage-section-head">
+          <span className="krowe-stage-badge action">Actions</span>
+          <span className="krowe-stage-section-count">
+            {plural(total, "thing")} done outside the code
+          </span>
+          <span className="krowe-stage-rule" />
+        </div>
+        <div className="krowe-stage-groups">{groups.map((g) => renderGroup(g))}</div>
+      </section>
+    );
+  }
+
+  // Non-code work is lifted out before anything else is grouped — it answers to
+  // neither a branch nor a push, and being grouped by one made finished work
+  // read as pending, queued behind a release that was never going to carry it.
+  const { code: codeTasks, actions: actionTasks } = splitCodeWork(visibleTasks);
+  const actionGroups = groupTasksByWorkKind(actionTasks);
+
+  // The one queue both tabs bucket. Everything already on main is history and
+  // belongs to the Shipped timeline — grouping it here is what turned the
+  // Staging tab into a 126-card pile of work that shipped weeks ago.
+  const queuedTasks = queuedCodeWork(visibleTasks);
+
+  // The client chips count what the tab in front of you holds. The Branch tab
+  // reaches the whole done history, so it counts all of it; the Staging tab
+  // holds only the queue, and "All 126" over a board showing one card is a
+  // number about some other page.
+  const chipTasks = mode === "branch" ? tasks : queuedCodeWork(tasks);
 
   // Live branch names for the engagements currently in scope, so branch mode can
   // surface repo branches that have no queued work yet. Default branches are
@@ -889,14 +996,14 @@ export function StagingBoard({
     for (const b of pb.branches) liveBranchNames.push(b.name);
   }
   // A branch already shown under Shipped shouldn't reappear as an empty row.
-  for (const t of visibleTasks) {
+  for (const t of codeTasks) {
     if (t.pushed_to_main && t.branch_name) excludeFromEmpty.add(t.branch_name);
   }
 
   // Branch mode splits by pushed_to_main (queued vs shipped); staging mode shows
   // one list of groups (the group is the organizing unit, not the push state).
   const stagedGroups = groupTasksByBranch(
-    visibleTasks.filter((t) => !t.pushed_to_main),
+    queuedTasks,
     liveBranchNames,
     excludeFromEmpty
   );
@@ -910,11 +1017,11 @@ export function StagingBoard({
         ? releases.filter((r) => r.engagement_id === null)
         : releases.filter((r) => r.engagement_id === engagementFilter);
   const shippedBuckets = groupTasksByRelease(
-    visibleTasks.filter((t) => t.pushed_to_main),
+    codeTasks.filter((t) => t.pushed_to_main),
     visibleReleases,
     gapsByRelease
   );
-  const groups = groupTasksByStagingGroup(visibleTasks, visibleGroupDefs);
+  const groups = groupTasksByStagingGroup(queuedTasks, visibleGroupDefs);
 
   // Flat, on-screen order of task ids for the sheet's prev/next stepping. Empty
   // branch rows contribute nothing, so navigation walks only real tasks.
@@ -922,6 +1029,7 @@ export function StagingBoard({
     mode === "branch"
       ? [
           ...stagedGroups.flatMap((g) => g.tasks.map((t) => t.id)),
+          ...actionGroups.flatMap((g) => g.tasks.map((t) => t.id)),
           ...shippedBuckets.flatMap((b) => b.tasks.map((t) => t.id)),
         ]
       : groups.flatMap((g) => g.tasks.map((t) => t.id));
@@ -1017,7 +1125,7 @@ export function StagingBoard({
             className={`krowe-filter-chip ${engagementFilter === null ? "active" : ""}`}
             onClick={() => setParam("engagement", null)}
           >
-            All <span className="count">{tasks.length}</span>
+            All <span className="count">{chipTasks.length}</span>
           </button>
           {engagements.map((e) => (
             <button
@@ -1027,7 +1135,7 @@ export function StagingBoard({
               onClick={() => setParam("engagement", e.id)}
             >
               {e.title}{" "}
-              <span className="count">{tasks.filter((t) => t.engagement_id === e.id).length}</span>
+              <span className="count">{chipTasks.filter((t) => t.engagement_id === e.id).length}</span>
             </button>
           ))}
           {hasPersonalTasks && (
@@ -1037,35 +1145,34 @@ export function StagingBoard({
               onClick={() => setParam("engagement", "personal")}
             >
               Personal{" "}
-              <span className="count">{tasks.filter((t) => t.engagement_id === null).length}</span>
+              <span className="count">{chipTasks.filter((t) => t.engagement_id === null).length}</span>
             </button>
           )}
         </div>
       )}
 
       {mode === "branch" ? (
-        stagedGroups.length === 0 && shippedBuckets.length === 0 ? (
+        stagedGroups.length === 0 &&
+        shippedBuckets.length === 0 &&
+        actionGroups.length === 0 ? (
           <div className="krowe-column-empty" style={{ maxWidth: 400 }}>
             Nothing here yet — finish a task and it lands in staging, ready to group by branch.
           </div>
         ) : (
           <div className="krowe-stage-wrap">
             {renderStagedSection(stagedGroups)}
+            {/* Only when there's something in it — a section that says "no
+                actions" is noise on a board that is mostly about code. */}
+            {actionGroups.length > 0 && renderActionsSection(actionGroups)}
             {renderShippedSection(shippedBuckets)}
           </div>
         )
-      ) : groups.length === 0 ? (
-        <div className="krowe-column-empty" style={{ maxWidth: 420 }}>
-          {activeEngagementId
-            ? "No staging groups yet — add one above, then assign done tasks to it from the task’s deliverable."
-            : "Pick a client above to create and manage its staging groups."}
-        </div>
       ) : (
-        <div className="krowe-stage-wrap">
-          <div className="krowe-stage-groups">
-            {groups.map((g) => renderGroup(g))}
-          </div>
-        </div>
+        // Same section, different buckets. Shipped history and non-code Actions
+        // stay on the Branch tab: a staging group is a batch you are about to
+        // push, so work that already went out — or that was never going out —
+        // has no business being grouped into one.
+        <div className="krowe-stage-wrap">{renderStagedSection(groups)}</div>
       )}
 
       <TaskDetailSheet

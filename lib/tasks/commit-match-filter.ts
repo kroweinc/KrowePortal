@@ -51,6 +51,29 @@ type RawMatch = {
 export const MATCH_CONFIDENCE_THRESHOLD = 0.8;
 
 /**
+ * At or above this, the scan stops asking and marks the task done itself.
+ *
+ * Set well clear of MATCH_CONFIDENCE_THRESHOLD because the two mistakes cost
+ * different amounts. Between the thresholds a wrong match paints a card the
+ * builder ignores; above it, a wrong match moves their task, resolves an open
+ * approval, and files the work under a push. Reject reverses all of it, but a
+ * reversal the builder never notices is a silent lie about what shipped.
+ */
+export const AUTO_APPLY_CONFIDENCE_THRESHOLD = 0.95;
+
+/**
+ * Whether a surviving match is certain enough to apply without asking.
+ *
+ * Branch is deliberately not part of this: a near-certain match found only on
+ * an integration branch is still finished work, it just isn't live yet. The
+ * caller's isLive rule decides whether it ships to a release or lands in Next
+ * push — the same split confirming by hand already makes.
+ */
+export function shouldAutoApply(match: Pick<CommitMatch, "confidence">): boolean {
+  return match.confidence >= AUTO_APPLY_CONFIDENCE_THRESHOLD;
+}
+
+/**
  * Keep only the matches that survive every rule the prompt already asks for.
  * Pure, so the rules hold whether or not the model complied.
  */

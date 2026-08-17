@@ -66,6 +66,18 @@ export async function isEngagementMember(
   return data ? isMember(data as EngagementMembers, profileId) : false;
 }
 
+/**
+ * The same membership rule as isEngagementMember, decided from an engagement
+ * the caller already embedded in its own read. Saves the second round trip on
+ * paths where the row being authorized joins to engagements anyway — and where
+ * that round trip sits on a click (see acceptReleaseGap).
+ */
+export function isEngagementMemberEmbed(embed: unknown, profileId: string): boolean {
+  if (DEV_PROFILE_IDS.has(profileId)) return true;
+  const members = membersFromEmbed(embed);
+  return members ? isMember(members, profileId) : false;
+}
+
 async function taskIdForChild(
   table: "task_subtasks" | "task_attachments" | "task_commits" | "task_comments",
   childId: string

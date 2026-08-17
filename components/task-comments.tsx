@@ -602,45 +602,40 @@ export function TaskCommentThread() {
 // ── Overview preview ─────────────────────────────────────────────────────────
 
 /** The single most recent entry plus a way into the full thread. Read-only —
- *  every write happens in the Comments tab. */
-export function TaskCommentPreview({ onOpenThread }: { onOpenThread: () => void }) {
+ *  every write happens in the Comments tab. Owns its section header so the
+ *  whole block can stay out of the sheet until there's a conversation: an empty
+ *  Discussion card is noise, and the footer's Comment button is the way in. */
+export function TaskDiscussionSection({ onOpenThread }: { onOpenThread: () => void }) {
   const { entries, commentCount, loading, error } = useTaskComments();
   const latest = entries[entries.length - 1];
 
-  if (loading) {
-    return <div className="krowe-cm-preview loading">Loading the conversation…</div>;
-  }
-
-  if (error || !latest) {
-    return (
-      <div className="krowe-cm-preview">
-        <p className="krowe-cm-preview-blank">
-          {error ? "Couldn't load the conversation" : "No comments yet"}
-        </p>
-        <button type="button" className="krowe-cm-open" onClick={onOpenThread}>
-          <MessageSquare className="h-3.5 w-3.5" />
-          Start the conversation
-        </button>
-      </div>
-    );
-  }
+  if (loading || error || !latest) return null;
 
   return (
-    <div className="krowe-cm-preview">
-      <ul className="krowe-cm-list">
-        {latest.kind === "comment" ? (
-          <CommentRow key={latest.id} entry={latest} canManage={false} compact />
-        ) : (
-          <EventRow key={latest.id} entry={latest} compact />
-        )}
-      </ul>
-      <button type="button" className="krowe-cm-open" onClick={onOpenThread}>
-        <MessageSquare className="h-3.5 w-3.5" />
-        {commentCount === 0
-          ? "Open the conversation"
-          : `View all comments (${commentCount})`}
-      </button>
-    </div>
+    <section className="krowe-task-section">
+      <div className="krowe-task-section-h">
+        <span className="label">
+          <MessageSquare className="h-3 w-3" />
+          Discussion
+        </span>
+        <span className="rule" />
+      </div>
+      <div className="krowe-cm-preview">
+        <ul className="krowe-cm-list">
+          {latest.kind === "comment" ? (
+            <CommentRow key={latest.id} entry={latest} canManage={false} compact />
+          ) : (
+            <EventRow key={latest.id} entry={latest} compact />
+          )}
+        </ul>
+        <button type="button" className="krowe-cm-open" onClick={onOpenThread}>
+          <MessageSquare className="h-3.5 w-3.5" />
+          {commentCount === 0
+            ? "Open the conversation"
+            : `View all comments (${commentCount})`}
+        </button>
+      </div>
+    </section>
   );
 }
 

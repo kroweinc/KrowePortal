@@ -86,6 +86,12 @@
   --info:      #1269a8;
   --info-soft: #f0f9ff;
 
+  /* Informational callout — a warm block that offers something rather than
+     warning about it (the task sheet's Regenerate prompt). Softer than
+     --primary-soft, which reads as a chosen/active orange. */
+  --callout-bg:     #fef5ed;
+  --callout-border: #edcfb9;
+
   /* Contribution-heat ramp (repo activity strip) — quietest to busiest day.
      Level 0 is --border; these are the four "has commits" steps, each a deeper
      wash of --primary over the soft tint. */
@@ -125,6 +131,22 @@
      centered against the whole window. Overridden at the 860px breakpoint
      and by the collapsed rail. */
   --sidebar-width: 260px;
+
+  /* Spacing — the scale DESIGN.md specifies. Documented there since the start but
+     never implemented here, so every rule below this point set gaps and padding
+     in raw px. Defined now rather than adding another literal; existing rules are
+     left alone deliberately (a mechanical sweep of ~7900 lines of CSS is its own
+     change, with its own diff to review). New rules use these. */
+  --space-xs:   2px;
+  --space-sm:   4px;
+  --space-md:   8px;
+  --space-lg:   12px;
+  --space-xl:   16px;
+  --space-2xl:  24px;
+  --space-3xl:  32px;
+  --space-4xl:  48px;
+  --space-5xl:  64px;
+  --space-6xl:  96px;
 
   /* Radius */
   --radius-sm:   6px;
@@ -237,6 +259,13 @@ textarea:focus-visible {
 @keyframes breathe         { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 @keyframes panel-in        { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes toast-in        { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes sidebar-enter   { from { opacity: 0; transform: translateX(-100%); } to { opacity: 1; transform: translateX(0); } }
+/* Offsets come from --sheet-from-* so one pair of keyframes covers all four sides.
+   Leaving only drifts a fraction of the way back — a full slide-out reads as a
+   yank once the fade has already carried the panel away. */
+@keyframes sheet-in          { from { opacity: 0; transform: translate(var(--sheet-from-x), var(--sheet-from-y)); } to { opacity: 1; transform: translate(0, 0); } }
+@keyframes sheet-out         { from { opacity: 1; transform: translate(0, 0); } to { opacity: 0; transform: translate(calc(var(--sheet-from-x) * 0.16), calc(var(--sheet-from-y) * 0.16)); } }
+@keyframes sheet-overlay-out { from { opacity: 1; } to { opacity: 0; } }
 
 /* ============================================================
    KROWE COMPONENT CLASSES
@@ -563,11 +592,48 @@ textarea:focus-visible {
 .krowe-sidebar.collapsed .krowe-sidebar-ic   { margin: 0; }
 .krowe-sidebar.collapsed .krowe-sidebar-foot { padding: 14px 10px 16px; }
 
+/* ── Sidebar entrance ──
+   On first paint the rail slides in from the left edge and its contents rise in
+   behind it, so the shell assembles instead of snapping into place. The layout
+   owns the rail, so this plays on a real page load — not on every client-side
+   navigation between /b routes. Desktop only: below 768px an off-canvas
+   translateX is the drawer's resting position, and animating it here would
+   flash the menu open on load. */
+@media (min-width: 768px) {
+  .krowe-sidebar {
+    animation: sidebar-enter var(--duration-slow) var(--ease-out-smooth) both;
+  }
+  .krowe-sidebar-brand,
+  .krowe-sidebar-cap,
+  .krowe-sidebar-nav > *,
+  .krowe-sidebar-foot > * {
+    animation: fade-up-in var(--duration-normal) var(--ease-out-smooth) both;
+    animation-delay: 120ms;
+  }
+  .krowe-sidebar-cap { animation-delay: 160ms; }
+  .krowe-sidebar-nav > *:nth-child(1) { animation-delay: 200ms; }
+  .krowe-sidebar-nav > *:nth-child(2) { animation-delay: 240ms; }
+  .krowe-sidebar-nav > *:nth-child(3) { animation-delay: 280ms; }
+  .krowe-sidebar-nav > *:nth-child(4) { animation-delay: 320ms; }
+  .krowe-sidebar-nav > *:nth-child(5) { animation-delay: 360ms; }
+  .krowe-sidebar-nav > *:nth-child(6) { animation-delay: 400ms; }
+  .krowe-sidebar-nav > *:nth-child(7) { animation-delay: 440ms; }
+  /* Tab lists are layout-defined and can grow; anything past the seventh lands
+     with the last staggered item rather than trailing off indefinitely. */
+  .krowe-sidebar-nav > *:nth-child(n + 8) { animation-delay: 480ms; }
+  .krowe-sidebar-foot > * { animation-delay: 520ms; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .krowe-sidebar.ready { transition: none; }
   .krowe-sidebar-toggle { transition: background 150ms var(--ease-out-smooth), color 150ms var(--ease-out-smooth); }
   .krowe-sidebar.collapsed .krowe-sidebar-brand img,
   .krowe-sidebar.collapsed .krowe-sidebar-toggle { transition: none; }
+  .krowe-sidebar,
+  .krowe-sidebar-brand,
+  .krowe-sidebar-cap,
+  .krowe-sidebar-nav > *,
+  .krowe-sidebar-foot > * { animation: none; }
 }
 
 /* ── Mobile: the rail becomes an off-canvas drawer ──
@@ -724,7 +790,7 @@ textarea:focus-visible {
   max-width: 1320px;
 }
 .krowe-column {
-  display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column; gap: 10px;
   min-height: 120px; padding: 8px; margin: -8px;
   border-radius: var(--radius-lg);
   transition: background var(--duration-fast) var(--ease-out-smooth);
@@ -799,6 +865,12 @@ textarea:focus-visible {
   background: var(--success-soft); color: var(--success);
   border-color: color-mix(in srgb, var(--success) 22%, transparent);
 }
+/* Done work with no branch and no push — informational, not a state on the way
+   to somewhere else, so it takes info rather than the staged/shipped pair. */
+.krowe-stage-badge.action {
+  background: var(--info-soft); color: var(--info);
+  border-color: color-mix(in srgb, var(--info) 22%, transparent);
+}
 .krowe-stage-groups { display: flex; flex-direction: column; gap: 16px; }
 .krowe-stage-group {
   border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -821,6 +893,11 @@ textarea:focus-visible {
 .krowe-stage-branch {
   font-family: var(--font-mono); font-size: 13px; font-weight: 600;
   color: var(--foreground); letter-spacing: -0.01em; flex-shrink: 0;
+}
+/* An Actions group is headed by a word ("Email"), not an identifier — mono is
+   for the branch names and shas around it, so this one reads as UI text. */
+.krowe-stage-branch.is-kind {
+  font-family: var(--font-sans); font-size: 13.5px; letter-spacing: 0;
 }
 .krowe-stage-purpose {
   font-family: var(--font-serif); font-style: italic; font-size: 13.5px;
@@ -1176,6 +1253,12 @@ textarea:focus-visible {
   padding: 1px 5px; border-radius: var(--radius-full);
   background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success);
 }
+/* Hand-added branch → neutral tag, so a branch the builder typed never reads as
+   one GitHub confirmed. */
+.krowe-branch-chip-tag.is-local {
+  background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
+  color: var(--muted-foreground);
+}
 /* Selected feature branch → staged (amber) */
 .krowe-branch-chip.active {
   background: var(--warning-soft); color: var(--warning);
@@ -1194,6 +1277,58 @@ textarea:focus-visible {
 .krowe-branch-chip.is-none.active {
   background: var(--foreground); color: var(--background); border-color: var(--foreground);
 }
+/* "Add branch" — dashed, so it reads as an empty slot to fill rather than as a
+   branch that already exists. */
+.krowe-branch-chip.is-add {
+  font-family: var(--font-sans);
+  border-style: dashed;
+}
+/* A local chip pairs with its own remove button — the only way back from a
+   typo, since nothing on GitHub will ever sweep a hand-added branch. Kept as a
+   sibling rather than nested (a button inside a button is invalid), and sized
+   to sit inside the chip row's rhythm. */
+.krowe-branch-chip-pair {
+  display: inline-flex; align-items: center; gap: 2px;
+  min-width: 0; max-width: 100%;
+}
+.krowe-branch-chip-pair .krowe-branch-chip { min-width: 0; }
+.krowe-branch-chip-remove {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; width: 22px; height: 22px; border-radius: var(--radius-full);
+  border: none; background: transparent; color: var(--faint-foreground);
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              background var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-chip-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.krowe-branch-chip-remove:disabled { opacity: 0.5; cursor: default; }
+
+/* Inline "name the branch" input. Typing target → 1px focus border, no halo. */
+.krowe-branch-add { display: inline-flex; align-items: center; gap: 6px; }
+.krowe-branch-add-input {
+  font-family: var(--font-mono); font-size: 11.5px;
+  padding: 4px 10px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--foreground);
+  width: 190px; max-width: 100%;
+}
+.krowe-branch-add-input::placeholder { color: var(--faint-foreground); }
+.krowe-branch-add-input:focus { outline: none; border-color: var(--border-focus); }
+.krowe-branch-add-input:disabled { opacity: 0.5; }
+.krowe-branch-add-save {
+  font-family: var(--font-sans); font-size: 11.5px; font-weight: 500;
+  padding: 4px 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--foreground); background: var(--foreground);
+  color: var(--background); cursor: pointer;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-branch-add-save:hover:not(:disabled) { opacity: 0.88; }
+.krowe-branch-add-save:active:not(:disabled) { transform: scale(0.97); }
+.krowe-branch-add-save:disabled { opacity: 0.5; cursor: default; }
+
 .krowe-branch-refresh {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: var(--radius-full);
@@ -1205,9 +1340,36 @@ textarea:focus-visible {
 .krowe-branch-refresh:hover:not(:disabled) { color: var(--foreground); border-color: var(--border-strong); }
 .krowe-branch-refresh:disabled { opacity: 0.5; cursor: default; }
 .krowe-branch-chips-hint { font-size: 12px; color: var(--muted-foreground); }
+.krowe-branch-chips-error { font-size: 12px; color: var(--danger); }
 .krowe-branch-chips-purpose { font-family: var(--font-serif); font-style: italic; color: var(--faint-foreground); }
 @keyframes krowe-spin { to { transform: rotate(360deg); } }
 .krowe-spin { animation: krowe-spin 0.7s linear infinite; }
+
+/* Work-kind chips — "what kind of work is this?" in the approval dialog.
+   Not every task ends in a branch (a question asked, an email sent), and the
+   chosen kind decides whether the branch picker shows at all. Same pill
+   geometry as the branch chips, but sans-serif (these are words, not refs) and
+   a neutral selected state — matching the group-by segment, since this is a
+   mode switch rather than a shipped/staged status. */
+.krowe-workkind-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
+.krowe-workkind-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500;
+  padding: 5px 12px; border-radius: var(--radius-full);
+  border: 1px solid var(--border); background: white; color: var(--muted-foreground);
+  cursor: pointer; white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth),
+              transform var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-workkind-chip svg { flex-shrink: 0; }
+.krowe-workkind-chip:hover:not(:disabled) { color: var(--foreground); border-color: var(--border-strong); }
+.krowe-workkind-chip:active:not(:disabled) { transform: scale(0.97); }
+.krowe-workkind-chip:disabled { opacity: 0.5; cursor: default; }
+.krowe-workkind-chip.active {
+  background: var(--foreground); color: var(--background); border-color: var(--foreground);
+}
 
 /* Staging group field — assign a done task to a builder-created group,
    separate from the branch. Mirrors the branch field layout. */
@@ -1335,27 +1497,119 @@ textarea:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .krowe-spin { animation: none; }
-  .krowe-branch-chip:active:not(:disabled) { transform: none; }
+  .krowe-branch-chip:active:not(:disabled),
+  .krowe-branch-add-save:active:not(:disabled) { transform: none; }
 }
 
-/* ── Card ── */
+/* ── Card — "Signal" (Build Board v2) ──
+   A state glyph in a left gutter, the title beside it, and everything else on a
+   single meta line indented to that gutter. --card-gutter is the one number the
+   body aligns to; the select checkbox is painted over the glyph rather than
+   beside it, so the gutter never widens and no card carries dead left space. */
 .krowe-card {
+  --card-gutter: 24px;   /* 15px glyph + 9px gap */
+  --card-bg: white;
   position: relative;
-  background: white; border: 1px solid var(--border);
-  border-radius: var(--radius-lg); padding: 13px 14px 12px 16px;
-  box-shadow: var(--shadow-1); cursor: grab;
-  transition: transform var(--duration-fast) var(--ease-out-smooth),
-              box-shadow var(--duration-fast) var(--ease-out-smooth),
-              border-color var(--duration-fast) var(--ease-out-smooth);
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 11px 12px;
+  cursor: grab;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth),
+              box-shadow var(--duration-fast) var(--ease-out-smooth);
   animation: fade-up-in var(--duration-normal) var(--ease-out-smooth) both;
 }
 .krowe-card:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-2);
-  border-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+  border-color: var(--border-strong);
+  --card-bg: color-mix(in srgb, var(--surface-subtle) 70%, white);
 }
 .krowe-card:active { cursor: grabbing; }
 .krowe-card.dragging { opacity: 0.4; }
+
+/* The card the cursor carries during a drag. A clone parked offscreen just long
+   enough for the browser to rasterize it as the drag image — lifted off the
+   board with the stronger border and shadow, and never animated, since the
+   snapshot is taken on the first frame. */
+.krowe-card-ghost {
+  position: fixed;
+  top: 0; left: -10000px;
+  pointer-events: none;
+  opacity: 1;
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-3);
+  animation: none;
+}
+
+/* Title row: [checkbox] [state glyph] [title ……] [pin · approval] */
+.krowe-card-srow { display: flex; align-items: flex-start; gap: 9px; }
+.krowe-card-srow-end { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+/* ApprovalPill renders null on most tasks — don't leave its gap behind. */
+.krowe-card-srow-end:empty { display: none; }
+
+/* Stage glyph — dashed ring → solid ring → half disc → filled check. */
+.krowe-card-state {
+  width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full);
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-card-state.backlog     { border: 1.4px dashed var(--faint-foreground); }
+.krowe-card-state.todo        { border: 1.4px solid var(--muted-foreground); }
+.krowe-card-state.in_progress {
+  border: 1.4px solid var(--primary);
+  background: conic-gradient(var(--primary) 0 50%, transparent 50% 100%);
+}
+.krowe-card-state.done { background: var(--success); color: white; }
+
+/* Priority glyph — three ascending bars, lit low → urgent. */
+.krowe-bars {
+  display: inline-flex; align-items: flex-end; gap: 1.5px;
+  height: 11px; flex-shrink: 0;
+}
+.krowe-bars i {
+  width: 2.5px; border-radius: 1px;
+  background: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+.krowe-bars i:nth-child(1) { height: 4px; }
+.krowe-bars i:nth-child(2) { height: 7.5px; }
+.krowe-bars i:nth-child(3) { height: 11px; }
+.krowe-bars.low    i:nth-child(1),
+.krowe-bars.medium i:nth-child(-n + 2),
+.krowe-bars.high   i,
+.krowe-bars.urgent i { background: var(--muted-foreground); }
+.krowe-bars.high   i { background: var(--warning); }
+.krowe-bars.urgent i { background: var(--danger); }
+
+/* Meta line — priority · type · tags ……… date · avatar (or hover actions). */
+.krowe-card-smeta {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding-left: var(--card-gutter);
+}
+.krowe-card-spacer { flex: 1; }
+.krowe-card-sep {
+  width: 3px; height: 3px; border-radius: var(--radius-full); flex-shrink: 0;
+  background: color-mix(in srgb, var(--faint-foreground) 55%, transparent);
+}
+/* The end-cap sizes to the signature; the hover actions are lifted out of flow
+   and painted over the meta line's slack. So the resting line never reserves
+   room for a button that isn't there, and the cross-fade costs no reflow. */
+.krowe-card-endcap { position: relative; flex-shrink: 0; }
+.krowe-card-endcap > * {
+  display: flex; align-items: center; justify-content: flex-end; gap: 7px;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-card-signature { opacity: 1; }
+.krowe-card-actions {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  /* Fade whatever sits underneath rather than slicing a chip in half. */
+  padding-left: 26px;
+  background: linear-gradient(to right, transparent, var(--card-bg) 22px);
+  opacity: 0; pointer-events: none;
+}
+.krowe-card:hover .krowe-card-signature,
+.krowe-card:focus-within .krowe-card-signature { opacity: 0; }
+.krowe-card:hover .krowe-card-actions,
+.krowe-card:focus-within .krowe-card-actions { opacity: 1; pointer-events: auto; }
 
 /* Priority rail */
 .krowe-rail {
@@ -1363,32 +1617,43 @@ textarea:focus-visible {
   width: 3px; border-radius: 0 3px 3px 0;
 }
 .krowe-op-card .krowe-rail { top: 18px; bottom: 18px; }
-.krowe-card.priority-urgent .krowe-rail { background: var(--danger); }
-.krowe-card.priority-high   .krowe-rail { background: var(--warning); }
-.krowe-card.priority-medium .krowe-rail { background: var(--primary-accent); opacity: 0.85; }
-.krowe-card.priority-low    .krowe-rail { background: var(--success); }
-/* Done tasks read as uniformly "shipped": the priority rail goes green
-   regardless of urgency (this override sits after the priority rules above). */
-.krowe-card.status-done     .krowe-rail { background: var(--success); opacity: 1; }
 
-.krowe-card.status-done       { background: color-mix(in srgb, var(--success) 4.5%, white); }
-.krowe-card.approval-pending,
+/* Card states. With the rail gone these read on the card's own edge and fill —
+   done mutes its title rather than tinting the whole card, so a full Done column
+   stays quiet instead of turning into a green block. */
+.krowe-card.status-done .krowe-card-title { color: var(--muted-foreground); }
+/* Done, but by the scan rather than by the builder — it sits at the head of the
+   column reading amber until they keep it or send it back. */
+.krowe-card.auto-done {
+  --card-bg: color-mix(in srgb, var(--warning) 4%, white);
+  border-color: color-mix(in srgb, var(--warning) 32%, var(--border));
+}
+.krowe-card.approval-pending {
+  --card-bg: color-mix(in srgb, var(--success) 2.5%, white);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
 .krowe-op-card.approval-pending {
   background: color-mix(in srgb, var(--success) 2.5%, white);
   border-color: color-mix(in srgb, var(--success) 30%, var(--border));
 }
 .krowe-card.priority-urgent {
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent), var(--shadow-1);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 22%, transparent);
 }
 
-.krowe-card-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .krowe-card-title {
-  font-size: 13.5px; font-weight: 600; line-height: 1.38;
+  flex: 1; min-width: 0;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 13.5px; font-weight: 600; line-height: 1.4;
   color: var(--foreground); letter-spacing: -0.005em; text-wrap: pretty;
+  text-decoration: none;
 }
 .krowe-card-desc {
-  margin-top: 7px; font-size: 12.5px; color: var(--muted-foreground); line-height: 1.5;
+  margin-top: -2px; padding-left: var(--card-gutter);
+  font-size: 12.5px; color: var(--muted-foreground); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.krowe-card .krowe-delivery-row {
+  padding-top: 0; padding-left: var(--card-gutter);
 }
 /* Operator send-back callout — builder-side "changes requested" on the card.
    One header row (badge · label · timestamp), the note as the serif hero,
@@ -1462,16 +1727,26 @@ textarea:focus-visible {
   text-decoration-thickness: 1px;
   color: var(--faint-foreground);
 }
+/* Two states share this card, so the accent is a local variable rather than a
+   second copy of the block. Green is a statement of fact — a commit shipped
+   this, confirm it. Amber is the same "shipped, but it needs your word" register
+   .krowe-gap uses: the scan already moved the task and is showing its work. */
 .krowe-card-shipped {
+  --shipped-accent: var(--success);
+  --shipped-accent-soft: var(--success-soft);
   margin-top: 12px; position: relative;
-  background: var(--success-soft);
-  border: 1px solid color-mix(in srgb, var(--success) 18%, transparent);
+  background: var(--shipped-accent-soft);
+  border: 1px solid color-mix(in srgb, var(--shipped-accent) 18%, transparent);
   border-radius: var(--radius-md);
   overflow: hidden;
 }
+.krowe-card-shipped.auto {
+  --shipped-accent: var(--warning);
+  --shipped-accent-soft: var(--warning-soft);
+}
 .krowe-card-shipped::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-  background: var(--success);
+  background: var(--shipped-accent);
 }
 .krowe-card-shipped-head {
   display: flex; align-items: center; gap: 8px;
@@ -1480,16 +1755,16 @@ textarea:focus-visible {
 .krowe-card-shipped-head .badge {
   display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: var(--radius-full);
-  background: color-mix(in srgb, var(--success) 16%, white);
-  color: var(--success); flex-shrink: 0;
+  background: color-mix(in srgb, var(--shipped-accent) 16%, white);
+  color: var(--shipped-accent); flex-shrink: 0;
 }
 .krowe-card-shipped-head .h {
   font-size: 12px; font-weight: 600; letter-spacing: 0.005em;
-  color: var(--success); white-space: nowrap;
+  color: var(--shipped-accent); white-space: nowrap;
 }
 .krowe-card-shipped-head .t {
   margin-left: auto; font-family: var(--font-mono); font-size: 10.5px;
-  color: color-mix(in srgb, var(--success) 62%, var(--muted-foreground));
+  color: color-mix(in srgb, var(--shipped-accent) 62%, var(--muted-foreground));
   white-space: nowrap;
 }
 .krowe-card-shipped-body { padding: 0 14px 11px 14px; }
@@ -1504,7 +1779,7 @@ textarea:focus-visible {
 a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 .krowe-card-shipped-commit .sha {
   font-family: var(--font-mono); font-size: 11px; font-weight: 500;
-  color: var(--success); flex-shrink: 0;
+  color: var(--shipped-accent); flex-shrink: 0;
 }
 .krowe-card-shipped-commit .msg {
   font-size: 12.5px; line-height: 1.45; color: var(--foreground);
@@ -1518,7 +1793,7 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 .krowe-card-shipped-foot {
   display: flex; align-items: center; justify-content: flex-end; gap: 6px;
   margin-top: 10px; padding-top: 9px;
-  border-top: 1px solid color-mix(in srgb, var(--success) 14%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--shipped-accent) 14%, transparent);
 }
 .krowe-card-shipped-foot button {
   display: inline-flex; align-items: center; gap: 5px;
@@ -1529,32 +1804,21 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
               border-color var(--duration-fast) var(--ease-out-smooth);
 }
 .krowe-card-shipped-foot .deny {
-  border: 1px solid color-mix(in srgb, var(--success) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--shipped-accent) 22%, transparent);
   background: transparent; color: var(--muted-foreground);
 }
 .krowe-card-shipped-foot .deny:hover {
-  background: color-mix(in srgb, var(--success) 8%, transparent);
+  background: color-mix(in srgb, var(--shipped-accent) 8%, transparent);
   color: var(--foreground);
 }
 .krowe-card-shipped-foot .confirm {
-  border: 1px solid var(--success);
-  background: var(--success); color: white;
+  border: 1px solid var(--shipped-accent);
+  background: var(--shipped-accent); color: white;
 }
 .krowe-card-shipped-foot .confirm:hover {
-  background: color-mix(in srgb, var(--success) 88%, black);
-  border-color: color-mix(in srgb, var(--success) 88%, black);
+  background: color-mix(in srgb, var(--shipped-accent) 88%, black);
+  border-color: color-mix(in srgb, var(--shipped-accent) 88%, black);
 }
-.krowe-card-meta {
-  margin-top: 11px;
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-}
-.krowe-card-meta-left { display: flex; align-items: center; gap: 6px; }
-.krowe-card-actions {
-  display: flex; align-items: center; gap: 6px;
-  opacity: 0; transition: opacity var(--duration-fast) var(--ease-out-smooth);
-}
-.krowe-card:hover .krowe-card-actions { opacity: 1; }
-
 /* ── Engagement filter chips ── */
 /* Board controls: engagement chips (left) + sort dropdown (right). */
 .krowe-board-controls {
@@ -1609,6 +1873,15 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 .krowe-chip-type.feature { background: var(--success-soft); color: var(--success); }
 .krowe-chip-type.bug     { background: var(--danger-soft);  color: var(--danger);  }
 .krowe-chip-type.change  { background: color-mix(in srgb, #3b82f6 12%, white); color: #1d4ed8; }
+
+/* Work kind (migration 0089) — code vs. the tasks that never touch a repo.
+   Deliberately quiet: it's a fact about the task, not a status to react to. */
+.krowe-chip-work {
+  font-size: 10.5px; padding: 2px 8px 2px 6px;
+  background: var(--surface-subtle); color: var(--muted-foreground);
+  border-color: var(--border);
+}
+.krowe-chip-work svg { flex-shrink: 0; }
 
 /* AI-generated area labels. */
 .krowe-chip-tag {
@@ -1682,6 +1955,23 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
   border-color: var(--primary); color: var(--primary);
   background: color-mix(in srgb, var(--primary) 6%, white);
 }
+
+/* ── Dashed "add / import" mini buttons ──
+   Shared by the project overview (.docov), the PRD wizard (.prdnew), and the
+   engagement Manage sections — the Granola import trigger renders one by
+   default, so this stays unscoped. */
+.add-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.add-mini {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 34px; padding: 0 14px; border-radius: var(--radius-full);
+  border: 1px dashed var(--border-strong); background: var(--surface-subtle);
+  color: var(--muted-foreground); font-size: 12.5px; font-weight: 500;
+  transition: all 160ms var(--ease-out-smooth);
+}
+.add-mini:hover { color: var(--foreground); border-color: var(--faint-foreground); background: white; }
+.add-mini:disabled { opacity: 0.5; cursor: default; }
+.add-mini .ai { display: inline-flex; color: var(--faint-foreground); }
+.add-mini:hover .ai { color: var(--primary); }
 
 /* ── Drop indicator ── */
 .krowe-drop-indicator {
@@ -2158,6 +2448,51 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
   display: flex; align-items: center; justify-content: center;
 }
 
+/* ── Radix sheet motion (task detail, profile drawers) ──
+   The primitive used to carry tailwindcss-animate utilities (animate-in /
+   slide-in-from-right); that plugin isn't part of this Tailwind v4 setup, so
+   they compiled to nothing and the panel appeared with no motion at all. The
+   Radix data-state attribute is the real hook: it flips to "closed" first and
+   the node stays mounted until the exit animation ends. */
+.krowe-sheet-panel {
+  /* Percentages, not bare zeros: the exit scales these in a calc(), and
+     calc(0 * 0.16) resolves to a number, which makes translate() invalid. */
+  --sheet-from-x: 0%;
+  --sheet-from-y: 0%;
+}
+.krowe-sheet-panel[data-side="right"]  { --sheet-from-x: 100%; }
+.krowe-sheet-panel[data-side="left"]   { --sheet-from-x: -100%; }
+.krowe-sheet-panel[data-side="top"]    { --sheet-from-y: -100%; }
+.krowe-sheet-panel[data-side="bottom"] { --sheet-from-y: 100%; }
+.krowe-sheet-panel[data-state="open"] {
+  animation: sheet-in var(--duration-normal) var(--ease-out-smooth);
+}
+/* Panel and backdrop share the exit duration so the dim clears with the panel
+   rather than snapping off underneath it. The easing front-loads the change, so
+   the exit still *feels* quicker than the entrance at the same duration —
+   --duration-fast left the fade almost entirely spent inside 70ms, which read
+   as a blink rather than a dismissal. */
+.krowe-sheet-panel[data-state="closed"] {
+  animation: sheet-out var(--duration-normal) var(--ease-out-smooth) forwards;
+}
+.krowe-sheet-overlay[data-state="open"] {
+  animation: fade-in var(--duration-normal) var(--ease-out-smooth);
+}
+/* A distinct keyframe name, not `fade-in reverse`: Radix's presence check reads
+   animation-name and unmounts on the spot when the closed state reuses the open
+   one — which dropped the backdrop a frame after Escape while the panel was
+   still on screen. */
+.krowe-sheet-overlay[data-state="closed"] {
+  animation: sheet-overlay-out var(--duration-normal) var(--ease-out-smooth) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* animation:none also tells Radix's presence check there's nothing to wait
+     for, so the panel unmounts immediately instead of hanging around. */
+  .krowe-sheet-panel[data-state],
+  .krowe-sheet-overlay[data-state] { animation: none; }
+}
+
 /* ── Sheet ── */
 .krowe-sheet-backdrop {
   position: fixed; inset: 0;
@@ -2352,35 +2687,40 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
    TASK DETAIL SHEET — Redesigned sidebar (Krowe brand)
    ============================================================ */
 
-/* SheetContent overrides */
+/* SheetContent overrides. --sheet-pad is the one gutter every band inside the
+   sheet aligns to (topbar, tabs, body, footer), so the narrow breakpoint at the
+   bottom of this block re-gutters the whole panel by changing one value. */
 .krowe-task-sheet {
+  --sheet-pad: 28px;
   background: var(--background) !important;
   padding: 0 !important;
   gap: 0 !important;
-  max-width: min(560px, 96vw) !important;
+  max-width: min(600px, 96vw) !important;
   display: flex;
   flex-direction: column;
 }
 
-/* Sticky topbar inside the sheet */
+/* Sticky topbar inside the sheet. No rule of its own — the tabs strip below
+   carries the only line, so the id/crumb reads as part of the tab band. */
 .krowe-task-sheet-topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--border);
+  height: 54px;
+  padding: 0 14px 0 var(--sheet-pad);
   background: var(--background);
   flex-shrink: 0;
 }
 .krowe-task-crumb {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--muted-foreground);
+  display: flex; align-items: center; gap: 9px;
+  font-size: 13px; color: var(--muted-foreground);
   min-width: 0;
 }
 .krowe-task-crumb .sep { color: var(--border-strong); }
+/* Plain mono, not a chip — it matches the card's own .krowe-card-id and lets the
+   engagement name be the only thing with weight in the crumb. */
 .krowe-task-crumb .id {
-  font-family: var(--font-mono); font-size: 11.5px;
-  background: var(--surface-subtle); color: var(--faint-foreground);
-  padding: 2px 7px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); letter-spacing: 0.02em;
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--faint-foreground); letter-spacing: 0.04em;
+  flex-shrink: 0; white-space: nowrap;
 }
 .krowe-task-crumb .engage {
   color: var(--foreground); white-space: nowrap;
@@ -2413,9 +2753,9 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 
 /* Tabs strip inside the sheet */
 .krowe-task-sheet-tabs {
-  display: flex; align-items: stretch;
-  gap: 22px;
-  padding: 0 24px;
+  display: flex; align-items: center;
+  gap: 26px;
+  padding: 0 var(--sheet-pad);
   border-bottom: 1px solid var(--border);
   background: var(--background);
   flex-shrink: 0;
@@ -2423,17 +2763,52 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 .krowe-task-tab {
   position: relative;
   background: none; border: none;
-  padding: 12px 0;
-  font-size: 13px; font-weight: 500;
+  padding: 0 0 12px;
+  font-size: 14px; font-weight: 500;
   color: var(--muted-foreground);
   cursor: pointer;
   transition: color var(--duration-fast) var(--ease-out-smooth);
 }
 .krowe-task-tab:hover { color: var(--foreground); }
-.krowe-task-tab.active { color: var(--foreground); }
+.krowe-task-tab.active { color: var(--foreground); font-weight: 600; }
+/* Overhangs the label by 2px each side so the weight bump on activation never
+   makes the underline look short. */
 .krowe-task-tab.active::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
-  height: 2px; background: var(--primary); border-radius: 2px;
+  content: ""; position: absolute; left: -2px; right: -2px; bottom: -1px;
+  height: 2px; background: var(--primary); border-radius: 2px 2px 0 0;
+}
+
+/* Sub-bar — stands in for the tabs strip while a linked Granola call is being
+   read inside the sheet (MeetingPanel). Same gutter, same rule, same height, so
+   swapping one band for the other doesn't shift the body under it. Back leads;
+   the full page is the quieter escape hatch. */
+.krowe-task-sheet-subbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--spacing-md);
+  padding: 0 var(--sheet-pad) 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+  flex-shrink: 0;
+}
+.krowe-task-subbar-back,
+.krowe-task-subbar-open {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin: -6px -9px; padding: 6px 9px;
+  background: none; border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  font-size: 13.5px; text-decoration: none; cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-task-subbar-back { font-weight: 600; color: var(--foreground); }
+.krowe-task-subbar-back:hover { color: var(--primary); }
+.krowe-task-subbar-open { font-weight: 500; color: var(--muted-foreground); }
+.krowe-task-subbar-open:hover { color: var(--foreground); }
+/* The button inherits the global halo; a link gets no global focus treatment in
+   this codebase, so it declares its own. */
+.krowe-task-subbar-open:focus-visible {
+  outline: none; color: var(--foreground);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
 }
 
 /* ════════════════════════════════════════════════
@@ -2656,47 +3031,35 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 
 /* Scrollable body */
 .krowe-task-sheet-body {
-  flex: 1; overflow-y: auto;
-  padding: 22px 24px;
-  display: flex; flex-direction: column; gap: 22px;
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  padding: 26px var(--sheet-pad) 34px;
+  display: flex; flex-direction: column; gap: 28px;
   min-height: 0;
 }
-.krowe-task-sheet-body::-webkit-scrollbar { width: 10px; }
+.krowe-task-sheet-body::-webkit-scrollbar { width: 11px; }
 .krowe-task-sheet-body::-webkit-scrollbar-thumb {
-  background: var(--border); border-radius: 999px;
-  border: 3px solid var(--background);
+  background: var(--border-strong); border-radius: 999px;
+  border: 4px solid var(--background);
 }
 
 /* Hero */
-.krowe-task-hero { padding: 4px 0 2px 0; }
-.krowe-task-hero-top {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 10px;
+.krowe-task-hero { padding: 0; }
+/* Byline under the title — who opened it and when. It is the only place either
+   fact appears: the stepper carries the stage, so Stage/Submitted by/Created
+   no longer repeat as property rows. */
+.krowe-task-byline {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  margin-top: 12px; font-size: 13.5px; color: var(--muted-foreground);
 }
-.krowe-status-pill {
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 5px 11px 5px 8px;
-  border-radius: var(--radius-full);
-  font-size: 11.5px; font-weight: 600;
-  letter-spacing: 0.04em; text-transform: uppercase;
+.krowe-task-byline .dot {
+  width: 3px; height: 3px; border-radius: var(--radius-full);
+  background: var(--border-strong); flex-shrink: 0;
 }
-.krowe-status-pill .pulse {
-  width: 7px; height: 7px; border-radius: 999px; background: currentColor;
-  box-shadow: 0 0 0 0 currentColor;
-  animation: krowe-pulse 2.2s var(--ease-out-smooth) infinite;
+.krowe-task-byline .krowe-card-submitter {
+  font-size: 13.5px; color: var(--foreground); font-weight: 500; gap: 7px;
 }
-@keyframes krowe-pulse {
-  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent); }
-  70%  { box-shadow: 0 0 0 6px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .krowe-status-pill .pulse { animation: none; }
-}
-.krowe-status-pill.backlog     { background: color-mix(in srgb, var(--primary-accent) 12%, white); color: color-mix(in srgb, var(--primary-accent) 68%, black); }
-.krowe-status-pill.todo        { background: color-mix(in srgb, var(--primary-accent) 8%, white);  color: color-mix(in srgb, var(--primary-accent) 55%, var(--primary-hover)); }
-.krowe-status-pill.in_progress { background: color-mix(in srgb, var(--primary) 12%, white);        color: var(--primary-hover); }
-.krowe-status-pill.done        { background: var(--success-soft);                                  color: var(--success); }
+.krowe-task-byline .krowe-avatar { width: 22px; height: 22px; }
+.krowe-task-byline .krowe-avatar-initials { font-size: 9px; }
 
 .krowe-prio-dot {
   display: inline-flex; align-items: center; gap: 6px;
@@ -2714,9 +3077,9 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 
 .krowe-task-hero-title {
   font-family: var(--font-serif);
-  font-size: 30px; line-height: 1.18;
-  letter-spacing: -0.012em; color: var(--foreground);
-  margin: 4px 0 6px 0;
+  font-size: 31px; line-height: 1.16;
+  letter-spacing: -0.014em; color: var(--foreground);
+  margin: 0;
   text-wrap: pretty;
   display: flex; align-items: flex-start; gap: 10px;
 }
@@ -2728,8 +3091,8 @@ a.krowe-card-shipped-commit:hover { opacity: 0.72; }
 button.krowe-hero-inline-title,
 span.krowe-hero-inline-title {
   font-family: var(--font-serif);
-  font-size: 30px; line-height: 1.18;
-  letter-spacing: -0.012em;
+  font-size: 31px; line-height: 1.16;
+  letter-spacing: -0.014em;
   color: var(--foreground);
   padding: 0; margin: 0;
 }
@@ -2741,8 +3104,8 @@ button.krowe-hero-inline-title:hover {
 .krowe-desc-inline-text,
 button.krowe-desc-inline-text,
 p.krowe-desc-inline-text {
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.68;
   color: var(--foreground);
   padding: 0; margin: 0;
   background: transparent;
@@ -2751,161 +3114,341 @@ button.krowe-desc-inline-text:hover {
   background: color-mix(in srgb, var(--primary) 4%, transparent);
 }
 
-/* Status pipeline (4-step stepper) */
+/* Status pipeline (4-step stepper). Each step wears the board's own state
+   language rather than an ordinal: a cleared step fills its tick green, the
+   current one takes the white pill and the half-filled orange disc — the same
+   glyph the card in that column shows. */
 .krowe-pipeline {
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px;
   background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 6px;
+  padding: 4px;
 }
 .krowe-pipe-step {
   position: relative;
-  padding: 10px 8px 9px;
+  padding: 9px 4px;
   border-radius: var(--radius-md);
-  text-align: center;
-  font-size: 11.5px; font-weight: 500;
-  color: var(--faint-foreground);
+  font-size: 13px; font-weight: 500;
+  color: var(--muted-foreground);
   background: none; border: none;
   cursor: pointer;
-  transition: all var(--duration-normal) var(--ease-out-smooth);
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  transition: background var(--duration-normal) var(--ease-out-smooth),
+              color var(--duration-normal) var(--ease-out-smooth),
+              box-shadow var(--duration-normal) var(--ease-out-smooth);
+  display: flex; align-items: center; justify-content: center; gap: 7px;
 }
-.krowe-pipe-step:hover:not(.active) { color: var(--muted-foreground); }
-.krowe-pipe-step .num {
-  font-family: var(--font-mono); font-size: 10px;
-  color: var(--faint-foreground); letter-spacing: 0.04em;
+.krowe-pipe-step:hover:not(.active) {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
 }
-.krowe-pipe-step .lbl { font-size: 12px; }
-.krowe-pipe-step.done { color: var(--success); }
-.krowe-pipe-step.done .num { color: color-mix(in srgb, var(--success) 70%, white); }
+.krowe-pipe-step .tick {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 1.4px solid var(--border-strong); border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--duration-normal) var(--ease-out-smooth),
+              border-color var(--duration-normal) var(--ease-out-smooth);
+}
+.krowe-pipe-step .lbl { white-space: nowrap; }
+.krowe-pipe-step.done .tick {
+  background: var(--success); border-color: var(--success); color: white;
+}
 .krowe-pipe-step.active {
-  background: white; color: var(--foreground);
+  background: white; color: var(--foreground); font-weight: 600;
   box-shadow: var(--shadow-1), 0 0 0 1px var(--border);
 }
-.krowe-pipe-step.active .num { color: var(--primary); }
-.krowe-pipe-step.active .lbl { font-weight: 600; }
-.krowe-pipe-step:not(:last-child)::after {
-  content: ""; position: absolute; right: -2px; top: 50%;
-  width: 4px; height: 4px; border-radius: 999px;
-  background: var(--border-strong); transform: translateY(-50%);
+.krowe-pipe-step.active .tick {
+  border-color: var(--primary);
+  background: conic-gradient(var(--primary) 0 50%, transparent 50%);
 }
-.krowe-pipe-step.done:not(:last-child)::after { background: var(--success); opacity: 0.6; }
 
-/* Section labels */
-.krowe-task-section { display: flex; flex-direction: column; gap: 8px; }
+/* Section labels. The rule fills the gap between the label and any right-side
+   action, so a head with an action and one without still read as the same band. */
+.krowe-task-section { display: flex; flex-direction: column; gap: 12px; }
 .krowe-task-section-h {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; gap: 10px;
 }
 .krowe-task-section-h .label {
-  display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; gap: 8px;
   font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.1em;
+  text-transform: uppercase; letter-spacing: 0.12em;
   color: var(--muted-foreground);
+  white-space: nowrap;
 }
 .krowe-task-section-h .label svg { color: var(--faint-foreground); }
-
-/* Description block (with left ember rail) */
-.krowe-task-desc {
-  font-size: 14px; line-height: 1.65;
-  color: var(--foreground);
-  padding: 14px 16px 14px 20px;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  position: relative;
+.krowe-task-section-h .rule { flex: 1; height: 1px; background: var(--border); }
+/* Tally beside a section label (attachment count) — mono, like the tab counts. */
+.krowe-task-section-count {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 400;
+  letter-spacing: 0; color: var(--faint-foreground);
 }
-.krowe-task-desc::before {
-  content: ""; position: absolute; left: 0; top: 14px; bottom: 14px;
-  width: 2px; background: var(--primary); border-radius: 999px;
-  opacity: 0.7;
+
+/* Quiet text action that rides in a section head ("Edit", "+ Add"). */
+.krowe-task-mini {
+  display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+  padding: 4px 9px; border-radius: var(--radius-sm);
+  border: none; background: none; cursor: pointer;
+  font-family: var(--font-sans); font-size: 12.5px; font-weight: 500;
+  color: var(--muted-foreground); white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-task-mini:hover { background: var(--surface-subtle); color: var(--foreground); }
+.krowe-task-mini:disabled { opacity: 0.5; cursor: not-allowed; }
+/* The AI action in a head — the one place a head gets colour. */
+.krowe-task-mini.accent { color: var(--primary); }
+.krowe-task-mini.accent:hover { background: var(--primary-soft); color: var(--primary-hover); }
+
+/* Description — flat prose. The section head's Edit button carries the affordance
+   the old boxed-and-railed block used to, so the body can just be the writing. */
+.krowe-task-desc {
+  font-size: 15px; line-height: 1.68;
+  color: var(--foreground);
+  text-wrap: pretty;
 }
 .krowe-task-desc-empty {
   color: var(--faint-foreground);
   font-family: var(--font-serif); font-style: italic;
-  font-size: 14px;
+  font-size: 16px;
 }
 
-/* Meta card — compact 2-column grid (rev) */
-.krowe-meta-card {
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* Read mode for the description: each sentence/line becomes its own bullet, so
+   a three-clause task brief scans instead of reading as a paragraph. Editing
+   swaps back to the raw textarea, which is what actually round-trips. */
+.krowe-task-bullets {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 9px;
 }
-.krowe-meta-cell {
-  padding: 9px 14px;
-  display: flex; flex-direction: column; gap: 3px;
-  position: relative; min-width: 0;
+.krowe-task-bullets li {
+  position: relative; padding-left: 19px;
+  font-size: 15px; line-height: 1.6;
+  color: var(--foreground); text-wrap: pretty;
 }
-.krowe-meta-cell:nth-child(odd) { border-right: 1px solid var(--border); }
-.krowe-meta-cell:nth-child(n+3) { border-top:   1px solid var(--border); }
-.krowe-meta-cell.full           { grid-column: 1 / -1; border-right: none; }
-.krowe-meta-cell .k {
-  font-size: 10px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.09em;
-  color: var(--muted-foreground);
-  line-height: 1;
+.krowe-task-bullets li::before {
+  content: ""; position: absolute; left: 3px; top: 0.68em;
+  width: 5px; height: 5px; border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--primary) 55%, var(--border-strong));
 }
-.krowe-meta-cell .v {
-  color: var(--foreground); font-weight: 500;
-  display: inline-flex; align-items: center; gap: 7px;
-  font-size: 12.5px; min-width: 0;
-}
-.krowe-meta-cell .v.mono  { font-family: var(--font-mono); font-size: 12px; }
-.krowe-meta-cell .v.muted { color: var(--muted-foreground); font-weight: 400; }
-.krowe-meta-badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 9px; border-radius: var(--radius-full);
-  font-size: 11px; font-weight: 500;
-}
-.krowe-meta-badge.builder  { background: var(--builder-soft);  color: var(--builder-text); }
-.krowe-meta-badge.operator { background: var(--operator-soft); color: var(--operator-text); }
 
-/* Subtasks card */
-.krowe-subs-card {
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+/* Property rows — Linear's right rail, laid flat and paired two-up so the
+   task's shape fits one glance instead of a nine-row column. Each row is
+   self-contained (no positional separators), so rows can be added, reordered,
+   or dropped freely; .wide takes the full width for anything that needs it. */
+.krowe-task-props {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px 22px;
+  align-items: center;
 }
-.krowe-subs-h {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 14px 12px 16px;
-  border-bottom: 1px solid var(--border);
+.krowe-task-prop {
+  display: grid; grid-template-columns: 106px 1fr;
+  align-items: center; gap: 12px;
+  min-height: 36px; padding: 5px 10px; margin: 0 -10px;
+  border-radius: var(--radius-md);
+  transition: background var(--duration-instant) var(--ease-out-smooth);
+}
+.krowe-task-prop.wide { grid-column: 1 / -1; }
+.krowe-task-prop:hover { background: var(--surface-subtle); }
+.krowe-task-prop .k {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--muted-foreground);
+}
+.krowe-task-prop .k svg { flex-shrink: 0; color: var(--faint-foreground); }
+.krowe-task-prop .v {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 14px; color: var(--foreground); font-weight: 500; min-width: 0;
+}
+.krowe-task-prop .v .krowe-chip { font-size: 11.5px; padding: 3px 9px; }
+.krowe-task-prop .v.mono {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 400;
+  letter-spacing: -0.01em; color: var(--muted-foreground);
+}
+.krowe-task-prop .v .none { color: var(--faint-foreground); font-weight: 400; }
+
+/* Editable property values. Both are pickers, so both keep the orange halo on
+   focus (DESIGN.md → Focus Ring): the bare select is the visible control and
+   inherits the global `select:focus-visible` rule, while the chip is a shell
+   over a transparent select — a shell wrapping a picker keeps the halo and so
+   does not take .krowe-field-shell. */
+.krowe-prop-sel {
+  appearance: none; -webkit-appearance: none;
+  border: 1px solid transparent; background: none;
+  font: inherit; color: inherit; cursor: pointer;
+  padding: 3px 7px; margin-left: -7px;
+  border-radius: var(--radius-sm);
+}
+.krowe-task-prop:hover .krowe-prop-sel { border-color: var(--border); }
+
+.krowe-prop-pick { position: relative; display: inline-flex; }
+.krowe-prop-pick select {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  opacity: 0; cursor: pointer; border: none; appearance: none; -webkit-appearance: none;
+}
+.krowe-prop-pick:focus-within {
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+.krowe-prop-pick:focus-within > .krowe-chip { border-color: var(--primary); }
+.krowe-prop-pick select:focus-visible { outline: none; box-shadow: none; }
+/* "From meeting" — the whole row is the link, so the target clears 44px. It
+   spans both property columns: a call title plus its date never fits half. */
+.krowe-task-prop-link { text-decoration: none; min-height: 44px; }
+.krowe-task-prop-link:hover .t { color: var(--primary); }
+.krowe-task-prop-link:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.krowe-task-prop-link .v { flex-wrap: nowrap; }
+.krowe-task-prop-link .t {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-task-prop-link .when {
+  flex-shrink: 0; margin-left: auto; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 12px;
+  font-weight: 400; color: var(--faint-foreground);
+}
+.krowe-task-prop-link .go { flex-shrink: 0; color: var(--faint-foreground); }
+
+/* Activity timeline — a rail with node badges, newest first. */
+.krowe-task-acts {
+  list-style: none; margin: 0; padding: 0; position: relative;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.krowe-task-acts::before {
+  content: ""; position: absolute; left: 11px; top: 14px; bottom: 14px;
+  width: 1.5px; background: var(--border);
+}
+.krowe-task-act {
+  position: relative;
+  display: grid; grid-template-columns: 24px 1fr auto;
+  align-items: center; gap: 13px; padding: 7px 0;
+  font-size: 13.5px; color: var(--muted-foreground);
+}
+.krowe-task-act .node {
+  width: 24px; height: 24px; border-radius: var(--radius-full);
+  background: white; border: 1px solid var(--border); color: var(--faint-foreground);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 4px var(--background); z-index: 1;
+}
+.krowe-task-act .node.milestone { background: var(--primary); border-color: var(--primary); color: white; }
+.krowe-task-act .node.subtask {
+  background: var(--success-soft); color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+}
+.krowe-task-act .what { min-width: 0; }
+.krowe-task-act strong { color: var(--foreground); font-weight: 600; }
+.krowe-task-act time {
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--faint-foreground);
+  white-space: nowrap;
+}
+.krowe-task-acts-more {
+  align-self: flex-start; margin-top: 4px;
+  padding: 4px 9px; border: none; border-radius: var(--radius-sm);
+  background: none; color: var(--muted-foreground);
+  font-size: 12.5px; font-weight: 500; cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-task-acts-more:hover { background: var(--surface-subtle); color: var(--foreground); }
+/* Serif-italic "nothing here yet" — the sheet's quiet empty state. A bare line,
+   not a dashed box: an empty section shouldn't draw more edge than a full one. */
+.krowe-task-empty-soft {
+  padding: 2px 0;
+  color: var(--faint-foreground);
+  font-family: var(--font-serif); font-style: italic; font-size: 16px;
+}
+
+/* Attachments — an attachment should show its contents, not just its name. An
+   image renders above the meta row inside the same card; everything else keeps
+   the single row it always had. The card is the frame both share. */
+.krowe-att-item {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
   background: var(--surface-subtle);
-  gap: 12px;
+  overflow: hidden;
+  font-size: 12px;
 }
-.krowe-subs-progress { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.krowe-subs-meta { font-size: 11.5px; color: var(--muted-foreground); margin: 2px 0 0; }
-.krowe-subs-meta strong { color: var(--foreground); font-weight: 600; }
-.krowe-subs-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.krowe-att-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 6px 10px;
+}
+/* The image sits flush to the card's edges, so its corners are the card's
+   corners minus the border — the row beneath supplies the only inset. */
+.krowe-att-media {
+  display: block; background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-soft);
+  cursor: zoom-in;
+}
+.krowe-att-media img {
+  display: block; width: 100%;
+  max-height: 280px; object-fit: contain;
+  transition: opacity var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-att-media:hover img { opacity: 0.88; }
 
-.krowe-progress-ring { position: relative; flex-shrink: 0; }
-.krowe-progress-ring svg { transform: rotate(-90deg); display: block; }
-.krowe-progress-ring .track { stroke: var(--border); }
-.krowe-progress-ring .fill  { stroke: var(--primary); transition: stroke-dashoffset 380ms cubic-bezier(0.16, 1, 0.3, 1); }
-.krowe-progress-ring .pct {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
-  color: var(--foreground);
+/* A note reads as prose: wrapped, line breaks kept, clamped only when long. */
+.krowe-att-note { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.krowe-att-note .body {
+  color: var(--muted-foreground); line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.krowe-att-note .body.clamped {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.krowe-att-note-more {
+  align-self: flex-start; padding: 0;
+  border: none; background: none; cursor: pointer;
+  font-family: var(--font-sans); font-size: 11.5px; font-weight: 500;
+  color: var(--muted-foreground);
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-att-note-more:hover { color: var(--foreground); }
+
+/* Sub-tasks — flat rows on the sheet's own ground. The section head above owns
+   the label and the Generate/Add actions, so this block is just progress and
+   the list; wrapping it in a card only duplicated that head. */
+.krowe-subs-h {
+  display: flex; align-items: center;
+  gap: 12px; padding: 0 0 4px;
+}
+/* Reads n/total · bar. The bar takes the slack, so progress is legible at a
+   glance without a ring competing with the section label. */
+.krowe-subs-n {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--muted-foreground); flex-shrink: 0;
+}
+.krowe-subs-bar {
+  flex: 1; min-width: 40px; height: 4px;
+  border-radius: var(--radius-full); background: var(--border); overflow: hidden;
+}
+.krowe-subs-bar i {
+  display: block; height: 100%; border-radius: var(--radius-full);
+  background: var(--success);
+  transition: width var(--duration-slow) var(--ease-out-smooth);
 }
 
-.krowe-sub-list { list-style: none; padding: 4px; margin: 0; }
+.krowe-sub-list { list-style: none; padding: 0; margin: 0; }
+/* Rows separate with an inset hairline rather than a border, so the first row
+   carries no line and hover can still paint edge to edge. */
 .krowe-sub-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: var(--radius-md);
-  font-size: 13.5px; color: var(--foreground);
-  transition: background 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex; align-items: center; gap: 12px;
+  /* 12px + a 21px line clears the 44px touch target the design system asks for. */
+  padding: 12px 10px; margin: 0 -10px; border-radius: var(--radius-md);
+  font-size: 14px; line-height: 1.5; color: var(--foreground);
+  transition: background var(--duration-fast) var(--ease-out-smooth);
   position: relative;
 }
+.krowe-sub-item + .krowe-sub-item { box-shadow: inset 0 1px 0 var(--border); }
 .krowe-sub-item:hover { background: var(--surface-subtle); }
+/* The drag handle lives in the sheet's gutter, out of flow, so the checkbox
+   stays flush with the section label instead of being pushed off it by a
+   control that is invisible until hover. */
 .krowe-sub-item .grip {
+  position: absolute; left: -14px; top: 50%; transform: translateY(-50%);
   width: 14px; color: var(--border-strong);
-  opacity: 0; transition: opacity 160ms;
+  opacity: 0; transition: opacity var(--duration-fast) var(--ease-out-smooth);
   display: inline-flex; align-items: center; cursor: grab;
   flex-shrink: 0;
 }
@@ -2916,19 +3459,21 @@ button.krowe-desc-inline-text:hover {
   border: 1.5px solid var(--border-strong);
   border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center;
-  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background var(--duration-normal) var(--ease-out-smooth),
+              border-color var(--duration-normal) var(--ease-out-smooth);
   background: white; color: white;
   position: relative; cursor: pointer;
 }
+.krowe-sub-item:hover .check { border-color: var(--muted-foreground); }
 .krowe-sub-item.done .check {
-  background: var(--primary); border-color: var(--primary);
+  background: var(--success); border-color: var(--success);
 }
 .krowe-sub-item.done .check svg { animation: krowe-scale-pop 280ms cubic-bezier(0.16, 1, 0.3, 1); }
 @keyframes krowe-scale-pop {
   from { transform: scale(0.4); opacity: 0; }
   to   { transform: scale(1);   opacity: 1; }
 }
-.krowe-sub-item .stext { flex: 1; line-height: 1.45; min-width: 0; }
+.krowe-sub-item .stext { flex: 1; line-height: 1.5; min-width: 0; text-wrap: pretty; }
 .krowe-sub-item.done .stext {
   color: var(--faint-foreground);
   text-decoration: line-through; text-decoration-thickness: 1px;
@@ -2969,13 +3514,9 @@ button.krowe-desc-inline-text:hover {
   list-style: none;
 }
 
-/* Attachments / deliverable section frames */
-.krowe-attach-frame {
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 12px 14px;
-}
+/* Deliverable section frame. Attachments used to sit in a matching white card,
+   but it wrapped a head the section already draws — see TaskAttachments, which
+   now renders the sheet's own section head and nothing around it. */
 .krowe-deliverable-block {
   background: color-mix(in srgb, var(--success) 5%, white);
   border: 1px solid color-mix(in srgb, var(--success) 22%, var(--border));
@@ -3257,11 +3798,6 @@ button.krowe-desc-inline-text:hover {
   padding: 12px 14px;
   display: flex; flex-direction: column; gap: 10px;
 }
-.krowe-cm-preview.loading,
-.krowe-cm-preview-blank {
-  font-size: 13px; color: var(--faint-foreground);
-  font-family: var(--font-serif); font-style: italic;
-}
 .krowe-cm-open {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   width: 100%; padding: 8px 14px; border-radius: var(--radius-full);
@@ -3291,22 +3827,31 @@ button.krowe-desc-inline-text:hover {
    Rewrite a task + reconcile its subtasks from a change note, previewed
    before it's applied. Ember/sparkles motif; tokens only. */
 .krowe-task-regen { display: flex; flex-direction: column; gap: 10px; }
+/* Collapsed state: one callout, copy and trigger side by side. Stacking the
+   hint over a loud orange pill made an offer read like an alert. */
+.krowe-regen-callout {
+  display: flex; align-items: center; gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--callout-border);
+  border-radius: var(--radius-lg);
+  background: var(--callout-bg);
+}
 .krowe-regen-hint {
-  font-size: 12.5px; line-height: 1.5;
-  color: var(--muted-foreground);
+  margin: 0; font-size: 13.5px; line-height: 1.5;
+  color: var(--muted-foreground); text-wrap: pretty;
 }
 .krowe-regen-trigger {
-  align-self: flex-start;
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 7px 13px; border-radius: var(--radius-full);
-  background: var(--primary-soft); color: var(--primary);
-  border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
-  font-size: 12.5px; font-weight: 550; cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 14px; border-radius: var(--radius-full);
+  background: white; color: var(--foreground);
+  border: 1px solid var(--border);
+  font-size: 13px; font-weight: 500; white-space: nowrap; cursor: pointer;
   transition: transform var(--duration-fast) var(--ease-out-smooth),
-              background var(--duration-fast) var(--ease-out-smooth);
+              border-color var(--duration-fast) var(--ease-out-smooth);
 }
 .krowe-regen-trigger:hover {
-  background: color-mix(in srgb, var(--primary) 18%, white);
+  border-color: var(--foreground);
   transform: translateY(-1px);
 }
 .krowe-regen-trigger:active { transform: translateY(0) scale(0.98); }
@@ -3510,19 +4055,26 @@ button.krowe-desc-inline-text:hover {
 /* Sticky footer */
 .krowe-task-sheet-footer {
   flex-shrink: 0;
-  padding: 14px 24px;
+  padding: 14px var(--sheet-pad, 24px);
   border-top: 1px solid var(--border);
   background: var(--background);
-  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  display: flex; align-items: center; gap: 10px;
 }
+/* Destructive action sits alone on the left; everything else banks right. */
+.krowe-task-sheet-footer-spacer { flex: 1; }
 .krowe-btn-pill {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 9px 16px; border-radius: var(--radius-full);
-  font-size: 13px; font-weight: 500;
+  height: 34px; padding: 0 14px; border-radius: var(--radius-full);
+  font-size: 13px; font-weight: 500; white-space: nowrap; flex-shrink: 0;
   border: 1px solid transparent;
   background: transparent; color: var(--foreground);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-out-smooth);
+}
+/* The footer's copy of the pill is the sheet's terminal action, so it takes the
+   full button size; the ones inside the body stay at the compact height. */
+.krowe-task-sheet-footer .krowe-btn-pill {
+  height: 40px; padding: 0 18px; font-size: 14px;
 }
 .krowe-btn-pill.primary {
   background: var(--primary); color: var(--primary-foreground);
@@ -3552,6 +4104,13 @@ button.krowe-desc-inline-text:hover {
 .krowe-btn-pill.ghost:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 /* Right-aligned action cluster in the sheet footer (e.g. Unsend + primary). */
 .krowe-task-sheet-footer-actions { display: inline-flex; align-items: center; gap: 10px; }
+
+/* Narrow sheet: tighten the shared gutter and drop the properties back to one
+   column — 106px of key plus a value chip doesn't fit half a phone. */
+@media (max-width: 640px) {
+  .krowe-task-sheet { --sheet-pad: 20px; }
+  .krowe-task-props { grid-template-columns: 1fr; }
+}
 
 /* ── Refine diff preview (prd|quote refine-section-dialog.tsx) ─────────────
    Each entry of a proposed section marked kept / new / removed, so it's visible
@@ -4076,8 +4635,8 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-board-titlewrap { min-width: 0; }
 .krowe-board-title {
-  font-family: var(--font-sans); font-size: 30px; font-weight: 600;
-  letter-spacing: -0.02em; line-height: 1; color: var(--foreground);
+  font-family: var(--font-serif); font-size: 38px; font-weight: 400;
+  letter-spacing: -0.015em; line-height: 1; color: var(--foreground);
   white-space: nowrap; margin: 0;
 }
 .krowe-board-sub {
@@ -4119,30 +4678,36 @@ button.krowe-desc-inline-text:hover {
 .krowe-column:hover .krowe-column-add, .krowe-column-add:focus-visible { opacity: 1; }
 .krowe-column-add:hover { background: var(--surface-subtle); color: var(--foreground); }
 
-/* Done check glyph */
-.krowe-card-check {
-  width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px;
-  border-radius: 5px; background: var(--success); color: white;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-
 /* ── Multi-select on task cards ── */
 /* Checkbox is hidden until the card is hovered, then pinned open once any card
    in the board is selected (.selecting) — same reveal idiom as card actions. */
+/* Out of flow and centred on the state glyph: the checkbox and the glyph share
+   one slot and cross-fade, so offering selection costs the card no left gutter
+   and revealing the checkbox shifts nothing. 9.5px = the card's 12px/11px
+   padding plus half the 15px glyph, less half this 20px box. */
 .krowe-card-select {
-  width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; padding: 0;
+  position: absolute; left: 9.5px; top: 9.5px; z-index: 1;
+  width: 20px; height: 20px; padding: 0;
   border: 1.5px solid var(--border-strong); border-radius: 6px; background: white;
   color: white; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
-  opacity: 0;
+  opacity: 0; pointer-events: none;
   transition: opacity var(--duration-fast) var(--ease-out-smooth),
     background var(--duration-fast) var(--ease-out-smooth),
     border-color var(--duration-fast) var(--ease-out-smooth);
 }
 .krowe-card:hover .krowe-card-select,
-.krowe-card.selecting .krowe-card-select { opacity: 1; }
+.krowe-card:focus-within .krowe-card-select,
+.krowe-card.selecting .krowe-card-select { opacity: 1; pointer-events: auto; }
+/* Only cards that actually render a checkbox trade their glyph away for it. */
+.krowe-card.selectable:hover .krowe-card-state,
+.krowe-card.selectable:focus-within .krowe-card-state,
+.krowe-card.selecting .krowe-card-state { opacity: 0; }
 .krowe-card-select:hover { border-color: var(--primary); }
-.krowe-card-select.on { opacity: 1; background: var(--primary); border-color: var(--primary); }
+.krowe-card-select.on {
+  opacity: 1; pointer-events: auto;
+  background: var(--primary); border-color: var(--primary);
+}
 .krowe-card.selected {
   border-color: var(--primary);
   box-shadow: 0 0 0 1px var(--primary), var(--shadow-2);
@@ -4192,11 +4757,10 @@ button.krowe-desc-inline-text:hover {
 .krowe-prio-dot.medium .d { background: var(--primary-accent); }
 .krowe-prio-dot.low    .d { background: var(--success); }
 
-/* Card date footer */
-.krowe-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
+/* Card date — mono, short form ("Jul 30"); the year lives in the detail sheet. */
 .krowe-card-date {
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 11px; color: var(--faint-foreground);
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--faint-foreground);
 }
 .krowe-card-date svg { color: color-mix(in srgb, var(--faint-foreground) 80%, transparent); }
 
@@ -4380,19 +4944,7 @@ button.krowe-desc-inline-text:hover {
   background: var(--surface-subtle); color: var(--faint-foreground); border-color: var(--border);
 }
 
-/* material add buttons */
-.docov .add-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-.docov .add-mini {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 34px; padding: 0 14px; border-radius: var(--radius-full);
-  border: 1px dashed var(--border-strong); background: var(--surface-subtle);
-  color: var(--muted-foreground); font-size: 12.5px; font-weight: 500;
-  transition: all 160ms var(--ease-out-smooth);
-}
-.docov .add-mini:hover { color: var(--foreground); border-color: var(--faint-foreground); background: white; }
-.docov .add-mini:disabled { opacity: 0.5; cursor: default; }
-.docov .add-mini .ai { display: inline-flex; color: var(--faint-foreground); }
-.docov .add-mini:hover .ai { color: var(--primary); }
+/* material add buttons — see the shared .add-mini / .add-row above */
 
 /* engagement */
 .docov .engage-cta {
@@ -4540,17 +5092,6 @@ button.krowe-desc-inline-text:hover {
 
 .prdnew .chip-kind { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.03em; text-transform: uppercase; padding: 2px 7px; border-radius: var(--radius-full); background: var(--surface-subtle); color: var(--faint-foreground); border: 1px solid var(--border); white-space: nowrap; }
 .prdnew .chip-kind.chip-ready { color: var(--success); background: var(--success-soft); border-color: color-mix(in srgb, var(--success) 22%, transparent); }
-
-.prdnew .add-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-.prdnew .add-mini {
-  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: var(--radius-full);
-  border: 1px dashed var(--border-strong); background: var(--surface-subtle); color: var(--muted-foreground); font-size: 12.5px; font-weight: 500;
-  transition: all 160ms var(--ease-out-smooth);
-}
-.prdnew .add-mini:hover { color: var(--foreground); border-color: var(--faint-foreground); background: white; }
-.prdnew .add-mini:disabled { opacity: 0.5; cursor: default; }
-.prdnew .add-mini .ai { display: inline-flex; color: var(--faint-foreground); }
-.prdnew .add-mini:hover .ai { color: var(--primary); }
 
 .prdnew .paste-box { margin-top: 12px; }
 @media (prefers-reduced-motion: no-preference) { .prdnew .paste-box { animation: prd-fade-up 240ms var(--ease-out-smooth); } }
@@ -6443,13 +6984,18 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-gr-task:hover { box-shadow: var(--shadow-2); }
 .krowe-gr-task.off { background: var(--surface-subtle); box-shadow: none; }
-.krowe-gr-task.off .krowe-gr-title-input, .krowe-gr-task.off .krowe-gr-task-rail { opacity: 0.5; }
+.krowe-gr-task.off .krowe-gr-task-rail { opacity: 0.5; }
+/* An unchecked row is the one you most need to read to decide on it, so the
+   title stays legible — the subtle surface and empty checkbox carry the "off". */
+.krowe-gr-task.off .krowe-gr-title-input { opacity: 0.72; }
 .krowe-gr-task-rail { position: absolute; left: 0; top: 0; bottom: 0; width: 3px; transition: background 160ms var(--ease-out-smooth); }
 .krowe-gr-task.prio-urgent .krowe-gr-task-rail { background: var(--danger); }
 .krowe-gr-task.prio-high   .krowe-gr-task-rail { background: var(--warning); }
 .krowe-gr-task.prio-medium .krowe-gr-task-rail { background: var(--primary-accent); }
 .krowe-gr-task.prio-low    .krowe-gr-task-rail { background: var(--success); }
-.krowe-gr-task-top { display: flex; align-items: center; gap: 11px; }
+/* Top aligned, not centered: the title wraps to two or three lines on a long
+   draft and the check/Details controls stay pinned to its first line. */
+.krowe-gr-task-top { display: flex; align-items: flex-start; gap: 11px; }
 .krowe-gr-check {
   width: 20px; height: 20px; flex-shrink: 0; border: 1.5px solid var(--border-strong);
   border-radius: 6px; background: white; display: inline-flex; align-items: center; justify-content: center;
@@ -6458,21 +7004,40 @@ button.krowe-desc-inline-text:hover {
 }
 .krowe-gr-check:hover { border-color: var(--primary); }
 .krowe-gr-check.on { background: var(--primary); border-color: var(--primary); }
+/* A textarea, not an input: its height is driven from scrollHeight by
+   TaskTitleField, so overflow stays hidden and resize is off. */
 .krowe-gr-title-input {
   flex: 1; min-width: 0; border: none; background: none; outline: none;
-  font-family: var(--font-sans); font-size: 14px; font-weight: 600; color: var(--foreground);
+  font-family: var(--font-sans); font-size: 14px; font-weight: 600; line-height: 1.4; color: var(--foreground);
   padding: 3px 5px; margin: -3px -5px; border-radius: 6px;
+  resize: none; overflow: hidden; text-wrap: pretty;
   transition: box-shadow 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth);
 }
 .krowe-gr-title-input:focus { background: var(--surface-subtle); }
+/* Faint = "not editable yet" (drafts still streaming in). An unchecked row is
+   disabled too, but you have to read it to decide on it — .off keeps it dark. */
 .krowe-gr-title-input:disabled { color: var(--faint-foreground); }
+.krowe-gr-task.off .krowe-gr-title-input:disabled { color: var(--foreground); }
 .krowe-gr-details-btn {
   flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
   border: none; background: none; color: var(--muted-foreground);
-  font-size: 11.5px; font-weight: 500; padding: 5px 8px; border-radius: var(--radius-full); cursor: pointer;
+  font-size: 11.5px; font-weight: 500; padding: 5px 8px; margin-top: -3px;
+  border-radius: var(--radius-full); cursor: pointer;
   transition: all 150ms var(--ease-out-smooth);
 }
 .krowe-gr-details-btn:hover { color: var(--foreground); background: var(--surface-subtle); }
+/* Owner / duplicate / confidence pills, on their own row under the title and
+   indented past the checkbox (20px + 11px gap) so they line up with it. However
+   many a draft carries, none of them squeeze the title. */
+.krowe-gr-task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 8px 0 0 31px; }
+/* The draft's description while the row is collapsed — enough to tell what the
+   task is asking for without opening Details. */
+.krowe-gr-task-desc {
+  margin: 7px 0 0 31px; font-size: 12.5px; line-height: 1.5; color: var(--muted-foreground);
+  text-wrap: pretty;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.krowe-gr-task.off .krowe-gr-task-desc { opacity: 0.75; }
 .krowe-gr-task-controls {
   display: flex; align-items: flex-end; gap: 12px; margin-top: 13px;
   padding-left: 31px; padding-top: 12px;
@@ -6482,12 +7047,14 @@ button.krowe-desc-inline-text:hover {
 .krowe-gr-field { display: flex; flex-direction: column; gap: 5px; }
 .krowe-gr-field-cap { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; color: var(--faint-foreground); padding-left: 3px; }
 .krowe-gr-details { margin: 13px 0 2px 31px; display: flex; flex-direction: column; gap: 11px; animation: fade-up-in 200ms var(--ease-out-smooth) both; }
+/* Height is driven from scrollHeight by TaskDescriptionField (capped, then it
+   scrolls), so the drag handle would only fight it. */
 .krowe-gr-desc {
   width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md);
   background: var(--surface-subtle); padding: 9px 11px;
   font-family: var(--font-sans); font-size: 12.5px; line-height: 1.5; color: var(--foreground);
-  resize: vertical; outline: none;
-  transition: all 150ms var(--ease-out-smooth);
+  resize: none; outline: none;
+  transition: border-color 150ms var(--ease-out-smooth), background 150ms var(--ease-out-smooth);
 }
 /* The surface lift stays; the quiet border comes from the global text rule. */
 .krowe-gr-desc:focus { background: white; }
@@ -6557,6 +7124,297 @@ button.krowe-desc-inline-text:hover {
 .krowe-gr-btn.ghost { color: var(--muted-foreground); background: none; }
 .krowe-gr-btn.ghost:hover:not(:disabled) { color: var(--foreground); background: var(--surface-subtle); }
 .krowe-gr-btn.lg { height: 42px; padding: 0 20px; font-size: 13.5px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   Granola meeting page — /b/meetings/[id]
+   Sibling of the krowe-gr- import modal above: same feature, same
+   prefix discipline, deliberately placed right after it so
+   .krowe-mtg-jump can restyle .krowe-gr-quote .qm's contents on
+   source order alone. Reuses .krowe-gr-quote for source quotes,
+   .md-content for the summary, and .krowe-chip-status for task state
+   — only the page-level structure is new.
+   Motif: Ember Glyph as the task-list bullet, that section only.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Back link ── */
+.krowe-mtg-back {
+  position: relative;
+  display: inline-flex; align-items: center; gap: var(--spacing-md);
+  margin-left: calc(var(--spacing-md) * -1); margin-bottom: var(--spacing-xl);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-full);
+  font-size: 12.5px; color: var(--muted-foreground); text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-mtg-back:hover { color: var(--foreground); }
+/* Links get no global focus treatment in this codebase (only button/select/
+   checkbox/radio do), so every link class here declares its own. A link is a
+   click verb → the orange halo. */
+.krowe-mtg-back:focus-visible {
+  outline: none; color: var(--foreground);
+  box-shadow: 0 0 0 1px var(--primary),
+              0 0 0 4px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+/* Pads the hit area to 44px without moving anything. */
+.krowe-mtg-back::after { content: ""; position: absolute; inset: -12px -6px; }
+
+/* ── Hero ──
+   Padding (24) >= outer radius (16), so the inner medallion is free to take
+   its own standard radius under the corner-nesting rule. */
+.krowe-mtg-hero {
+  display: flex; align-items: flex-start; gap: var(--spacing-xl);
+  padding: var(--spacing-2xl);
+  background: var(--background);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+.krowe-mtg-hero-ic {
+  width: 44px; height: 44px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+.krowe-mtg-hero-body { flex: 1; min-width: 0; }
+.krowe-mtg-title {
+  font-family: var(--font-sans);
+  font-size: 30px; line-height: 1.3; letter-spacing: -0.3px; font-weight: 600;
+  color: var(--foreground); text-wrap: pretty;
+}
+.krowe-mtg-meta {
+  margin-top: var(--spacing-md);
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--spacing-md);
+  font-size: 12px; line-height: 1.5; letter-spacing: 0.2px;
+  color: var(--muted-foreground);
+}
+.krowe-mtg-meta .mono { font-family: var(--font-mono); letter-spacing: 0; }
+.krowe-mtg-meta .dot {
+  width: 3px; height: 3px; border-radius: var(--radius-full);
+  background: var(--faint-foreground);
+}
+
+/* ── Participants ── */
+.krowe-mtg-people-cap {
+  margin-top: var(--spacing-xl);
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--muted-foreground);
+}
+.krowe-mtg-people {
+  display: flex; flex-wrap: wrap; gap: var(--spacing-sm);
+  margin: var(--spacing-md) 0 0; padding: 0; list-style: none;
+}
+.krowe-mtg-person {
+  padding: 3px 10px; border-radius: var(--radius-full);
+  background: var(--surface-subtle); border: 1px solid var(--border);
+  font-size: 11.5px; color: var(--muted-foreground);
+}
+
+/* ── Sections ── */
+.krowe-mtg-sections {
+  margin-top: var(--spacing-2xl);
+  display: flex; flex-direction: column; gap: var(--spacing-2xl);
+}
+.krowe-mtg-sec-h {
+  display: flex; align-items: baseline; gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+.krowe-mtg-sec-h h2 {
+  font-family: var(--font-sans);
+  font-size: 15px; font-weight: 600; letter-spacing: -0.1px; color: var(--foreground);
+}
+.krowe-mtg-sec-h .ct {
+  font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--faint-foreground); letter-spacing: 0.01em;
+}
+.krowe-mtg-panel {
+  padding: var(--spacing-xl);
+  background: var(--background);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.krowe-mtg-blank { font-size: 13px; color: var(--muted-foreground); }
+.krowe-mtg-note {
+  display: flex; align-items: flex-start; gap: var(--spacing-md);
+  padding: var(--spacing-lg) var(--spacing-xl);
+  background: var(--info-soft);
+  border: 1px solid color-mix(in srgb, var(--info) 22%, transparent);
+  border-radius: var(--radius-lg);
+  font-size: 13px; line-height: 1.55; color: var(--foreground);
+}
+/* Direct child only — the note can now hold a retry button, and that button's
+   own icon must not inherit the info-blue leading glyph's colour. */
+.krowe-mtg-note > svg { flex-shrink: 0; margin-top: 1px; color: var(--info); }
+.krowe-mtg-note .body { flex: 1; min-width: 0; }
+
+/* "Try again" on a call Granola couldn't be reached for, or hadn't finished
+   transcribing. Always states the outcome — a retry that lands on the same
+   status changes nothing on screen, and a button that looks inert reads as
+   broken. */
+.krowe-mtg-retry {
+  margin-top: var(--spacing-md);
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--spacing-md);
+}
+.krowe-mtg-retry-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 32px; padding: var(--spacing-sm) var(--spacing-lg);
+  background: var(--background); border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 12.5px; font-weight: 500; color: var(--foreground); cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out-smooth),
+              color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-mtg-retry-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.krowe-mtg-retry-btn:disabled { opacity: 0.6; cursor: default; }
+.krowe-mtg-retry .out {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* Summary markdown. .md-content styles h1-h3; the renderer demotes headings so
+   the page's heading order stays sequential, so the lower levels need their
+   sizes restated here. */
+.krowe-mtg-md h4 { font-size: 14px; font-weight: 600; margin-top: 1.1em; }
+.krowe-mtg-md h5,
+.krowe-mtg-md h6 { font-size: 13px; font-weight: 600; margin-top: 1em; }
+/* .md-content restores list indentation but not the marker (the reset strips
+   list-style), so its lists read as unlabelled indented lines. Fixed here
+   rather than on .md-content itself, which would also restyle the operator
+   README that shares it. A meeting summary is mostly lists — it needs them. */
+.krowe-mtg-md ul { list-style: disc; }
+.krowe-mtg-md ol { list-style: decimal; }
+.krowe-mtg-md li::marker { color: var(--faint-foreground); }
+
+/* ── Transcript ──
+   Two columns: a fixed mono speaker rail you can run your eye down, and the
+   line itself. No inner scroller on purpose — the page scrolls, so Ctrl-F and
+   the browser's own find-on-page keep working over the whole call. */
+.krowe-mtg-transcript { display: flex; flex-direction: column; gap: var(--spacing-md); }
+.krowe-mtg-line {
+  position: relative;
+  display: grid; grid-template-columns: 92px minmax(0, 68ch); gap: var(--spacing-lg);
+  padding: var(--spacing-sm) var(--spacing-md);
+  margin: 0 calc(var(--spacing-md) * -1);
+  border-radius: var(--radius-md);
+  font-size: 13px; line-height: 1.6;
+  scroll-margin-top: calc(var(--topbar-height) + var(--spacing-xl));
+}
+.krowe-mtg-line .who {
+  font-family: var(--font-mono); font-size: 10.5px; text-align: right;
+  padding-top: 3px; color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.krowe-mtg-line.me .who { color: var(--foreground); font-weight: 600; }
+.krowe-mtg-line .said { color: var(--foreground); text-wrap: pretty; }
+.krowe-mtg-line.is-quoted { background: var(--surface-subtle); }
+.krowe-mtg-line.is-arrived { background: color-mix(in srgb, var(--primary) 7%, transparent); }
+.krowe-mtg-line:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--primary),
+              0 0 0 4px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.krowe-mtg-line mark {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--foreground); border-radius: 3px; padding: 0 2px;
+}
+/* Zero-size anchor: several tasks can quote one line, so each gets its own
+   jump target rather than the row owning a single id. */
+.krowe-mtg-anchor { position: absolute; top: 0; left: 0; width: 0; height: 0; }
+
+/* ── Tasks from this call ── */
+.krowe-mtg-tasks {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--spacing-md);
+}
+.krowe-mtg-task {
+  padding: var(--spacing-lg);
+  background: var(--background);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  transition: border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-mtg-task.is-from { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); }
+.krowe-mtg-task-link {
+  display: flex; align-items: center; gap: var(--spacing-md);
+  min-height: 44px; margin: calc(var(--spacing-sm) * -1) 0;
+  text-decoration: none; border-radius: var(--radius-md);
+}
+.krowe-mtg-task-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--primary),
+              0 0 0 4px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.krowe-mtg-task-link .t {
+  flex: 1; min-width: 0; font-size: 13.5px; color: var(--foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.krowe-mtg-task-link:hover .t { color: var(--primary); }
+.krowe-mtg-task-link .from {
+  flex-shrink: 0; font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.01em; color: var(--primary);
+}
+.krowe-mtg-task-link .go { flex-shrink: 0; color: var(--faint-foreground); }
+.krowe-mtg-task .krowe-gr-quote { margin-top: var(--spacing-md); }
+.krowe-mtg-jump { color: var(--muted-foreground); text-decoration: underline; }
+.krowe-mtg-jump:hover { color: var(--primary); }
+.krowe-mtg-jump:focus-visible {
+  outline: none; color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+/* ── The same call, previewed inside the task sheet (MeetingPanel) ──
+   Every structural class above is reused; this scope only steps the scale down
+   to a 600px rail. The hero drops its card — the sheet is already the card —
+   and the speaker rail narrows to what a name needs at 10px. */
+.krowe-mtg-inline { display: flex; flex-direction: column; gap: var(--spacing-xl); }
+.krowe-mtg-inline .krowe-mtg-hero {
+  padding: 0; gap: var(--spacing-lg);
+  background: none; border: none; box-shadow: none;
+}
+.krowe-mtg-inline .krowe-mtg-hero-ic { width: 34px; height: 34px; }
+.krowe-mtg-inline .krowe-mtg-title { font-size: 21px; }
+.krowe-mtg-inline .krowe-mtg-people-cap { margin-top: var(--spacing-lg); }
+.krowe-mtg-inline .krowe-mtg-sections { margin-top: 0; gap: var(--spacing-2xl); }
+.krowe-mtg-inline .krowe-mtg-panel { padding: var(--spacing-lg); }
+.krowe-mtg-inline .krowe-mtg-line {
+  grid-template-columns: 62px minmax(0, 1fr); gap: var(--spacing-md);
+  font-size: 12.5px;
+  scroll-margin-top: var(--spacing-lg);
+}
+.krowe-mtg-inline .krowe-mtg-line .who { font-size: 10px; }
+.krowe-mtg-load { gap: var(--spacing-lg); }
+
+/* The panel opens windowed on the line the task was drafted from — this reads
+   the remainder in place, for when the full page is more than the moment needs. */
+.krowe-mtg-more {
+  margin-top: var(--spacing-md);
+  width: 100%; min-height: 38px; padding: var(--spacing-sm) var(--spacing-lg);
+  background: none; border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-full);
+  font-size: 12.5px; color: var(--muted-foreground); cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out-smooth),
+              border-color var(--duration-fast) var(--ease-out-smooth);
+}
+.krowe-mtg-more:hover { color: var(--foreground); border-color: var(--foreground); }
+
+/* A task row can also be a button (swap the sheet to that task, no navigation)
+   or plain (it IS the task the sheet is on) — .krowe-mtg-task-link draws all
+   three, so the button has to shed its own chrome. */
+button.krowe-mtg-task-link {
+  width: 100%; padding: 0; font: inherit;
+  background: none; border: none; text-align: left; cursor: pointer;
+}
+.krowe-mtg-task-link.is-current { cursor: default; }
+
+/* In-page #q-<id> jumps. Scoped with :has() so no other route inherits it, and
+   off entirely under reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  html:has(.krowe-mtg-transcript) { scroll-behavior: smooth; }
+}
+
+@media (max-width: 720px) {
+  .krowe-mtg-hero { flex-direction: column; gap: var(--spacing-lg); }
+  .krowe-mtg-title { font-size: 24px; }
+  .krowe-mtg-line { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .krowe-mtg-line .who { text-align: left; padding-top: 0; }
+}
 
 /* ═══════════════════════════════════════════════════════════════
    Settings redesign — ported from Settings.html (claude.ai/design).
@@ -7061,6 +7919,44 @@ button.krowe-desc-inline-text:hover {
 
 .krowe-repo-empty {
   padding: 18px 16px; font-size: 12.5px; color: var(--muted-foreground);
+}
+
+/* ── Areas: the label vocabulary this repo's tasks are filed under ── */
+.krowe-areas-card {
+  display: flex; flex-direction: column; gap: var(--space-md);
+  padding: var(--space-lg) var(--space-xl);
+}
+.krowe-areas-head {
+  display: flex; align-items: flex-start; gap: var(--space-md);
+  justify-content: space-between; flex-wrap: wrap;
+}
+.krowe-areas-lede {
+  margin: 0; max-width: 62ch;
+  font-size: 12.5px; line-height: 1.5; color: var(--muted-foreground);
+}
+.krowe-areas-refresh { flex-shrink: 0; }
+.krowe-areas-foot {
+  display: flex; justify-content: flex-start;
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+.krowe-areas-list {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: var(--space-md);
+}
+/* Slug column is fixed so the glosses line up and the list reads as a legend
+   rather than a ragged paragraph; it collapses on narrow screens below. */
+.krowe-areas-item {
+  display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: var(--space-md);
+  align-items: baseline;
+}
+.krowe-areas-item .krowe-chip-tag { justify-self: start; }
+.krowe-areas-gloss {
+  font-size: 12.5px; line-height: 1.5; color: var(--foreground);
+}
+
+@media (max-width: 720px) {
+  .krowe-areas-item { grid-template-columns: minmax(0, 1fr); gap: var(--space-sm); }
 }
 
 @media (max-width: 1080px) {

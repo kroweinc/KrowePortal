@@ -63,6 +63,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
   try {
     result = await generatePrd(resolved.genInput, { userId: resolved.profile.id, operation: "generate_prd" });
   } catch (err) {
+    console.error("[draftPrd]", err);
     return { error: friendlyAiError(err) };
   }
 
@@ -81,6 +82,7 @@ export async function draftPrd(input: DraftPrdInput): Promise<DraftPrdResult> {
         { userId: resolved.profile.id, operation: "generate_prd" }
       );
     } catch (err) {
+      console.error("[draftPrd forceFinal]", err);
       return { error: friendlyAiError(err) };
     }
     if (result.kind !== "prd") return { error: "The PRD came back empty — generation didn't finish. Please try again." };
@@ -202,6 +204,7 @@ export async function refinePrdSection(input: RefinePrdSectionInput): Promise<Re
       currentDate: new Date().toISOString().slice(0, 10),
     }, { userId: profile.id, operation: "refine_prd_section" });
   } catch (err) {
+    console.error("[refinePrdSection]", err);
     return { error: friendlyAiError(err) };
   }
 

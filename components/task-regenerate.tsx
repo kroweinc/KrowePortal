@@ -99,17 +99,20 @@ export function TaskRegenerate({
   if (mode === "collapsed") {
     return (
       <div className="krowe-task-regen">
-        <p className="krowe-regen-hint">
-          Scope changed? Describe what&rsquo;s different and regenerate this task to match.
-        </p>
-        <button
-          type="button"
-          className="krowe-regen-trigger"
-          onClick={() => setMode("composing")}
-        >
-          <WandSparkles className="h-3.5 w-3.5" />
-          Regenerate from a change
-        </button>
+        <div className="krowe-regen-callout">
+          <p className="krowe-regen-hint">
+            Scope changed? Describe what&rsquo;s different and we&rsquo;ll rewrite this
+            task to match.
+          </p>
+          <button
+            type="button"
+            className="krowe-regen-trigger"
+            onClick={() => setMode("composing")}
+          >
+            <WandSparkles className="h-3.5 w-3.5" />
+            Regenerate
+          </button>
+        </div>
       </div>
     );
   }

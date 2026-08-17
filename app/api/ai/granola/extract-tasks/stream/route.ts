@@ -12,10 +12,11 @@ import {
   type ExtractTasksInput,
 } from "@/lib/ai/extract-tasks-from-transcript";
 import { createItemsScanner } from "@/lib/ai/stream-items";
-import { ExtractedTaskDraft } from "@/lib/ai/schemas";
+import { extractedTaskDraft, type ExtractedTaskDraft } from "@/lib/ai/schemas";
 import { stripNullsDeep } from "@/lib/ai/strict-schema";
 import type { AiCallMeta } from "@/lib/ai/usage";
 import { MAX_SOP_CHARS } from "@/lib/attachments-constants";
+import { FALLBACK_AREA_VOCABULARY } from "@/lib/types";
 
 // SSE streaming variant of draftTasksFromGranolaNote / draftTasksFromPastedTranscript
 // (lib/actions/granola-import.ts). Same gates and byte-identical extraction params
@@ -88,6 +89,7 @@ export async function POST(request: NextRequest) {
       transcript: body.data.content,
       participants: null,
       builderName: gate.builderName,
+      areas: gate.areas,
     };
     meta = {
       userId: gate.profileId,
@@ -102,9 +104,24 @@ export async function POST(request: NextRequest) {
       const send = (data: unknown) => controller.enqueue(encoder.encode(sse(data)));
       let full = "";
       try {
-        send({ type: "meta", noteTitle, noteCreatedAt });
+        // The vocabulary rides along so the review's Area select offers exactly the
+        // labels the model was constrained to — not the generic list.
+        send({
+          type: "meta",
+          noteTitle,
+          noteCreatedAt,
+          areas: (extractInput.areas ?? FALLBACK_AREA_VOCABULARY).values,
+        });
 
         const scan = createItemsScanner();
+        // Built from the SAME vocabulary the request constrained the model to.
+        // The fallback const would reject every draft on a repo with derived
+        // areas, so no `task` event would ever fire and the review dialog would
+        // sit on its spinner until `done` — progressive streaming silently
+        // degrading to the blocking path it exists to replace.
+        const streamedDraft = extractedTaskDraft(
+          (extractInput.areas ?? FALLBACK_AREA_VOCABULARY).values.map((a) => a.slug)
+        );
         const deltas = runChatStream(buildExtractionParams(extractInput), meta);
         for await (const delta of deltas) {
           if (request.signal.aborted) break;
@@ -114,9 +131,9 @@ export async function POST(request: NextRequest) {
             // doesn't parse is silently held for the authoritative `done` pass.
             // Every draft is treated as the builder's own work in the review UI
             // (all rows start checked), so nothing is filtered during parse.
-            const parsed = ExtractedTaskDraft.safeParse(stripNullsDeep(item));
+            const parsed = streamedDraft.safeParse(stripNullsDeep(item));
             if (parsed.success) {
-              send({ type: "task", item: parsed.data });
+              send({ type: "task", item: parsed.data as ExtractedTaskDraft });
             }
           }
         }

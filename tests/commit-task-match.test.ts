@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   filterCommitMatches,
+  shouldAutoApply,
+  AUTO_APPLY_CONFIDENCE_THRESHOLD,
   MATCH_CONFIDENCE_THRESHOLD,
   type CommitMatchCandidate,
   type TaskMatchInput,
@@ -114,5 +116,46 @@ describe("filterCommitMatches", () => {
 
   it("returns nothing when the model returned nothing", () => {
     expect(filterCommitMatches([], [commit("aaa1111")], [task("t1")])).toEqual([]);
+  });
+});
+
+// The second threshold: which surviving matches move the task without asking.
+describe("shouldAutoApply", () => {
+  it("applies a near-certain match", () => {
+    expect(shouldAutoApply({ confidence: 0.98 })).toBe(true);
+  });
+
+  it("leaves a merely-strong match for the builder to confirm", () => {
+    // Above MATCH_CONFIDENCE_THRESHOLD, so it still gets recorded and painted —
+    // it just doesn't get to move anything on its own.
+    expect(shouldAutoApply({ confidence: 0.87 })).toBe(false);
+  });
+
+  it("treats the auto threshold as inclusive", () => {
+    expect(shouldAutoApply({ confidence: AUTO_APPLY_CONFIDENCE_THRESHOLD })).toBe(true);
+    expect(shouldAutoApply({ confidence: AUTO_APPLY_CONFIDENCE_THRESHOLD - 0.01 })).toBe(false);
+  });
+
+  it("sits above the threshold that records a match at all", () => {
+    // If these ever crossed, every recorded match would auto-apply and the
+    // confirm card would be dead code.
+    expect(AUTO_APPLY_CONFIDENCE_THRESHOLD).toBeGreaterThan(MATCH_CONFIDENCE_THRESHOLD);
+  });
+
+  it("never sees anything the filter already dropped", () => {
+    const commits = [commit("aaa1111")];
+    const tasks = [task("t1")];
+    // 0.99 but predating the task: filterCommitMatches kills it, so the auto
+    // path is never offered a match the age guard rejected.
+    const survivors = filterCommitMatches(
+      [raw("aaa1111", "t1", 0.99)],
+      [commit("aaa1111", "2026-06-01T00:00:00Z")],
+      [task("t1", "2026-07-01T00:00:00Z")]
+    );
+    expect(survivors.filter(shouldAutoApply)).toEqual([]);
+    // Same confidence, sane dates — this one does auto-apply.
+    expect(
+      filterCommitMatches([raw("aaa1111", "t1", 0.99)], commits, tasks).filter(shouldAutoApply)
+    ).toHaveLength(1);
   });
 });
